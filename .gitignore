@@ -28,3 +28,7 @@ xai-*.json
 grok-gateway
 stress_test.py
 stress_test_v2.py
+
+# Allow skills/ (project skill, not global)
+!skills/
+!skills/**
