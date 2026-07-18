@@ -1,0 +1,73 @@
+# FoxRouters — full stack (Redis + ClickHouse + gateway)
+# Usage:
+#   cp .env.example .env    # then edit .env with real values
+#   ./start.sh              # one-command deploy (captures bootstrap key)
+#   ./start.sh --status     # check status
+#
+# The gateway waits for Redis + ClickHouse to be healthy before starting.
+
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: foxrouters-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+    restart: unless-stopped
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:latest
+    container_name: foxrouters-clickhouse
+    ports:
+      - "8123:8123"   # HTTP interface
+      - "9000:9000"   # Native TCP (gateway connects here)
+    environment:
+      CLICKHOUSE_USER: default
+      CLICKHOUSE_PASSWORD: ""
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "1"
+    volumes:
+      - clickhouse-data:/var/lib/clickhouse
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8123/ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    restart: unless-stopped
+
+  foxrouters:
+    build: .
+    container_name: foxrouters
+    ports:
+      - "20130:20130"
+    depends_on:
+      redis:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      # Override host-oriented values from .env with container DNS names.
+      REDIS_ADDR: redis:6379
+      CLICKHOUSE_ADDR: clickhouse:9000
+      CLICKHOUSE_DB: foxrouters
+      CLICKHOUSE_USER: default
+      CLICKHOUSE_PASSWORD: ""
+      PORT: "20130"
+    restart: unless-stopped
+
+volumes:
+  redis-data:
+  clickhouse-data:

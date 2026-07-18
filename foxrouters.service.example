@@ -1,0 +1,40 @@
+[Unit]
+Description=FoxRouters (Grok + CodeBuddy unified gateway)
+After=network.target
+
+[Service]
+EnvironmentFile=/path/to/.env
+Type=simple
+WorkingDirectory=/path/to/foxrouters
+ReadWritePaths=/path/to/foxrouters
+ExecStart=/path/to/foxrouters/foxrouters
+Environment=PORT=20130
+Restart=always
+RestartSec=5
+
+# --- Security hardening ---
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=true
+PrivateDevices=true
+ProtectClock=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectHostname=true
+ProtectProc=invisible
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=false
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+LimitNOFILE=65536
+LimitNPROC=512
+
+[Install]
+WantedBy=multi-user.target

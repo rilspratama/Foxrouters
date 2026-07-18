@@ -1,0 +1,30 @@
+# Secrets
+gateway-key.txt
+codebuddy-key.txt
+bootstrap-key.txt
+*.env
+.env
+.gateway.env
+cpa_auths/
+
+# Binary
+foxrouters
+ai-gateway
+
+# Database
+*.db
+*.sqlite
+
+# Logs
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+graphify-out/
+xai-*.json
+
+# Legacy binary + stress tests (not part of release)
+grok-gateway
+stress_test.py
+stress_test_v2.py

@@ -1,0 +1,2543 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="referrer" content="no-referrer">
+<title>FoxRouters</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;510;590;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+/* ──────────────────────────────────────────────────────────
+   Design System: Linear.app Dark Theme
+   Backgrounds: #08090a (page), #0f1011 (panel), #191a1b (elevated)
+   Text: #f7f8f8, #d0d6e0, #8a8f98, #62666d
+   Brand: #5e6ad2, #7170ff, #828fff
+   Borders: rgba(255,255,255,0.05–0.08)
+   No shadows — luminance stepping for elevation
+   ────────────────────────────────────────────────────────── */
+:root {
+  /* Backgrounds — refined dark (GitHub-dark inspired) */
+  --bg:           #0d1117;
+  --bg-panel:     #161b22;
+  --bg-elevated:  #21262d;
+  --bg-hover:     rgba(255,255,255,0.04);
+  --bg-input:     #0d1117;
+
+  /* Text */
+  --text-primary:    #e6edf3;
+  --text-secondary:  #9dabb8;
+  --text-tertiary:   #6e7681;
+  --text-quaternary: #484f58;
+
+  /* Brand — indigo */
+  --brand:       #6366f1;
+  --brand-hover: #818cf8;
+  --brand-violet:#7170ff;
+  --brand-bg:    rgba(99,102,241,0.10);
+  --brand-subtle:rgba(99,102,241,0.15);
+
+  /* Borders */
+  --border:        #30363d;
+  --border-strong: rgba(255,255,255,0.10);
+  --border-bright: rgba(255,255,255,0.16);
+  --border-muted:  #21262d;
+
+  /* Status */
+  --green:   #3fb950;
+  --emerald: #10b981;
+  --green-subtle: rgba(63,185,80,0.12);
+  --red:     #f85149;
+  --red-subtle:   rgba(248,81,73,0.12);
+  --orange:  #f59e0b;
+  --yellow:  #eab308;
+  --yellow-subtle:rgba(234,179,8,0.12);
+
+  /* Radius */
+  --radius:    8px;
+  --radius-sm: 6px;
+  --radius-xs: 4px;
+  --radius-lg: 12px;
+
+  /* Shadows — subtle elevation */
+  --shadow-card:   0 1px 3px rgba(0,0,0,0.3);
+  --shadow-hover:  0 4px 12px rgba(0,0,0,0.35);
+  --shadow-modal:  0 8px 32px rgba(0,0,0,0.5);
+
+  /* Spacing scale (4px base) */
+  --sp-1: 4px; --sp-2: 8px; --sp-3: 12px; --sp-4: 16px;
+  --sp-5: 20px; --sp-6: 24px; --sp-8: 32px; --sp-10: 40px; --sp-12: 48px;
+
+  /* Typography */
+  --font: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  --mono: 'JetBrains Mono', 'Fira Code', 'SF Mono', Menlo, monospace;
+
+  /* Transitions */
+  --tc: 150ms ease;
+  --tt: 200ms ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  font-family: var(--font);
+  background: var(--bg);
+  color: var(--text-primary);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  font-feature-settings: "cv01", "ss03";
+  font-weight: 400;
+  line-height: 1.5;
+  display: flex;
+  min-height: 100vh;
+}
+
+/* ── Scrollbar ── */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.08); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.14); }
+
+/* ══════════════════════════════════════════════════════════
+   SIDEBAR
+   ══════════════════════════════════════════════════════════ */
+.sidebar {
+  width: 220px;
+  min-height: 100vh;
+  background: var(--bg-panel);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  position: sticky;
+  top: 0;
+  height: 100vh;
+}
+
+.sidebar-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 18px 18px 16px;
+}
+
+.sidebar-brand .logo {
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-sm);
+  background: var(--brand);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  flex-shrink: 0;
+  color: #fff;
+  box-shadow: 0 1px 3px rgba(99,102,241,0.4);
+}
+
+.sidebar-brand .title {
+  font-size: 15px;
+  font-weight: 590;
+  letter-spacing: -0.01em;
+  color: var(--text-primary);
+}
+
+.sidebar-brand .version {
+  font-size: 11px;
+  font-family: var(--mono);
+  color: var(--text-quaternary);
+  padding: 1px 6px;
+  border: 1px solid var(--border-strong);
+  border-radius: 9999px;
+  margin-left: auto;
+}
+
+.sidebar-nav {
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+}
+
+.nav-section-label {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-quaternary);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 12px 10px 6px;
+}
+
+.nav-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 10px;
+  border-radius: var(--radius-sm);
+  font-size: 13.5px;
+  font-weight: 510;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  transition: background 150ms ease, color 150ms ease;
+  text-decoration: none;
+  border: none;
+  background: none;
+  width: 100%;
+  text-align: left;
+  font-family: var(--font);
+}
+
+.nav-item:hover {
+  background: var(--bg-hover);
+  color: var(--text-secondary);
+}
+
+.nav-item.active {
+  background: rgba(255,255,255,0.04);
+  color: var(--text-primary);
+}
+
+.nav-item svg {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  opacity: 0.7;
+}
+
+.nav-item.active svg { opacity: 1; }
+
+.sidebar-footer {
+  padding: 12px 18px;
+  border-top: 1px solid var(--border);
+  font-size: 11px;
+  color: var(--text-quaternary);
+  font-family: var(--mono);
+}
+
+.sidebar-footer .status-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.sidebar-footer .status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--green);
+}
+
+.sidebar-footer .status-dot.err { background: var(--red); }
+
+/* ══════════════════════════════════════════════════════════
+   MAIN CONTENT
+   ══════════════════════════════════════════════════════════ */
+.main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 28px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-panel);
+  min-height: 52px;
+}
+
+.topbar-title {
+  font-size: 16px;
+  font-weight: 590;
+  letter-spacing: -0.01em;
+}
+
+.topbar-spacer { flex: 1; }
+
+.topbar-meta {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  font-family: var(--mono);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.topbar-meta .pulse-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--green);
+  animation: pulse 2s ease-in-out infinite;
+}
+
+@keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
+
+.content {
+  padding: 24px 28px;
+  flex: 1;
+  max-width: 1200px;
+  width: 100%;
+}
+
+/* ── Pages ── */
+.page { display: none; }
+.page.active { display: block; }
+
+/* ── Stats Grid ── */
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+  margin-bottom: 20px;
+}
+
+.stat-card {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px 18px;
+  transition: border-color var(--tc), box-shadow var(--tc), transform var(--tt);
+  box-shadow: var(--shadow-card);
+}
+
+.stat-card:hover {
+  border-color: var(--border-bright);
+  box-shadow: var(--shadow-hover);
+  transform: translateY(-1px);
+}
+
+.stat-card .stat-label {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-bottom: 8px;
+}
+
+.stat-card .stat-value {
+  font-size: 24px;
+  font-weight: 590;
+  letter-spacing: -0.02em;
+  font-feature-settings: "tnum";
+  color: var(--text-primary);
+  line-height: 1.2;
+}
+
+.stat-card .stat-sub {
+  font-size: 11.5px;
+  color: var(--text-tertiary);
+  margin-top: 4px;
+}
+
+.stat-card .stat-sub .ok { color: var(--green); }
+.stat-card .stat-sub .err { color: var(--red); }
+.stat-card .stat-sub .warn { color: var(--orange); }
+
+/* ── Circuit Badge (pill) ── */
+.circuit-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  font-weight: 510;
+  padding: 2px 8px;
+  border-radius: 9999px;
+  border: 1px solid var(--border-strong);
+  background: transparent;
+  font-family: var(--mono);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.circuit-badge::before {
+  content: '';
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+}
+
+.circuit-closed::before { background: var(--green); }
+.circuit-closed { color: var(--green); border-color: rgba(39,166,68,0.2); }
+
+.circuit-open::before { background: var(--red); }
+.circuit-open { color: var(--red); border-color: rgba(239,68,68,0.2); }
+
+.circuit-half-open::before { background: var(--orange); }
+.circuit-half-open { color: var(--orange); border-color: rgba(245,158,11,0.2); }
+
+/* ── Status Dot ── */
+.sdot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  display: inline-block;
+}
+.sdot-ok { background: var(--green); }
+.sdot-err { background: var(--red); }
+
+/* ── Cards / Panels ── */
+.panel {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  margin-bottom: 16px;
+  overflow: hidden;
+  box-shadow: var(--shadow-card);
+}
+
+.panel-head {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.panel-head h3 {
+  font-size: 13px;
+  font-weight: 590;
+  letter-spacing: -0.01em;
+  color: var(--text-primary);
+}
+
+.panel-head svg {
+  width: 15px;
+  height: 15px;
+  color: var(--text-tertiary);
+}
+
+.panel-head .head-meta {
+  margin-left: auto;
+  font-size: 11.5px;
+  color: var(--text-tertiary);
+  font-family: var(--mono);
+}
+
+.panel-body { padding: 0; }
+
+/* ── Table ── */
+.tbl { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+
+.tbl th {
+  text-align: left;
+  padding: 10px 16px;
+  color: var(--text-tertiary);
+  font-weight: 600;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+  background: var(--bg-elevated);
+}
+
+.tbl td {
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border-muted);
+  color: var(--text-secondary);
+}
+
+.tbl tr:last-child td { border-bottom: none; }
+.tbl tr { transition: background var(--tc); }
+.tbl tbody tr:hover { background: var(--bg-hover); }
+
+.mono { font-family: var(--mono); font-size: 11.5px; }
+.muted { color: var(--text-tertiary); }
+.ok { color: var(--green); }
+.err { color: var(--red); }
+.warn { color: var(--orange); }
+
+/* ── Scrollable table container ── */
+.tbl-scroll { max-height: 420px; overflow-y: auto; }
+.tbl-scroll thead { position: sticky; top: 0; background: var(--bg-elevated); z-index: 1; }
+
+/* ── Progress bar ── */
+.pbar {
+  width: 80px;
+  height: 4px;
+  background: rgba(255,255,255,0.06);
+  border-radius: 2px;
+  overflow: hidden;
+  display: inline-block;
+  vertical-align: middle;
+  margin-right: 6px;
+}
+
+.pbar-fill { height: 100%; border-radius: 2px; transition: width 0.4s ease; }
+.pbar-green { background: var(--green); }
+.pbar-orange { background: var(--orange); }
+.pbar-red { background: var(--red); }
+
+/* ── Sub-tabs ── */
+.subtabs {
+  display: flex;
+  gap: 2px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.subtab {
+  padding: 5px 12px;
+  font-size: 12.5px;
+  font-weight: 510;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  border-radius: var(--radius-xs);
+  transition: all 120ms ease;
+  border: none;
+  background: none;
+  font-family: var(--font);
+}
+
+.subtab:hover { color: var(--text-secondary); background: var(--bg-hover); }
+.subtab.active { color: var(--text-primary); background: var(--bg-elevated); box-shadow: inset 0 0 0 1px var(--border); }
+
+/* ── Quick Test ── */
+.test-row {
+  display: flex;
+  gap: 8px;
+  padding: 12px 16px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.test-row select,
+.test-row input {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-strong);
+  color: var(--text-primary);
+  border-radius: var(--radius-sm);
+  padding: 7px 12px;
+  font-size: 13px;
+  font-family: var(--font);
+  outline: none;
+  transition: border-color 120ms ease;
+}
+
+.test-row select:focus,
+.test-row input:focus { border-color: var(--brand); }
+
+.test-row select { width: 180px; cursor: pointer; }
+.test-row input { flex: 1; min-width: 200px; }
+
+.btn-primary {
+  background: var(--brand);
+  color: #fff;
+  border: none;
+  border-radius: var(--radius-sm);
+  padding: 8px 18px;
+  font-size: 13px;
+  font-weight: 590;
+  cursor: pointer;
+  transition: background var(--tc), box-shadow var(--tc), transform var(--tt);
+  font-family: var(--font);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  box-shadow: 0 1px 2px rgba(99,102,241,0.3);
+}
+
+.btn-primary:hover {
+  background: var(--brand-hover);
+  box-shadow: 0 2px 8px rgba(99,102,241,0.4);
+  transform: translateY(-1px);
+}
+.btn-primary:active { transform: translateY(0); }
+.btn-primary:disabled { opacity: 0.5; cursor: wait; transform: none; box-shadow: none; }
+
+.btn-ghost {
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 6px 14px;
+  font-size: 12.5px;
+  font-weight: 510;
+  cursor: pointer;
+  transition: all var(--tc);
+  font-family: var(--font);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.btn-ghost:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+  border-color: var(--border-bright);
+}
+
+.test-result {
+  margin: 0 16px 12px;
+  padding: 12px 14px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  display: none;
+  max-height: 280px;
+  overflow-y: auto;
+  font-family: var(--mono);
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
+.test-result.show { display: block; }
+
+/* ── Spinner ── */
+.spinner {
+  display: inline-block;
+  width: 13px;
+  height: 13px;
+  border: 2px solid rgba(255,255,255,0.2);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ── History Stats ── */
+.history-stats {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+  padding: 12px 16px 0;
+}
+
+.history-stat {
+  background: rgba(255,255,255,0.02);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 8px 14px;
+  min-width: 120px;
+}
+
+.history-stat .label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-tertiary);
+  font-weight: 500;
+}
+
+.history-stat .value {
+  font-size: 18px;
+  font-weight: 590;
+  color: var(--text-primary);
+  font-family: var(--mono);
+  margin-top: 2px;
+  letter-spacing: -0.01em;
+}
+
+.history-stat .value.err { color: var(--red); }
+
+/* ── Status code colors ── */
+.stcode-2xx { color: var(--green); }
+.stcode-4xx { color: var(--orange); }
+.stcode-5xx { color: var(--red); }
+
+.history-empty {
+  text-align: center;
+  padding: 32px;
+  color: var(--text-tertiary);
+  font-size: 13px;
+}
+
+/* ── Modal ── */
+.modal-overlay {
+  display: none;
+  position: fixed;
+  top: 0; left: 0;
+  width: 100%; height: 100%;
+  background: rgba(0,0,0,0.6);
+  z-index: 9999;
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  align-items: flex-start;
+  justify-content: center;
+  padding: 40px 20px;
+}
+
+.modal-overlay.show { display: flex; }
+
+.modal-box {
+  max-width: 860px;
+  width: 100%;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 24px;
+  max-height: 85vh;
+  overflow-y: auto;
+  box-shadow: var(--shadow-modal);
+}
+
+.modal-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 18px;
+}
+
+.modal-head h3 {
+  font-size: 15px;
+  font-weight: 590;
+  letter-spacing: -0.01em;
+  color: var(--text-primary);
+}
+
+.modal-close {
+  background: none;
+  border: none;
+  color: var(--text-tertiary);
+  font-size: 20px;
+  cursor: pointer;
+  padding: 2px 6px;
+  line-height: 1;
+  transition: color 120ms ease;
+}
+
+.modal-close:hover { color: var(--text-primary); }
+
+.modal-field { margin-bottom: 14px; }
+
+.modal-field .field-label {
+  font-size: 11px;
+  color: var(--text-quaternary);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-bottom: 4px;
+  font-weight: 500;
+}
+
+.modal-field .field-value {
+  font-size: 13px;
+  color: var(--text-secondary);
+  font-family: var(--mono);
+}
+
+.modal-grid {
+  display: flex;
+  gap: 20px;
+  margin-bottom: 14px;
+  flex-wrap: wrap;
+}
+
+.modal-grid > div { min-width: 100px; }
+
+.modal-text-block {
+  background: var(--bg);
+  padding: 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  font-size: 12.5px;
+  font-family: var(--mono);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 200px;
+  overflow-y: auto;
+  line-height: 1.6;
+}
+
+.modal-text-block.output { max-height: 300px; }
+
+/* ── Modal detail tabs ── */
+.modal-tabs {
+  display: flex;
+  gap: 2px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 14px;
+}
+
+.modal-tab {
+  padding: 6px 14px;
+  font-size: 12.5px;
+  font-weight: 510;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  border: none;
+  background: none;
+  border-radius: var(--radius-xs) var(--radius-xs) 0 0;
+  border-bottom: 2px solid transparent;
+  transition: all 120ms ease;
+  font-family: var(--font);
+  margin-bottom: -1px;
+}
+
+.modal-tab:hover { color: var(--text-secondary); }
+.modal-tab.active { color: var(--text-primary); border-bottom-color: var(--brand); }
+
+.modal-tab-content { display: none; }
+.modal-tab-content.active { display: block; }
+
+.modal-json-block {
+  background: var(--bg);
+  padding: 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  font-size: 11.5px;
+  font-family: var(--mono);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 400px;
+  overflow-y: auto;
+  line-height: 1.5;
+}
+
+.modal-json-empty {
+  padding: 24px;
+  text-align: center;
+  color: var(--text-quaternary);
+  font-size: 13px;
+}
+
+.modal-loading {
+  padding: 24px;
+  text-align: center;
+  color: var(--text-tertiary);
+  font-size: 13px;
+}
+
+/* ── Key display (keys page) ── */
+.key-card {
+  background: rgba(255,255,255,0.02);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 18px 20px;
+  margin-bottom: 12px;
+}
+
+.key-card .key-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.key-card .key-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-tertiary);
+  font-weight: 500;
+  margin-bottom: 8px;
+}
+
+.key-card .key-value {
+  font-family: var(--mono);
+  font-size: 13.5px;
+  color: var(--text-secondary);
+  background: var(--bg);
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  flex: 1;
+  user-select: all;
+}
+
+.key-card .key-meta {
+  display: flex;
+  gap: 16px;
+  margin-top: 10px;
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+
+.key-card .key-meta span {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* ── Footer ── */
+.footer-bar {
+  font-size: 11px;
+  color: var(--text-quaternary);
+  text-align: right;
+  margin-top: 12px;
+  font-family: var(--mono);
+}
+
+.footer-bar .err-msg { color: var(--red); }
+
+/* ── Responsive ── */
+@media (max-width: 900px) {
+  .stats-grid { grid-template-columns: repeat(2, 1fr); }
+}
+
+@media (max-width: 700px) {
+  body { flex-direction: column; }
+  .sidebar { width: 100%; height: auto; min-height: auto; position: relative; }
+  .sidebar-nav { flex-direction: row; flex-wrap: wrap; }
+  .nav-section-label { display: none; }
+  .content { padding: 16px; }
+  .topbar { padding: 12px 16px; }
+  .stats-grid { grid-template-columns: 1fr 1fr; }
+  .test-row { flex-direction: column; align-items: stretch; }
+  .test-row select, .test-row input { width: 100%; }
+}
+</style>
+</head>
+<body>
+
+<!-- ═══════════════════ SIDEBAR ═══════════════════ -->
+<aside class="sidebar">
+  <div class="sidebar-brand">
+    <div class="logo">
+      <svg width="20" height="20" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <!-- Fox ears -->
+        <path d="M8 4L11 12L6 10L8 4Z" fill="currentColor"/>
+        <path d="M24 4L21 12L26 10L24 4Z" fill="currentColor"/>
+        <!-- Fox head (rounded) -->
+        <path d="M16 7C11 7 7 11 7 16C7 20 10 23 16 25C22 23 25 20 25 16C25 11 21 7 16 7Z" fill="currentColor"/>
+        <!-- Router signal arcs (white cutout) -->
+        <path d="M12 15C13 14 14 14 16 14C18 14 19 14 20 15" stroke="rgba(255,255,255,0.9)" stroke-width="1.2" stroke-linecap="round" fill="none"/>
+        <path d="M11 17C13 16 14.5 16 16 16C17.5 16 19 16 21 17" stroke="rgba(255,255,255,0.7)" stroke-width="1.2" stroke-linecap="round" fill="none"/>
+        <!-- Eyes -->
+        <circle cx="13" cy="13" r="1.2" fill="rgba(255,255,255,0.95)"/>
+        <circle cx="19" cy="13" r="1.2" fill="rgba(255,255,255,0.95)"/>
+        <!-- Nose -->
+        <circle cx="16" cy="19" r="1" fill="rgba(255,255,255,0.9)"/>
+      </svg>
+    </div>
+    <span class="title">FoxRouters</span>
+    <span class="version" id="version">v5.7</span>
+  </div>
+  <nav class="sidebar-nav">
+    <div class="nav-section-label">Monitor</div>
+    <button class="nav-item active" data-route="#/" onclick="navigateTo('#/')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9"/><rect x="14" y="3" width="7" height="5"/><rect x="14" y="12" width="7" height="9"/><rect x="3" y="16" width="7" height="5"/></svg>
+      Dashboard
+    </button>
+    <button class="nav-item" data-route="#/accounts" onclick="navigateTo('#/accounts')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+      Accounts &amp; Keys
+    </button>
+    <button class="nav-item" data-route="#/keys" onclick="navigateTo('#/keys')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg>
+      Gateway API Keys
+    </button>
+    <button class="nav-item" data-route="#/models" onclick="navigateTo('#/models')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
+      Models
+    </button>
+  </nav>
+  <div class="sidebar-footer">
+    <div class="status-row">
+      <span class="status-dot" id="sidebarDot"></span>
+      <span id="sidebarStatus">Connected</span>
+    </div>
+    <div style="margin-top:4px;display:flex;align-items:center;justify-content:space-between">
+      <span id="lastUpdate">—</span>
+      <a href="/logout" style="color:var(--text-tertiary);font-size:11px;text-decoration:none" onmouseover="this.style.color='var(--red)'" onmouseout="this.style.color='var(--text-tertiary)'">Logout</a>
+    </div>
+  </div>
+</aside>
+
+<!-- ═══════════════════ MAIN ═══════════════════ -->
+<div class="main">
+  <div class="topbar">
+    <span class="topbar-title" id="pageTitle">Dashboard</span>
+    <div class="topbar-spacer"></div>
+    <div class="topbar-meta">
+      <span class="pulse-dot"></span>
+      <span id="topbarMeta">Live · auto-refresh 5s</span>
+    </div>
+  </div>
+
+  <div class="content">
+
+    <!-- ════════ PAGE 1: DASHBOARD HOME ════════ -->
+    <div class="page active" id="page-dashboard">
+      <!-- Stats Grid -->
+      <div class="stats-grid" id="statsGrid">
+        <div class="stat-card">
+          <div class="stat-label">Grok Accounts</div>
+          <div class="stat-value" id="grokCount">—</div>
+          <div class="stat-sub" id="grokActive"></div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">CB Keys</div>
+          <div class="stat-value" id="cbCount">—</div>
+          <div class="stat-sub" id="cbActive"></div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Models</div>
+          <div class="stat-value" id="models">—</div>
+          <div class="stat-sub">available</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Total Tokens (24h)</div>
+          <div class="stat-value" id="totalTokens">—</div>
+          <div class="stat-sub" id="totalTokensSub">24h usage</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Grok Circuit</div>
+          <div class="stat-value" id="grokCircuit" style="font-size:15px;padding-top:4px">—</div>
+          <div class="stat-sub" id="grokLatency"></div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">CB Circuit</div>
+          <div class="stat-value" id="cbCircuit" style="font-size:15px;padding-top:4px">—</div>
+          <div class="stat-sub" id="cbLatency"></div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Grok Errors</div>
+          <div class="stat-value" id="grokErrors">—</div>
+          <div class="stat-sub" id="grokErrRate"></div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">CB Errors</div>
+          <div class="stat-value" id="cbErrors">—</div>
+          <div class="stat-sub" id="cbErrRate"></div>
+        </div>
+      </div>
+
+      <!-- Upstream Health -->
+      <div class="panel">
+        <div class="panel-head">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+          <h3>Upstream Health</h3>
+        </div>
+        <div class="panel-body">
+          <div class="tbl-scroll" style="max-height:200px">
+            <table class="tbl">
+              <thead><tr>
+                <th>Upstream</th><th>Circuit</th><th>Check</th><th>Latency</th><th>Requests</th><th>Errors</th><th>Error Rate</th><th>Last Error</th>
+              </tr></thead>
+              <tbody id="healthBody"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- Quick Test -->
+      <div class="panel">
+        <div class="panel-head">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 9V5a3 3 0 0 0-6 0v4"/><rect x="2" y="9" width="20" height="12" rx="2"/></svg>
+          <h3>Quick Test</h3>
+        </div>
+        <div class="test-row">
+          <select id="testModel">
+            <option value="cb/gpt-5.2">cb/gpt-5.2</option>
+            <option value="cb/claude-opus-4.6">cb/claude-opus-4.6</option>
+            <option value="cb/gemini-3.1-pro">cb/gemini-3.1-pro</option>
+            <option value="grok-4.5">grok-4.5</option>
+          </select>
+          <input id="testPrompt" type="text" placeholder="Send a test message..." value="Say hello in one sentence." />
+          <button class="btn-primary" onclick="runTest()" id="testBtn">Send</button>
+        </div>
+        <div class="test-result" id="testResult"></div>
+      </div>
+
+      <!-- Request History -->
+      <div class="panel">
+        <div class="panel-head">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M7 14l4-4 4 4 5-5"/></svg>
+          <h3>Request History</h3>
+          <span class="head-meta" id="historyPeriod">Last 24h</span>
+        </div>
+        <div id="historyStats" class="history-stats"></div>
+        <div class="tbl-scroll" style="max-height:400px;margin:0 0 4px">
+          <table class="tbl" id="historyTable">
+            <thead><tr>
+              <th>Time</th><th>Model</th><th>Upstream</th><th>Status</th><th>Latency</th><th>Tokens</th>
+            </tr></thead>
+            <tbody id="historyBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- ════════ PAGE 2: ACCOUNTS & KEYS ════════ -->
+    <div class="page" id="page-accounts">
+      <div class="panel">
+        <div class="panel-head">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+          <h3>Accounts &amp; Keys</h3>
+          <div style="margin-left:auto">
+            <button class="btn-ghost" onclick="refreshAccounts()">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+              Refresh Tokens
+            </button>
+          </div>
+        </div>
+        <div class="subtabs">
+          <button class="subtab active" onclick="showTab(event,'cb')">CodeBuddy Keys</button>
+          <button class="subtab" onclick="showTab(event,'grok')">Grok Accounts</button>
+          <div style="margin-left:auto;display:flex;gap:6px">
+            <button class="btn-ghost" id="cbAddBtn" onclick="showAddCBModal()" style="padding:5px 12px;font-size:12px">+ Add Key</button>
+            <button class="btn-ghost" id="cbBulkBtn" onclick="showBulkCBModal()" style="padding:5px 12px;font-size:12px">Bulk Import</button>
+            <button class="btn-ghost" id="grokAddBtn" onclick="showAddGrokModal()" style="padding:5px 12px;font-size:12px;display:none">+ Add Account</button>
+            <button class="btn-ghost" id="grokBulkBtn" onclick="showBulkGrokModal()" style="padding:5px 12px;font-size:12px;display:none">Bulk Import</button>
+          </div>
+        </div>
+        <div id="cbPanel" class="tbl-scroll" style="max-height:500px">
+          <table class="tbl">
+            <thead><tr>
+              <th>Key</th><th>Credits</th><th>Usage</th><th>Requests</th><th>Status</th>
+            </tr></thead>
+            <tbody id="cbBody"></tbody>
+          </table>
+        </div>
+        <div id="cbPager" style="display:flex;align-items:center;gap:8px;padding:10px 16px;border-top:1px solid var(--border);font-size:13px;color:var(--text-tertiary)"></div>
+        <div id="grokPanel" style="display:none">
+          <div class="tbl-scroll" style="max-height:500px">
+            <table class="tbl">
+              <thead><tr>
+                <th>Email</th><th>Token Status</th><th>Expires At</th><th>Last Refresh</th><th>Disabled At</th>
+              </tr></thead>
+              <tbody id="grokBody"></tbody>
+            </table>
+          </div>
+          <div id="grokPager" style="display:flex;align-items:center;gap:8px;padding:10px 16px;border-top:1px solid var(--border);font-size:13px;color:var(--text-tertiary)"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ════════ PAGE 3: GATEWAY API KEYS ════════ -->
+    <div class="page" id="page-keys">
+      <div class="panel">
+        <div class="panel-head">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg>
+          <h3>Gateway API Keys</h3>
+          <div style="margin-left:auto;display:flex;gap:8px">
+            <button class="btn-primary" onclick="showCreateKeyModal()" style="display:flex;align-items:center;gap:6px;padding:6px 14px;border-radius:var(--radius-sm);background:var(--brand);color:#fff;border:none;font-size:13px;font-weight:500;cursor:pointer">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>
+              Create Key
+            </button>
+          </div>
+        </div>
+        <div style="padding:16px">
+          <p style="font-size:13px;color:var(--text-tertiary);margin-bottom:16px;line-height:1.6">
+            Gateway API keys are stored in Redis with per-key RPM limits, token quotas, and usage tracking.
+            Bootstrap keys from <code style="font-family:var(--mono);color:var(--text-secondary);background:var(--bg-elevated);padding:1px 5px;border-radius:3px;font-size:12px">gateway-key.txt</code> have unlimited RPM/quota by default.
+          </p>
+          <div id="keysContainer">
+            <div style="text-align:center;padding:32px;color:var(--text-tertiary);font-size:13px">Loading keys...</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
+          <h3>Authentication</h3>
+        </div>
+        <div style="padding:16px">
+          <p style="font-size:13px;color:var(--text-tertiary);line-height:1.6;margin-bottom:12px">
+            Your browser is authenticated via an <strong style="color:var(--text-secondary)">HttpOnly session cookie</strong> set by the login page.
+            The key never enters JavaScript — protected from XSS. Logout clears the cookie.
+          </p>
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+            <button class="btn-ghost" onclick="window.location.href='/login'">New Session</button>
+            <button class="btn-ghost" onclick="window.location.href='/logout'">Logout</button>
+            <span style="font-size:12px;color:var(--text-tertiary);font-family:var(--mono)" id="currentKeyDisplay"></span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ════════ PAGE 4: MODELS ════════ -->
+    <div class="page" id="page-models">
+      <div class="panel">
+        <div class="panel-head">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
+          <h3>Available Models</h3>
+          <div style="margin-left:auto;display:flex;gap:8px;align-items:center">
+            <select id="modelHours" onchange="loadModels()" style="padding:5px 10px;background:var(--bg);border:1px solid var(--border-strong);border-radius:var(--radius-sm);color:var(--text-primary);font-size:12px;font-family:var(--font)">
+              <option value="24">24h</option>
+              <option value="168">7d</option>
+              <option value="720">30d</option>
+            </select>
+            <button class="btn-ghost" onclick="loadModels()" style="padding:5px 12px;font-size:12px">Refresh</button>
+          </div>
+        </div>
+        <div style="padding:16px">
+          <div id="modelsContainer">
+            <div style="text-align:center;padding:32px;color:var(--text-tertiary);font-size:13px">Loading models...</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Key Modal -->
+    <div class="modal-overlay" id="keyModal" onclick="if(event.target===this)closeKeyModal()">
+      <div class="modal-box" style="max-width:480px">
+        <div class="modal-head">
+          <h3 id="keyModalTitle">Create Gateway Key</h3>
+          <button class="modal-close" onclick="closeKeyModal()">×</button>
+        </div>
+        <div style="padding:20px">
+          <div id="keyModalContent">
+            <div style="display:flex;flex-direction:column;gap:14px">
+              <div>
+                <label style="font-size:12px;color:var(--text-tertiary);display:block;margin-bottom:6px">Name</label>
+                <input type="text" id="keyName" placeholder="e.g. production, test" style="width:100%;padding:8px 12px;background:var(--bg);border:1px solid var(--border-strong);border-radius:var(--radius-sm);color:var(--text-primary);font-size:13px;font-family:var(--font)" />
+              </div>
+              <div>
+                <label style="font-size:12px;color:var(--text-tertiary);display:block;margin-bottom:6px">Role</label>
+                <select id="keyRole" style="width:100%;padding:8px 12px;background:var(--bg);border:1px solid var(--border-strong);border-radius:var(--radius-sm);color:var(--text-primary);font-size:13px">
+                  <option value="inference">inference (default — /v1/* only)</option>
+                  <option value="admin">admin (all endpoints)</option>
+                </select>
+              </div>
+              <div>
+                <label style="font-size:12px;color:var(--text-tertiary);display:block;margin-bottom:6px">Allowed Models <span style="color:var(--text-tertiary)">(empty = all models allowed)</span></label>
+                <div id="keyModelSelector" style="border:1px solid var(--border-strong);border-radius:var(--radius-sm);background:var(--bg);max-height:200px;overflow-y:auto;padding:8px">
+                  <div style="text-align:center;padding:8px;color:var(--text-tertiary);font-size:12px">Loading models...</div>
+                </div>
+                <div style="display:flex;gap:6px;margin-top:4px">
+                  <button type="button" class="btn-ghost" onclick="toggleAllModels(true)" style="padding:3px 8px;font-size:11px">Select All</button>
+                  <button type="button" class="btn-ghost" onclick="toggleAllModels(false)" style="padding:3px 8px;font-size:11px">Clear</button>
+                  <button type="button" class="btn-ghost" onclick="toggleModelGroup('grok')" style="padding:3px 8px;font-size:11px">Grok only</button>
+                  <button type="button" class="btn-ghost" onclick="toggleModelGroup('cb')" style="padding:3px 8px;font-size:11px">CodeBuddy only</button>
+                </div>
+              </div>
+              <div style="display:flex;gap:12px">
+                <div style="flex:1">
+                  <label style="font-size:12px;color:var(--text-tertiary);display:block;margin-bottom:6px">RPM (0 = unlimited)</label>
+                  <input type="number" id="keyRPM" value="0" min="0" style="width:100%;padding:8px 12px;background:var(--bg);border:1px solid var(--border-strong);border-radius:var(--radius-sm);color:var(--text-primary);font-size:13px;font-family:var(--mono)" />
+                </div>
+                <div style="flex:1">
+                  <label style="font-size:12px;color:var(--text-tertiary);display:block;margin-bottom:6px">Burst (0 = use RPM)</label>
+                  <input type="number" id="keyBurst" value="0" min="0" style="width:100%;padding:8px 12px;background:var(--bg);border:1px solid var(--border-strong);border-radius:var(--radius-sm);color:var(--text-primary);font-size:13px;font-family:var(--mono)" />
+                </div>
+              </div>
+              <div>
+                <label style="font-size:12px;color:var(--text-tertiary);display:block;margin-bottom:6px">Token Quota (0 = unlimited)</label>
+                <input type="number" id="keyQuota" value="0" min="0" style="width:100%;padding:8px 12px;background:var(--bg);border:1px solid var(--border-strong);border-radius:var(--radius-sm);color:var(--text-primary);font-size:13px;font-family:var(--mono)" />
+              </div>
+              <div id="keyEditDisabled" style="display:none">
+                <label style="font-size:12px;color:var(--text-tertiary);display:flex;align-items:center;gap:6px;cursor:pointer">
+                  <input type="checkbox" id="keyDisabled" style="accent-color:var(--brand)" /> Disabled
+                </label>
+              </div>
+              <div id="keyCreateResult" style="display:none">
+                <div style="background:var(--bg);border:1px solid var(--border-strong);border-radius:var(--radius-sm);padding:12px;margin-bottom:8px">
+                  <div style="font-size:11px;color:var(--text-tertiary);margin-bottom:4px">New API Key (shown once):</div>
+                  <div style="display:flex;align-items:center;gap:8px">
+                    <code id="newKeyValue" style="font-family:var(--mono);font-size:13px;color:var(--emerald);word-break:break-all;flex:1"></code>
+                    <button class="btn-ghost" onclick="copyNewKey()" style="flex-shrink:0;padding:4px 8px;font-size:12px">Copy</button>
+                  </div>
+                </div>
+                <div style="font-size:12px;color:var(--orange)">⚠ Save this key now — it will not be shown again.</div>
+              </div>
+            </div>
+            <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:20px">
+              <button class="btn-ghost" onclick="closeKeyModal()">Cancel</button>
+              <button id="keyModalSave" class="btn-primary" onclick="saveKeyModal()" style="padding:8px 16px;border-radius:var(--radius-sm);background:var(--brand);color:#fff;border:none;font-size:13px;font-weight:500;cursor:pointer">Create</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /content -->
+
+  <div class="footer-bar" id="footerUpdate" style="padding:0 28px 16px"></div>
+</div><!-- /main -->
+
+<!-- ═══════════════════ DETAIL MODAL ═══════════════════ -->
+<div class="modal-overlay" id="detailModal" onclick="if(event.target===this)closeModal()">
+  <div class="modal-box">
+    <div class="modal-head">
+      <h3>Request Detail</h3>
+      <button class="modal-close" onclick="closeModal()">×</button>
+    </div>
+    <div id="detailContent"></div>
+  </div>
+</div>
+
+<script>
+/* ══════════════════════════════════════════════════════════
+   AUTH — cookie-based (HttpOnly, set by /login)
+   No more ?key= URL param or localStorage — key never touches JS.
+   ══════════════════════════════════════════════════════════ */
+// authKey kept empty for backward compat with updateAuthKey() UI.
+// Real auth is via foxrouters_session cookie (HttpOnly, server-set).
+let authKey = '';
+
+function updateAuthKey() {
+  // Legacy: redirect to login page for new session
+  window.location.href = '/login';
+}
+
+function clearAuthKey() {
+  // Logout: clear cookie via /logout endpoint
+  window.location.href = '/logout';
+}
+
+function showCurrentKey() {
+  var el = document.getElementById('currentKeyDisplay');
+  if (el) {
+    el.textContent = 'Session via login cookie';
+  }
+}
+
+function hasUsableDefaultKey() {
+  return false; // cookie-based now
+}
+
+async function fetchJSON(url) {
+  var r = await fetch(url, { credentials: 'same-origin' });
+  if (r.status === 401) {
+    window.location.href = '/login';
+    throw new Error('Session expired — redirecting to login');
+  }
+  if (!r.ok) {
+    throw new Error('HTTP ' + r.status + ' on ' + url);
+  }
+  return r.json();
+}
+
+// fetchJSON with method/body support for CRUD operations
+async function apiFetch(url, opts) {
+  opts = opts || {};
+  var headers = {};
+  if (opts.headers) { for (var k in opts.headers) { headers[k] = opts.headers[k]; } }
+  var fetchOpts = { method: opts.method || 'GET', headers: headers, credentials: 'same-origin' };
+  if (opts.body) { fetchOpts.body = opts.body; }
+  var r = await fetch(url, fetchOpts);
+  if (r.status === 401) {
+    window.location.href = '/login';
+    return;
+  }
+  if (!r.ok && r.status !== 200) {
+    var errBody = await r.text().catch(function() { return ''; });
+    throw new Error('HTTP ' + r.status + ': ' + errBody);
+  }
+  return r.json();
+}
+
+/* ══════════════════════════════════════════════════════════
+   ROUTING (hash-based SPA)
+   ══════════════════════════════════════════════════════════ */
+var routes = {
+  '#/':         { page: 'page-dashboard', title: 'Dashboard',   meta: 'Live · auto-refresh 5s' },
+  '#/accounts': { page: 'page-accounts',  title: 'Accounts & Keys', meta: 'Live · auto-refresh 5s' },
+  '#/keys':     { page: 'page-keys',      title: 'Gateway API Keys', meta: 'Redis-backed · CRUD' },
+  '#/models':   { page: 'page-models',    title: 'Models', meta: 'Usage stats · aliases' }
+};
+
+function navigateTo(hash) {
+  window.location.hash = hash;
+}
+
+function router() {
+  var hash = window.location.hash || '#/';
+  var route = routes[hash] || routes['#/'];
+
+  // Pages
+  document.querySelectorAll('.page').forEach(function(p) { p.classList.remove('active'); });
+  var pageEl = document.getElementById(route.page);
+  if (pageEl) pageEl.classList.add('active');
+
+  // Nav items
+  document.querySelectorAll('.nav-item').forEach(function(n) {
+    n.classList.toggle('active', n.getAttribute('data-route') === hash);
+  });
+
+  // Title
+  document.getElementById('pageTitle').textContent = route.title;
+  document.getElementById('topbarMeta').textContent = route.meta;
+
+  // Page-specific actions
+  if (hash === '#/keys') {
+    showCurrentKey();
+    loadGatewayKeys();
+  }
+  if (hash === '#/models') {
+    loadModels();
+  }
+}
+
+window.addEventListener('hashchange', router);
+
+/* ══════════════════════════════════════════════════════════
+   HELPERS
+   ══════════════════════════════════════════════════════════ */
+function circuitBadge(state) {
+  var cls = state === 'closed' ? 'circuit-closed' : state === 'open' ? 'circuit-open' : 'circuit-half-open';
+  return '<span class="circuit-badge ' + cls + '">' + state + '</span>';
+}
+
+function sdot(ok) {
+  return '<span class="sdot ' + (ok ? 'sdot-ok' : 'sdot-err') + '"></span>';
+}
+
+function escHtml(s) {
+  if (!s) return '';
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
+/* ══════════════════════════════════════════════════════════
+   REFRESH (health + accounts + cb-stats + models)
+   ══════════════════════════════════════════════════════════ */
+async function refresh() {
+  try {
+    var results = await Promise.all([
+      fetchJSON('/health'),
+      fetchJSON('/accounts'),
+      fetchJSON('/cb-stats'),
+      fetchJSON('/v1/models')
+    ]);
+    var health = results[0], accounts = results[1], cbStats = results[2], models = results[3];
+
+    // Version
+    var verEl = document.getElementById('version');
+    if (verEl && health.version) verEl.textContent = 'v' + health.version;
+
+    // Stats grid
+    document.getElementById('grokCount').textContent = health.grok_accounts;
+    document.getElementById('cbCount').textContent = health.cb_keys;
+    document.getElementById('cbActive').innerHTML = '<span class="ok">' + health.cb_keys_active + ' active</span>';
+    document.getElementById('models').textContent = models.data ? models.data.length : '—';
+
+    var g = health.upstreams.grok, cb = health.upstreams.codebuddy;
+
+    // Circuit cards
+    document.getElementById('grokCircuit').innerHTML = circuitBadge(g.circuit_state);
+    document.getElementById('cbCircuit').innerHTML = circuitBadge(cb.circuit_state);
+    document.getElementById('grokLatency').innerHTML = g.last_check_ok ? '<span class="ok">' + g.last_check_ms + 'ms</span>' : '<span class="err">down</span>';
+    document.getElementById('cbLatency').innerHTML = cb.last_check_ok ? '<span class="ok">' + cb.last_check_ms + 'ms</span>' : '<span class="err">down</span>';
+    document.getElementById('grokErrors').textContent = g.total_errors;
+    document.getElementById('cbErrors').textContent = cb.total_errors;
+    document.getElementById('grokErrRate').textContent = g.error_rate_pct.toFixed(1) + '% rate';
+    document.getElementById('cbErrRate').textContent = cb.error_rate_pct.toFixed(1) + '% rate';
+
+    // Sidebar status
+    var dotEl = document.getElementById('sidebarDot');
+    var statusEl = document.getElementById('sidebarStatus');
+    var allOK = g.circuit_state !== 'open' && cb.circuit_state !== 'open';
+    dotEl.className = 'status-dot' + (allOK ? '' : ' err');
+    statusEl.textContent = allOK ? 'All systems operational' : 'Circuit open';
+
+    // Upstream health table
+    var hb = '';
+    for (var name in health.upstreams) {
+      if (!health.upstreams.hasOwnProperty(name)) continue;
+      var u = health.upstreams[name];
+      hb += '<tr>' +
+        '<td class="mono">' + name + '</td>' +
+        '<td>' + circuitBadge(u.circuit_state) + '</td>' +
+        '<td>' + sdot(u.last_check_ok) + (u.last_check_ok ? 'OK' : 'FAIL') + '</td>' +
+        '<td class="mono">' + u.last_check_ms + 'ms</td>' +
+        '<td class="mono">' + u.total_requests + '</td>' +
+        '<td class="mono">' + u.total_errors + '</td>' +
+        '<td class="mono">' + u.error_rate_pct.toFixed(1) + '%</td>' +
+        '<td class="muted" style="font-size:11px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + escHtml(u.last_error_msg || '—') + '</td>' +
+      '</tr>';
+    }
+    document.getElementById('healthBody').innerHTML = hb;
+
+    // CB Keys table (paginated)
+    var allCB = cbStats.codebuddy_keys || [];
+    window._allCB = allCB;
+    window._cbPage = window._cbPage || 1;
+    window._cbPageSize = window._cbPageSize || 50;
+    renderCBPage();
+
+    // Grok Accounts table (paginated)
+    var allGrok = (accounts && (accounts.grok_accounts || accounts.grok)) || [];
+    var disabledCount = allGrok.filter(function(a) { return a.disabled; }).length;
+    var bannedCount = allGrok.filter(function(a) { return a.token_status === 'banned'; }).length;
+    document.getElementById('grokActive').innerHTML = '<span class="ok">' + (allGrok.length - disabledCount) + ' active</span>' + (bannedCount > 0 ? ' <span class="err">⛔ ' + bannedCount + ' banned</span>' : '');
+
+    // Store globally for pagination
+    window._allGrok = allGrok;
+    window._grokPage = window._grokPage || 1;
+    window._grokPageSize = window._grokPageSize || 50;
+    renderGrokPage();
+
+
+    // Timestamp
+    var ts_str = 'Updated ' + new Date().toLocaleTimeString();
+    document.getElementById('lastUpdate').textContent = ts_str;
+    document.getElementById('footerUpdate').textContent = ts_str;
+  } catch (e) {
+    document.getElementById('footerUpdate').innerHTML = '<span class="err-msg">Error: ' + escHtml(e.message) + '</span>';
+    document.getElementById('sidebarStatus').textContent = 'Connection error';
+    document.getElementById('sidebarDot').className = 'status-dot err';
+  }
+}
+
+/* ══════════════════════════════════════════════════════════
+   GROK PAGINATION
+   ══════════════════════════════════════════════════════════ */
+function renderGrokPage() {
+  var all = window._allGrok || [];
+  var page = window._grokPage || 1;
+  var size = window._grokPageSize || 50;
+  var totalPages = Math.max(1, Math.ceil(all.length / size));
+  if (page > totalPages) page = totalPages;
+  if (page < 1) page = 1;
+  window._grokPage = page;
+
+  var start = (page - 1) * size;
+  var end = Math.min(start + size, all.length);
+  var gRows = '';
+  for (var j = start; j < end; j++) {
+    var a = all[j];
+    var ts = a.token_status || (a.disabled ? 'disabled' : 'active');
+    var tsColor = ts === 'active' ? 'ok' : (ts === 'cooldown' ? 'warn' : 'err');
+    var tsLabel = ts === 'active' ? '✅ active' : (ts === 'cooldown' ? '⏳ cooldown' : (ts === 'banned' ? '⛔ banned' : (ts === 'revoked' ? '⛔ revoked' : (ts === 'expired' ? '🔴 expired' : '❓ ' + ts))));
+    var expAt = a.expires_at && a.expires_at !== '0001-01-01T00:00:00Z' ? new Date(a.expires_at).toLocaleString('en-GB', {month:'short',day:'2-digit',hour:'2-digit',minute:'2-digit',timeZone:'UTC'}) + ' UTC' : '—';
+    var lastRef = a.last_refresh && a.last_refresh !== '0001-01-01T00:00:00Z' ? new Date(a.last_refresh).toLocaleString('en-GB', {month:'short',day:'2-digit',hour:'2-digit',minute:'2-digit',timeZone:'UTC'}) + ' UTC' : '—';
+    var disAt = a.disabled_at && a.disabled_at !== '0001-01-01T00:00:00Z' ? new Date(a.disabled_at).toLocaleString('en-GB', {month:'short',day:'2-digit',hour:'2-digit',minute:'2-digit',timeZone:'UTC'}) + ' UTC' : '—';
+    gRows += '<tr>' +
+      '<td class="mono">' + escHtml(a.email) + '</td>' +
+      '<td><span class="' + tsColor + '">' + tsLabel + '</span></td>' +
+      '<td class="muted" style="font-size:11px">' + expAt + '</td>' +
+      '<td class="muted" style="font-size:11px">' + lastRef + '</td>' +
+      '<td class="muted" style="font-size:11px">' + disAt + '</td>' +
+    '</tr>';
+  }
+  document.getElementById('grokBody').innerHTML = gRows || '<tr><td colspan="5" class="history-empty">No Grok accounts loaded</td></tr>';
+
+  // Pager
+  var pager = document.getElementById('grokPager');
+  var html = '';
+  // Page size selector
+  html += '<span>Show</span>';
+  html += '<select onchange="window._grokPageSize=parseInt(this.value);window._grokPage=1;renderGrokPage()" style="background:var(--bg-elevated);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text-primary);padding:3px 8px;font-size:12px">';
+  [25, 50, 100, 200].forEach(function(n) {
+    html += '<option value="' + n + '"' + (size === n ? ' selected' : '') + '>' + n + '</option>';
+  });
+  html += '</select>';
+  // Prev
+  html += '<button onclick="window._grokPage--;renderGrokPage()" style="padding:4px 10px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg-elevated);color:var(--text-secondary);cursor:pointer;font-size:12px"' + (page <= 1 ? ' disabled' : '') + '>‹ Prev</button>';
+  // Page numbers
+  var maxButtons = 7;
+  var fromPg = Math.max(1, page - Math.floor(maxButtons / 2));
+  var toPg = Math.min(totalPages, fromPg + maxButtons - 1);
+  if (toPg - fromPg < maxButtons - 1) fromPg = Math.max(1, toPg - maxButtons + 1);
+  if (fromPg > 1) {
+    html += '<button onclick="window._grokPage=1;renderGrokPage()" style="padding:4px 10px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg-elevated);color:var(--text-secondary);cursor:pointer;font-size:12px">1</button>';
+    if (fromPg > 2) html += '<span style="padding:0 2px">…</span>';
+  }
+  for (var p = fromPg; p <= toPg; p++) {
+    if (p === page) {
+      html += '<button style="padding:4px 10px;border:1px solid var(--brand);border-radius:var(--radius-sm);background:var(--brand);color:#fff;font-size:12px;cursor:default">' + p + '</button>';
+    } else {
+      html += '<button onclick="window._grokPage=' + p + ';renderGrokPage()" style="padding:4px 10px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg-elevated);color:var(--text-secondary);cursor:pointer;font-size:12px">' + p + '</button>';
+    }
+  }
+  if (toPg < totalPages) {
+    if (toPg < totalPages - 1) html += '<span style="padding:0 2px">…</span>';
+    html += '<button onclick="window._grokPage=' + totalPages + ';renderGrokPage()" style="padding:4px 10px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg-elevated);color:var(--text-secondary);cursor:pointer;font-size:12px">' + totalPages + '</button>';
+  }
+  // Next
+  html += '<button onclick="window._grokPage++;renderGrokPage()" style="padding:4px 10px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg-elevated);color:var(--text-secondary);cursor:pointer;font-size:12px"' + (page >= totalPages ? ' disabled' : '') + '>Next ›</button>';
+  // Info
+  html += '<span style="margin-left:auto">' + (start + 1) + '–' + end + ' of ' + all.length + '</span>';
+  pager.innerHTML = html;
+}
+
+/* ══════════════════════════════════════════════════════════
+   CODEBUDDY PAGINATION (mirrors Grok pattern)
+   ══════════════════════════════════════════════════════════ */
+function renderCBPage() {
+  var all = window._allCB || [];
+  var page = window._cbPage || 1;
+  var size = window._cbPageSize || 50;
+  var totalPages = Math.max(1, Math.ceil(all.length / size));
+  if (page > totalPages) page = totalPages;
+  if (page < 1) page = 1;
+  window._cbPage = page;
+
+  var start = (page - 1) * size;
+  var end = Math.min(start + size, all.length);
+  var cbRows = '';
+  for (var j = start; j < end; j++) {
+    var k = all[j];
+    var pct = (k.credits_used / k.credit_limit) * 100;
+    var color = pct > 90 ? 'pbar-red' : pct > 70 ? 'pbar-orange' : 'pbar-green';
+    var status = k.disabled ? '<span class="err">disabled</span>' : '<span class="ok">active</span>';
+    cbRows += '<tr>' +
+      '<td class="mono">' + escHtml(k.key) + '</td>' +
+      '<td class="mono">' + k.credits_used.toFixed(1) + '/' + k.credit_limit + '</td>' +
+      '<td><div class="pbar"><div class="pbar-fill ' + color + '" style="width:' + pct + '%"></div></div>' + (k.credit_limit - k.credits_used).toFixed(1) + ' left</td>' +
+      '<td class="mono">' + k.total_requests + '</td>' +
+      '<td>' + status + '</td>' +
+    '</tr>';
+  }
+  document.getElementById('cbBody').innerHTML = cbRows || '<tr><td colspan="5" class="history-empty">No CodeBuddy keys loaded</td></tr>';
+
+  // Pager
+  var pager = document.getElementById('cbPager');
+  if (!pager) return;
+  var html = '';
+  html += '<span>Show</span>';
+  html += '<select onchange="window._cbPageSize=parseInt(this.value);window._cbPage=1;renderCBPage()" style="background:var(--bg-elevated);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text-primary);padding:3px 8px;font-size:12px">';
+  [25, 50, 100, 200].forEach(function(n) {
+    html += '<option value="' + n + '"' + (size === n ? ' selected' : '') + '>' + n + '</option>';
+  });
+  html += '</select>';
+  html += '<button onclick="window._cbPage--;renderCBPage()" style="padding:4px 10px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg-elevated);color:var(--text-secondary);cursor:pointer;font-size:12px"' + (page <= 1 ? ' disabled' : '') + '>‹ Prev</button>';
+  var maxButtons = 7;
+  var fromPg = Math.max(1, page - Math.floor(maxButtons / 2));
+  var toPg = Math.min(totalPages, fromPg + maxButtons - 1);
+  if (toPg - fromPg < maxButtons - 1) fromPg = Math.max(1, toPg - maxButtons + 1);
+  if (fromPg > 1) {
+    html += '<button onclick="window._cbPage=1;renderCBPage()" style="padding:4px 10px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg-elevated);color:var(--text-secondary);cursor:pointer;font-size:12px">1</button>';
+    if (fromPg > 2) html += '<span style="padding:0 2px">…</span>';
+  }
+  for (var p = fromPg; p <= toPg; p++) {
+    if (p === page) {
+      html += '<button style="padding:4px 10px;border:1px solid var(--brand);border-radius:var(--radius-sm);background:var(--brand);color:#fff;font-size:12px;cursor:default">' + p + '</button>';
+    } else {
+      html += '<button onclick="window._cbPage=' + p + ';renderCBPage()" style="padding:4px 10px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg-elevated);color:var(--text-secondary);cursor:pointer;font-size:12px">' + p + '</button>';
+    }
+  }
+  if (toPg < totalPages) {
+    if (toPg < totalPages - 1) html += '<span style="padding:0 2px">…</span>';
+    html += '<button onclick="window._cbPage=' + totalPages + ';renderCBPage()" style="padding:4px 10px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg-elevated);color:var(--text-secondary);cursor:pointer;font-size:12px">' + totalPages + '</button>';
+  }
+  html += '<button onclick="window._cbPage++;renderCBPage()" style="padding:4px 10px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg-elevated);color:var(--text-secondary);cursor:pointer;font-size:12px"' + (page >= totalPages ? ' disabled' : '') + '>Next ›</button>';
+  html += '<span style="margin-left:auto">' + (start + 1) + '–' + end + ' of ' + all.length + '</span>';
+  pager.innerHTML = html;
+}
+
+/* ══════════════════════════════════════════════════════════
+   TABS (Accounts page)
+   ══════════════════════════════════════════════════════════ */
+function showTab(e, tab) {
+  document.querySelectorAll('.subtab').forEach(function(t) { t.classList.remove('active'); });
+  e.target.classList.add('active');
+  document.getElementById('cbPanel').style.display = tab === 'cb' ? '' : 'none';
+  document.getElementById('grokPanel').style.display = tab === 'grok' ? '' : 'none';
+  // Toggle add/bulk buttons to match active tab
+  document.getElementById('cbAddBtn').style.display = tab === 'cb' ? '' : 'none';
+  document.getElementById('cbBulkBtn').style.display = tab === 'cb' ? '' : 'none';
+  document.getElementById('grokAddBtn').style.display = tab === 'grok' ? '' : 'none';
+  document.getElementById('grokBulkBtn').style.display = tab === 'grok' ? '' : 'none';
+}
+
+/* ══════════════════════════════════════════════════════════
+   QUICK TEST
+   ══════════════════════════════════════════════════════════ */
+async function runTest() {
+  var model = document.getElementById('testModel').value;
+  var prompt = document.getElementById('testPrompt').value;
+  var btn = document.getElementById('testBtn');
+  var result = document.getElementById('testResult');
+  btn.innerHTML = '<span class="spinner"></span> Sending';
+  btn.disabled = true;
+  result.classList.add('show');
+  result.textContent = 'Waiting for response...';
+  try {
+    var r = await fetch('/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...(authKey ? { 'Authorization': 'Bearer ' + authKey } : {}) },
+      body: JSON.stringify({ model: model, messages: [{ role: 'user', content: prompt }], stream: false, max_completion_tokens: 100 })
+    });
+    var d = await r.json();
+    if (d.error) {
+      result.innerHTML = '<span class="err">Error ' + r.status + '</span>: ' + escHtml(d.error);
+    } else {
+      var tokens = d.usage ? d.usage.total_tokens : '?';
+      result.innerHTML = '<span class="ok">OK ' + r.status + ' · ' + tokens + ' tokens</span>\n\n' + escHtml(d.choices && d.choices[0] ? d.choices[0].message.content : '—');
+    }
+  } catch (e) {
+    result.innerHTML = '<span class="err">Error</span>: ' + escHtml(e.message);
+  }
+  btn.textContent = 'Send';
+  btn.disabled = false;
+}
+
+/* ══════════════════════════════════════════════════════════
+   HISTORY
+   ══════════════════════════════════════════════════════════ */
+var historyLogs = [];
+
+async function loadHistory() {
+  try {
+    var results = await Promise.all([
+      fetchJSON('/history?hours=24'),
+      fetchJSON('/history/recent?limit=50')
+    ]);
+    var statsRes = results[0], recentRes = results[1];
+
+    // Update Total Tokens card
+    var s = statsRes;
+    var ttEl = document.getElementById('totalTokens');
+    if (ttEl) {
+      ttEl.textContent = (s.total_tokens || 0).toLocaleString();
+      var subEl = document.getElementById('totalTokensSub');
+      if (subEl) subEl.textContent = 'in:' + (s.total_tokens_in||0) + ' out:' + (s.total_tokens_out||0);
+    }
+
+    // History stats cards
+    var statsEl = document.getElementById('historyStats');
+    var errClass = s.total_errors > 0 ? 'err' : '';
+    statsEl.innerHTML =
+      '<div class="history-stat"><div class="label">Requests (24h)</div><div class="value">' + s.total_requests + '</div></div>' +
+      '<div class="history-stat"><div class="label">Errors</div><div class="value ' + errClass + '">' + s.total_errors + '</div></div>' +
+      '<div class="history-stat"><div class="label">Error Rate</div><div class="value ' + errClass + '">' + s.error_rate_pct.toFixed(1) + '%</div></div>' +
+      '<div class="history-stat"><div class="label">Avg Latency</div><div class="value">' + Math.round(s.avg_latency_ms) + 'ms</div></div>';
+
+    // Recent table
+    var body = document.getElementById('historyBody');
+    historyLogs = recentRes.recent_requests || [];
+    if (historyLogs.length === 0) {
+      body.innerHTML = '<tr><td colspan="6" class="history-empty">No requests logged yet</td></tr>';
+      return;
+    }
+    body.innerHTML = historyLogs.map(function(l, i) {
+      var sc = l.status_code;
+      var cls = sc >= 500 ? 'stcode-5xx' : sc >= 400 ? 'stcode-4xx' : 'stcode-2xx';
+      var tok = (l.tokens_in + l.tokens_out) > 0 ? (l.tokens_in + '/' + l.tokens_out) : '—';
+      var err = l.error_msg ? ' <span style="opacity:0.5" title="' + escHtml(l.error_msg) + '">!</span>' : '';
+      return '<tr style="cursor:pointer" onclick="showDetail(' + i + ')">' +
+        '<td class="mono">' + escHtml(l.timestamp) + '</td>' +
+        '<td>' + escHtml(l.model) + '</td>' +
+        '<td style="opacity:0.6">' + escHtml(l.upstream) + '</td>' +
+        '<td class="' + cls + '">' + sc + err + '</td>' +
+        '<td class="mono">' + l.latency_ms + 'ms</td>' +
+        '<td class="mono">' + tok + '</td>' +
+      '</tr>';
+    }).join('');
+  } catch (e) {
+    console.error('history error', e);
+  }
+}
+
+/* ══════════════════════════════════════════════════════════
+   DETAIL MODAL
+   ══════════════════════════════════════════════════════════ */
+function showDetail(idx) {
+  var l = historyLogs[idx];
+  if (!l) return;
+  var sc = l.status_code;
+  var cls = sc >= 500 ? 'stcode-5xx' : sc >= 400 ? 'stcode-4xx' : 'stcode-2xx';
+
+  var html =
+    '<div class="modal-field"><div class="field-label">Time</div><div class="field-value">' + escHtml(l.timestamp) + '</div></div>' +
+    '<div class="modal-grid">' +
+      '<div class="modal-field"><div class="field-label">Model</div><div class="field-value">' + escHtml(l.model) + '</div></div>' +
+      '<div class="modal-field"><div class="field-label">Upstream</div><div class="field-value">' + escHtml(l.upstream) + '</div></div>' +
+      '<div class="modal-field"><div class="field-label">Status</div><div class="field-value ' + cls + '">' + sc + '</div></div>' +
+      '<div class="modal-field"><div class="field-label">Latency</div><div class="field-value">' + l.latency_ms + 'ms</div></div>' +
+      '<div class="modal-field"><div class="field-label">Tokens</div><div class="field-value">' + l.tokens_in + ' in / ' + l.tokens_out + ' out</div></div>' +
+    '</div>';
+
+  if (l.error_msg) {
+    html += '<div class="modal-field"><div class="field-label">Error</div><div class="modal-text-block" style="color:var(--red)">' + escHtml(l.error_msg) + '</div></div>';
+  }
+
+  // Tabs: Preview | Request JSON | Response JSON
+  html += '<div class="modal-tabs">' +
+    '<button class="modal-tab active" onclick="switchDetailTab(\'preview\')">Preview</button>' +
+    '<button class="modal-tab" onclick="switchDetailTab(\'reqjson\')">Request JSON</button>' +
+    '<button class="modal-tab" onclick="switchDetailTab(\'respjson\')">Response JSON</button>' +
+  '</div>';
+
+  // Tab: Preview (existing input/output text)
+  html += '<div class="modal-tab-content active" id="tab-preview">';
+  if (l.input_text) {
+    html += '<div class="modal-field"><div class="field-label">Input</div><div class="modal-text-block">' + escHtml(l.input_text) + '</div></div>';
+  } else {
+    html += '<div class="modal-json-empty">No input text captured</div>';
+  }
+  if (l.output_text) {
+    html += '<div class="modal-field"><div class="field-label">Output</div><div class="modal-text-block output">' + escHtml(l.output_text) + '</div></div>';
+  } else {
+    html += '<div class="modal-json-empty">No output text captured</div>';
+  }
+  html += '</div>';
+
+  // Tab: Request JSON (lazy-loaded)
+  html += '<div class="modal-tab-content" id="tab-reqjson"><div class="modal-loading" id="reqjson-loading">Loading full request JSON...</div></div>';
+
+  // Tab: Response JSON (lazy-loaded)
+  html += '<div class="modal-tab-content" id="tab-respjson"><div class="modal-loading" id="respjson-loading">Loading full response JSON...</div></div>';
+
+  document.getElementById('detailContent').innerHTML = html;
+  document.getElementById('detailModal').classList.add('show');
+
+  // Store current log ID for lazy loading
+  currentDetailId = l.id;
+  detailJsonLoaded = { req: false, resp: false };
+}
+
+var currentDetailId = null;
+var detailJsonLoaded = { req: false, resp: false };
+
+function switchDetailTab(tab) {
+  document.querySelectorAll('.modal-tab').forEach(function(t) { t.classList.remove('active'); });
+  document.querySelectorAll('.modal-tab-content').forEach(function(c) { c.classList.remove('active'); });
+  event.target.classList.add('active');
+  document.getElementById('tab-' + tab).classList.add('active');
+
+  // Lazy-load JSON when switching to those tabs
+  if (tab === 'reqjson' && !detailJsonLoaded.req && currentDetailId) {
+    detailJsonLoaded.req = true;
+    loadDetailJson(currentDetailId, 'request');
+  }
+  if (tab === 'respjson' && !detailJsonLoaded.resp && currentDetailId) {
+    detailJsonLoaded.resp = true;
+    loadDetailJson(currentDetailId, 'response');
+  }
+}
+
+async function loadDetailJson(id, type) {
+  var containerId = type === 'request' ? 'tab-reqjson' : 'tab-respjson';
+  try {
+    // id must stay a string — UInt64 log ids exceed JS Number.MAX_SAFE_INTEGER
+    var data = await fetchJSON('/history/detail/' + encodeURIComponent(String(id)));
+    var jsonField = type === 'request' ? data.request_body : data.response_body;
+    var container = document.getElementById(containerId);
+    if (jsonField === null || jsonField === undefined || jsonField === '') {
+      container.innerHTML = '<div class="modal-json-empty">No ' + type + ' body captured for this request.</div>';
+      return;
+    }
+    // Object from API, or string body — always pretty-print full content
+    var formatted;
+    if (typeof jsonField === 'string') {
+      try {
+        formatted = JSON.stringify(JSON.parse(jsonField), null, 2);
+      } catch (e) {
+        formatted = jsonField;
+      }
+    } else {
+      formatted = JSON.stringify(jsonField, null, 2);
+    }
+    container.innerHTML = '<div class="modal-json-block">' + escHtml(formatted) + '</div>';
+  } catch (e) {
+    var el = document.getElementById(containerId);
+    if (el) el.innerHTML = '<div class="modal-json-empty">Error loading: ' + escHtml(e.message) + '</div>';
+  }
+}
+
+function closeModal() {
+  document.getElementById('detailModal').classList.remove('show');
+}
+
+document.addEventListener('keydown', function(e) {
+  if (e.key === 'Escape') closeModal();
+});
+
+/* ══════════════════════════════════════════════════════════
+   ACCOUNTS REFRESH (POST /accounts/refresh)
+   ══════════════════════════════════════════════════════════ */
+async function refreshAccounts() {
+  try {
+    var r = await fetch('/accounts/refresh', {
+      method: 'POST',
+      headers: authKey ? { 'Authorization': 'Bearer ' + authKey } : {}
+    });
+    var d = await r.json();
+    if (d.error) {
+      alert('Refresh failed: ' + d.error);
+    } else {
+      alert('Token refresh triggered successfully.');
+      refresh();
+    }
+  } catch (e) {
+    alert('Refresh error: ' + e.message);
+  }
+}
+
+/* ══════════════════════════════════════════════════════════
+   GATEWAY KEYS PAGE (Redis-backed CRUD)
+   ══════════════════════════════════════════════════════════ */
+var editingKeyMasked = null;
+
+function loadGatewayKeys() {
+  var container = document.getElementById('keysContainer');
+  if (!authKey) {
+    container.innerHTML = '<div style="text-align:center;padding:32px;color:var(--text-tertiary);font-size:13px">No auth key set. Please set a gateway key first.</div>';
+    return;
+  }
+
+  apiFetch('/api/keys').then(function(data) {
+    if (!data.keys || data.keys.length === 0) {
+      container.innerHTML = '<div style="text-align:center;padding:32px;color:var(--text-tertiary);font-size:13px">No gateway keys found. Click "Create Key" to add one.</div>';
+      return;
+    }
+
+    var html = '<table style="width:100%;border-collapse:collapse;font-size:13px">' +
+      '<thead><tr style="border-bottom:1px solid var(--border-strong)">' +
+        '<th style="text-align:left;padding:8px 10px;color:var(--text-tertiary);font-weight:500;font-size:11px;text-transform:uppercase;letter-spacing:0.5px">Name</th>' +
+        '<th style="text-align:left;padding:8px 10px;color:var(--text-tertiary);font-weight:500;font-size:11px;text-transform:uppercase;letter-spacing:0.5px">Key</th>' +
+        '<th style="text-align:center;padding:8px 10px;color:var(--text-tertiary);font-weight:500;font-size:11px;text-transform:uppercase;letter-spacing:0.5px">Role</th>' +
+        '<th style="text-align:left;padding:8px 10px;color:var(--text-tertiary);font-weight:500;font-size:11px;text-transform:uppercase;letter-spacing:0.5px">Models</th>' +
+        '<th style="text-align:right;padding:8px 10px;color:var(--text-tertiary);font-weight:500;font-size:11px;text-transform:uppercase;letter-spacing:0.5px">RPM</th>' +
+        '<th style="text-align:right;padding:8px 10px;color:var(--text-tertiary);font-weight:500;font-size:11px;text-transform:uppercase;letter-spacing:0.5px">Token Quota</th>' +
+        '<th style="text-align:right;padding:8px 10px;color:var(--text-tertiary);font-weight:500;font-size:11px;text-transform:uppercase;letter-spacing:0.5px">Requests</th>' +
+        '<th style="text-align:center;padding:8px 10px;color:var(--text-tertiary);font-weight:500;font-size:11px;text-transform:uppercase;letter-spacing:0.5px">Status</th>' +
+        '<th style="text-align:right;padding:8px 10px;color:var(--text-tertiary);font-weight:500;font-size:11px;text-transform:uppercase;letter-spacing:0.5px">Actions</th>' +
+      '</tr></thead><tbody>';
+
+    data.keys.forEach(function(k) {
+      var rpmDisplay = k.rpm > 0 ? k.rpm : '∞';
+      var roleBadge = k.role === 'admin'
+        ? '<span style="padding:2px 8px;border-radius:10px;font-size:10px;background:rgba(234,179,8,0.12);color:var(--orange)">admin</span>'
+        : '<span style="padding:2px 8px;border-radius:10px;font-size:10px;background:rgba(99,102,241,0.12);color:#818cf8">inference</span>';
+      var modelsDisplay = (k.allowed_models && k.allowed_models.length > 0)
+        ? '<span style="font-family:var(--mono);font-size:11px;color:var(--text-secondary)">' + escHtml(k.allowed_models.join(', ')) + '</span>'
+        : '<span style="color:var(--text-tertiary);font-size:11px">all</span>';
+      var quotaDisplay = k.token_quota > 0
+        ? '<div style="font-family:var(--mono);font-size:12px">' + formatNum(k.tokens_used) + ' / ' + formatNum(k.token_quota) + '</div>' +
+          '<div style="width:80px;height:4px;background:var(--bg-elevated);border-radius:2px;margin-top:3px;overflow:hidden">' +
+            '<div style="width:' + Math.min(100, k.token_quota > 0 ? (k.tokens_used / k.token_quota * 100) : 0) + '%;height:100%;background:' + (k.tokens_used / k.token_quota > 0.8 ? 'var(--red)' : 'var(--brand)') + '"></div>' +
+          '</div>'
+        : '<span style="color:var(--text-tertiary)">' + formatNum(k.tokens_used) + ' (∞)</span>';
+      var statusBadge = k.disabled
+        ? '<span style="padding:2px 8px;border-radius:10px;font-size:11px;background:rgba(239,68,68,0.12);color:var(--red)">Disabled</span>'
+        : '<span style="padding:2px 8px;border-radius:10px;font-size:11px;background:rgba(39,166,68,0.12);color:var(--green)">Active</span>';
+
+      // Safely pass key data to onclick via data attributes
+      html += '<tr style="border-bottom:1px solid var(--border)">' +
+        '<td style="padding:10px;color:var(--text-secondary)">' + escHtml(k.name || 'unnamed') + '</td>' +
+        '<td style="padding:10px;font-family:var(--mono);font-size:12px;color:var(--text-secondary)">' + escHtml(k.key_masked) + '</td>' +
+        '<td style="padding:10px;text-align:center">' + roleBadge + '</td>' +
+        '<td style="padding:10px;font-size:11px">' + modelsDisplay + '</td>' +
+        '<td style="padding:10px;text-align:right;font-family:var(--mono);color:var(--text-secondary)">' + rpmDisplay + '</td>' +
+        '<td style="padding:10px;text-align:right">' + quotaDisplay + '</td>' +
+        '<td style="padding:10px;text-align:right;font-family:var(--mono);color:var(--text-tertiary)">' + formatNum(k.requests) + '</td>' +
+        '<td style="padding:10px;text-align:center">' + statusBadge + '</td>' +
+        '<td style="padding:10px;text-align:right">' +
+          '<button class="btn-ghost" onclick="showEditKeyModal(\'' + k.key_masked + '\')" style="padding:3px 8px;font-size:12px">Edit</button> ' +
+          '<button class="btn-ghost" onclick="deleteKey(\'' + k.key_masked + '\')" style="padding:3px 8px;font-size:12px;color:var(--red)">Delete</button>' +
+        '</td>' +
+      '</tr>';
+    });
+
+    html += '</tbody></table>';
+    container.innerHTML = html;
+  }).catch(function(e) {
+    container.innerHTML = '<div style="text-align:center;padding:32px;color:var(--red);font-size:13px">Error loading keys: ' + escHtml(e.message) + '</div>';
+  });
+}
+
+function formatNum(n) {
+  if (n >= 1e6) return (n/1e6).toFixed(1) + 'M';
+  if (n >= 1e3) return (n/1e3).toFixed(1) + 'K';
+  return String(n);
+}
+
+/* ══════════════════════════════════════════════════════════
+   MODELS PAGE
+   ══════════════════════════════════════════════════════════ */
+var aliasMap = {
+  'grok-4.5-high':   { upstream: 'grok-4.5', effort: 'high' },
+  'grok-4.5-medium': { upstream: 'grok-4.5', effort: 'medium' },
+  'grok-4.5-low':    { upstream: 'grok-4.5', effort: 'low' },
+  'grok-4.5-xhigh': { upstream: 'grok-4.5', effort: 'high' }
+};
+
+async function loadModels() {
+  var container = document.getElementById('modelsContainer');
+  if (!container) return;
+
+  var hoursEl = document.getElementById('modelHours');
+  var hours = hoursEl ? hoursEl.value : '24';
+
+  container.innerHTML = '<div style="text-align:center;padding:32px;color:var(--text-tertiary);font-size:13px">Loading models...</div>';
+
+  try {
+    var results = await Promise.all([
+      fetchJSON('/v1/models'),
+      fetchJSON('/history?hours=' + hours)
+    ]);
+    var modelsData = results[0].data || [];
+    var history = results[1];
+
+    // Build usage map from by_model
+    var usageMap = {};
+    if (history.by_model) {
+      history.by_model.forEach(function(m) {
+        usageMap[m.model] = m;
+      });
+    }
+    // Group by owner
+    var groups = {};
+    modelsData.forEach(function(m) {
+      var owner = m.owned_by || 'unknown';
+      if (!groups[owner]) groups[owner] = [];
+      groups[owner].push(m);
+    });
+
+    var html = '';
+    var ownerLabels = { xai: 'Grok (xAI)', codebuddy: 'CodeBuddy' };
+
+    for (var owner in groups) {
+      if (!groups.hasOwnProperty(owner)) continue;
+      var models = groups[owner];
+      html += '<div style="margin-bottom:24px">';
+      html += '<div style="font-size:11px;text-transform:uppercase;letter-spacing:0.5px;color:var(--text-tertiary);margin-bottom:8px;font-weight:600">' + escHtml(ownerLabels[owner] || owner) + '</div>';
+      html += '<table style="width:100%;border-collapse:collapse;font-size:13px">';
+      html += '<thead><tr style="border-bottom:1px solid var(--border-strong)">' +
+        '<th style="text-align:left;padding:8px 10px;color:var(--text-tertiary);font-weight:500;font-size:11px;text-transform:uppercase;letter-spacing:0.5px">Model</th>' +
+        '<th style="text-align:left;padding:8px 10px;color:var(--text-tertiary);font-weight:500;font-size:11px;text-transform:uppercase;letter-spacing:0.5px">Type</th>' +
+        '<th style="text-align:right;padding:8px 10px;color:var(--text-tertiary);font-weight:500;font-size:11px;text-transform:uppercase;letter-spacing:0.5px">Requests</th>' +
+        '<th style="text-align:right;padding:8px 10px;color:var(--text-tertiary);font-weight:500;font-size:11px;text-transform:uppercase;letter-spacing:0.5px">Tokens In</th>' +
+        '<th style="text-align:right;padding:8px 10px;color:var(--text-tertiary);font-weight:500;font-size:11px;text-transform:uppercase;letter-spacing:0.5px">Tokens Out</th>' +
+        '<th style="text-align:right;padding:8px 10px;color:var(--text-tertiary);font-weight:500;font-size:11px;text-transform:uppercase;letter-spacing:0.5px">Avg Latency</th>' +
+        '<th style="text-align:right;padding:8px 10px;color:var(--text-tertiary);font-weight:500;font-size:11px;text-transform:uppercase;letter-spacing:0.5px">Errors</th>' +
+        '<th style="text-align:center;padding:8px 10px;color:var(--text-tertiary);font-weight:500;font-size:11px;text-transform:uppercase;letter-spacing:0.5px">Test</th>' +
+        '</tr></thead><tbody>';
+
+      models.forEach(function(m) {
+        var id = m.id;
+        var isAlias = aliasMap[id] !== undefined;
+        var typeLabel = isAlias
+          ? '<span style="padding:2px 8px;border-radius:10px;font-size:11px;background:rgba(94,106,210,0.12);color:var(--brand)">alias → ' + aliasMap[id].upstream + ' (' + aliasMap[id].effort + ')</span>'
+          : '<span style="padding:2px 8px;border-radius:10px;font-size:11px;background:rgba(255,255,255,0.04);color:var(--text-tertiary)">direct</span>';
+
+        var u = usageMap[id] || {};
+        var reqs = u.total_requests || 0;
+        var tokIn = u.total_tokens_in || 0;
+        var tokOut = u.total_tokens_out || 0;
+        var avgLat = u.avg_latency_ms ? Math.round(u.avg_latency_ms) + 'ms' : '—';
+        var errs = u.total_errors || 0;
+        var errStyle = errs > 0 ? 'color:var(--red)' : 'color:var(--text-tertiary)';
+
+        html += '<tr style="border-bottom:1px solid var(--border)">' +
+          '<td style="padding:10px;font-family:var(--mono);font-size:12px;color:var(--text-primary)">' + escHtml(id) + '</td>' +
+          '<td style="padding:10px">' + typeLabel + '</td>' +
+          '<td style="padding:10px;text-align:right;font-family:var(--mono);color:var(--text-secondary)">' + (reqs > 0 ? formatNum(reqs) : '—') + '</td>' +
+          '<td style="padding:10px;text-align:right;font-family:var(--mono);color:var(--text-secondary)">' + (tokIn > 0 ? formatNum(tokIn) : '—') + '</td>' +
+          '<td style="padding:10px;text-align:right;font-family:var(--mono);color:var(--text-secondary)">' + (tokOut > 0 ? formatNum(tokOut) : '—') + '</td>' +
+          '<td style="padding:10px;text-align:right;font-family:var(--mono);color:var(--text-tertiary)">' + avgLat + '</td>' +
+          '<td style="padding:10px;text-align:right;font-family:var(--mono);' + errStyle + '">' + (errs > 0 ? errs : '—') + '</td>' +
+          '<td style="padding:10px;text-align:center"><button class="btn-ghost" onclick="quickTestModel(\'' + escHtml(id) + '\')" style="padding:3px 10px;font-size:12px">Test</button></td>' +
+        '</tr>';
+      });
+
+      html += '</tbody></table>';
+      html += '</div>';
+    }
+
+    // Alias info box
+    html += '<div style="margin-top:16px;padding:14px;background:var(--bg-elevated);border-radius:var(--radius);border:1px solid var(--border);font-size:12px;color:var(--text-tertiary);line-height:1.6">';
+    html += '<strong style="color:var(--text-secondary)">Model Aliases</strong> — ';
+    html += '<code style="font-family:var(--mono);color:var(--brand)">grok-4.5-high</code>, ';
+    html += '<code style="font-family:var(--mono);color:var(--brand)">grok-4.5-medium</code>, ';
+    html += '<code style="font-family:var(--mono);color:var(--brand)">grok-4.5-low</code> map to ';
+    html += '<code style="font-family:var(--mono);color:var(--text-secondary)">grok-4.5</code> + ';
+    html += '<code style="font-family:var(--mono);color:var(--text-secondary)">reasoning_effort</code> param. Client-set ';
+    html += '<code style="font-family:var(--mono);color:var(--text-secondary)">reasoning_effort</code> takes precedence.';
+    html += '</div>';
+
+    container.innerHTML = html;
+  } catch(e) {
+    container.innerHTML = '<div style="text-align:center;padding:32px;color:var(--red);font-size:13px">Error loading models: ' + escHtml(e.message) + '</div>';
+  }
+}
+
+async function quickTestModel(model) {
+  var btn = event.target;
+  var origText = btn.textContent;
+  btn.textContent = 'Testing...';
+  btn.disabled = true;
+
+  try {
+    var r = await fetch('/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + authKey },
+      body: JSON.stringify({ model: model, messages: [{role:'user',content:'Say OK'}], stream: false })
+    });
+    var data = await r.json();
+    if (r.ok && data.choices) {
+      var content = data.choices[0].message.content || '';
+      var usage = data.usage || {};
+      var rt = usage.completion_tokens_details ? usage.completion_tokens_details.reasoning_tokens : 0;
+      btn.textContent = '✓ OK';
+      btn.style.color = 'var(--green)';
+      setTimeout(function() { btn.textContent = origText; btn.style.color = ''; btn.disabled = false; }, 3000);
+      console.log('[Test] ' + model + ': ' + content.substring(0,100) + ' | reasoning=' + rt + ' tokens=' + (usage.total_tokens||0));
+    } else {
+      var errMsg = data.error ? (data.error.message || JSON.stringify(data.error)).substring(0,80) : 'Unknown error';
+      btn.textContent = '✗ ' + r.status;
+      btn.style.color = 'var(--red)';
+      btn.title = errMsg;
+      setTimeout(function() { btn.textContent = origText; btn.style.color = ''; btn.disabled = false; }, 3000);
+    }
+  } catch(e) {
+    btn.textContent = '✗ Error';
+    btn.style.color = 'var(--red)';
+    setTimeout(function() { btn.textContent = origText; btn.style.color = ''; btn.disabled = false; }, 3000);
+  }
+}
+
+/* ══════════════════════════════════════════════════════════
+   MODEL SELECTOR (checkbox list for allowed_models)
+   ══════════════════════════════════════════════════════════ */
+var _availableModels = []; // cached model list from /v1/models
+
+function loadModelSelector() {
+  var container = document.getElementById('keyModelSelector');
+  if (!container) return Promise.resolve();
+  // Use cached models if available
+  if (_availableModels.length > 0) {
+    renderModelSelector(_availableModels);
+    return Promise.resolve();
+  }
+  container.innerHTML = '<div style="text-align:center;padding:8px;color:var(--text-tertiary);font-size:12px">Loading models...</div>';
+  return fetchJSON('/v1/models').then(function(data) {
+    _availableModels = (data.data || []).map(function(m) { return m.id; }).sort();
+    renderModelSelector(_availableModels);
+  }).catch(function(e) {
+    container.innerHTML = '<div style="padding:8px;color:var(--red);font-size:12px">Failed to load models: ' + escHtml(e.message) + '</div>';
+  });
+}
+
+function renderModelSelector(models) {
+  var container = document.getElementById('keyModelSelector');
+  if (!container) return;
+  if (!models || models.length === 0) {
+    container.innerHTML = '<div style="padding:8px;color:var(--text-tertiary);font-size:12px">No models available</div>';
+    return;
+  }
+  // Group by prefix (grok-* or cb/*)
+  var groups = {};
+  models.forEach(function(m) {
+    var prefix = m.startsWith('grok-') ? 'grok' : (m.startsWith('cb/') ? 'cb' : 'other');
+    if (!groups[prefix]) groups[prefix] = [];
+    groups[prefix].push(m);
+  });
+  var html = '';
+  ['grok', 'cb', 'other'].forEach(function(prefix) {
+    if (!groups[prefix]) return;
+    var label = prefix === 'grok' ? 'Grok' : (prefix === 'cb' ? 'CodeBuddy' : 'Other');
+    var globPattern = prefix === 'grok' ? 'grok-*' : (prefix === 'cb' ? 'cb/*' : null);
+    html += '<div style="margin-bottom:6px">';
+    html += '<div style="display:flex;align-items:center;gap:6px;padding:4px 0;border-bottom:1px solid var(--border);margin-bottom:4px">';
+    html += '<span style="font-size:11px;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.5px">' + escHtml(label) + '</span>';
+    if (globPattern) {
+      html += '<label style="display:flex;align-items:center;gap:3px;font-size:11px;color:var(--text-tertiary);cursor:pointer;margin-left:auto">';
+      html += '<input type="checkbox" id="modelGlob_' + prefix + '" value="' + escHtml(globPattern) + '" style="accent-color:var(--brand)" onchange="onModelCheckboxChange()" />';
+      html += '<span style="font-family:var(--mono)">' + escHtml(globPattern) + '</span> <span style="font-size:10px">(all)</span>';
+      html += '</label>';
+    }
+    html += '</div>';
+    // Individual models
+    groups[prefix].forEach(function(m) {
+      html += '<label style="display:flex;align-items:center;gap:6px;padding:3px 8px;cursor:pointer;font-size:12px">';
+      html += '<input type="checkbox" class="modelCheckbox" value="' + escHtml(m) + '" style="accent-color:var(--brand)" onchange="onModelCheckboxChange()" />';
+      html += '<span style="font-family:var(--mono);color:var(--text-secondary)">' + escHtml(m) + '</span>';
+      html += '</label>';
+    });
+    html += '</div>';
+  });
+  container.innerHTML = html;
+}
+
+function getSelectedModels() {
+  var checkboxes = document.querySelectorAll('.modelCheckbox, #keyModelSelector input[type=checkbox]');
+  var selected = [];
+  checkboxes.forEach(function(cb) {
+    if (cb.checked && cb.value) selected.push(cb.value);
+  });
+  return selected;
+}
+
+function setSelectedModels(models) {
+  var modelSet = {};
+  models.forEach(function(m) { modelSet[m] = true; });
+  var checkboxes = document.querySelectorAll('.modelCheckbox, #keyModelSelector input[type=checkbox]');
+  checkboxes.forEach(function(cb) {
+    cb.checked = !!modelSet[cb.value];
+  });
+}
+
+function toggleAllModels(check) {
+  var checkboxes = document.querySelectorAll('#keyModelSelector input[type=checkbox]');
+  checkboxes.forEach(function(cb) { cb.checked = check; });
+}
+
+function toggleModelGroup(prefix) {
+  // Select only models in this group, deselect others
+  var checkboxes = document.querySelectorAll('#keyModelSelector input[type=checkbox]');
+  var globVal = prefix === 'grok' ? 'grok-*' : 'cb/*';
+  checkboxes.forEach(function(cb) {
+    var isGroup = (prefix === 'grok' && (cb.value.startsWith('grok-') || cb.value === 'grok-*')) ||
+                  (prefix === 'cb' && (cb.value.startsWith('cb/') || cb.value === 'cb/*'));
+    cb.checked = isGroup;
+  });
+}
+
+function onModelCheckboxChange() {
+  // Placeholder for future live-validation hooks
+}
+
+function showCreateKeyModal() {
+  editingKeyMasked = null;
+  document.getElementById('keyModalTitle').textContent = 'Create Gateway Key';
+  document.getElementById('keyName').value = '';
+  document.getElementById('keyRole').value = 'inference';
+  document.getElementById('keyRPM').value = '0';
+  document.getElementById('keyBurst').value = '0';
+  document.getElementById('keyQuota').value = '0';
+  document.getElementById('keyDisabled').checked = false;
+  document.getElementById('keyEditDisabled').style.display = 'none';
+  document.getElementById('keyCreateResult').style.display = 'none';
+  document.getElementById('keyModalSave').textContent = 'Create';
+  document.getElementById('keyModal').classList.add('show');
+  // Load model selector + clear selection
+  loadModelSelector().then(function() { setSelectedModels([]); });
+}
+
+function showEditKeyModal(masked) {
+  editingKeyMasked = masked;
+  document.getElementById('keyModalTitle').textContent = 'Edit Gateway Key';
+  // Fetch current key data to populate form
+  apiFetch('/api/keys/' + encodeURIComponent(masked) + '/usage')
+    .then(function(k) {
+      document.getElementById('keyName').value = k.name || '';
+      document.getElementById('keyRole').value = k.role || 'inference';
+      document.getElementById('keyRPM').value = k.rpm || 0;
+      document.getElementById('keyBurst').value = k.burst || 0;
+      document.getElementById('keyQuota').value = k.token_quota || 0;
+      document.getElementById('keyDisabled').checked = k.disabled || false;
+      document.getElementById('keyEditDisabled').style.display = 'block';
+      document.getElementById('keyCreateResult').style.display = 'none';
+      document.getElementById('keyModalSave').textContent = 'Save';
+      document.getElementById('keyModal').classList.add('show');
+      // Load model selector + set current selection
+      loadModelSelector().then(function() { setSelectedModels(k.allowed_models || []); });
+    })
+    .catch(function(e) {
+      alert('Failed to load key: ' + e.message);
+    });
+}
+
+function closeKeyModal() {
+  document.getElementById('keyModal').classList.remove('show');
+}
+
+function saveKeyModal() {
+  var name = document.getElementById('keyName').value.trim() || 'unnamed';
+  var role = document.getElementById('keyRole').value;
+  var models = getSelectedModels();
+  var rpm = parseInt(document.getElementById('keyRPM').value) || 0;
+  var burst = parseInt(document.getElementById('keyBurst').value) || 0;
+  var quota = parseInt(document.getElementById('keyQuota').value) || 0;
+
+  if (editingKeyMasked) {
+    // Edit mode — send allowed_models (empty array = clear whitelist)
+    var disabled = document.getElementById('keyDisabled').checked;
+    apiFetch('/api/keys/' + encodeURIComponent(editingKeyMasked), {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: name, role: role, allowed_models: models, rpm: rpm, burst: burst, token_quota: quota, disabled: disabled })
+    }).then(function() {
+      closeKeyModal();
+      loadGatewayKeys();
+    }).catch(function(e) {
+      alert('Update failed: ' + e.message);
+    });
+  } else {
+    // Create mode
+    apiFetch('/api/keys', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: name, role: role, allowed_models: models, rpm: rpm, burst: burst, token_quota: quota })
+    }).then(function(data) {
+      // Show the full key once
+      document.getElementById('keyCreateResult').style.display = 'block';
+      document.getElementById('newKeyValue').textContent = data.key;
+      document.getElementById('keyModalSave').textContent = 'Close';
+      document.getElementById('keyModalSave').onclick = function() {
+        closeKeyModal();
+        loadGatewayKeys();
+        // Restore onclick for next time
+        document.getElementById('keyModalSave').onclick = saveKeyModal;
+        document.getElementById('keyModalSave').textContent = 'Create';
+      };
+    }).catch(function(e) {
+      alert('Create failed: ' + e.message);
+    });
+  }
+}
+
+function copyNewKey() {
+  var key = document.getElementById('newKeyValue').textContent;
+  navigator.clipboard.writeText(key).then(function() {
+    var btn = event.target.closest('button');
+    if (btn) {
+      var orig = btn.innerHTML;
+      btn.innerHTML = '✓';
+      setTimeout(function() { btn.innerHTML = orig; }, 1500);
+    }
+  });
+}
+
+function deleteKey(masked) {
+  if (!confirm('Delete key ' + masked + '? This cannot be undone.')) return;
+  apiFetch('/api/keys/' + encodeURIComponent(masked), {
+    method: 'DELETE'
+  }).then(function() {
+    loadGatewayKeys();
+  }).catch(function(e) {
+    alert('Delete failed: ' + e.message);
+  });
+}
+
+/* ══════════════════════════════════════════════════════════
+   INIT
+   ══════════════════════════════════════════════════════════ */
+router();           // initial route
+loadHistory();       // initial history load
+refresh();           // initial data load
+setInterval(loadHistory, 10000);  // history every 10s
+setInterval(refresh, 5000);       // health/accounts every 5s
+</script>
+
+<!-- ══════════════════════════════════════════════════════════
+     ADD/BULK IMPORT MODALS
+     ══════════════════════════════════════════════════════════ -->
+
+<!-- Add CB Key Modal -->
+<div class="modal-overlay" id="addCBModal" onclick="if(event.target===this)closeAddCBModal()" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:1000;align-items:center;justify-content:center">
+  <div style="background:var(--bg-secondary);border:1px solid var(--border);border-radius:var(--radius);width:90%;max-width:480px;padding:24px">
+    <h3 style="margin:0 0 16px;font-size:16px">Add CodeBuddy Key</h3>
+    <div style="margin-bottom:16px">
+      <label style="font-size:12px;color:var(--text-tertiary);display:block;margin-bottom:6px">API Key</label>
+      <input type="text" id="addCBKeyInput" placeholder="ck_..." style="width:100%;padding:8px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg-primary);color:var(--text);font-family:var(--mono);font-size:13px" />
+    </div>
+    <div style="display:flex;gap:8px;justify-content:flex-end">
+      <button class="btn-ghost" onclick="closeAddCBModal()" style="padding:8px 16px;font-size:13px">Cancel</button>
+      <button class="btn-primary" onclick="submitAddCB()" style="padding:8px 16px;border-radius:var(--radius-sm);background:var(--brand);color:#fff;border:none;font-size:13px;font-weight:500;cursor:pointer">Add</button>
+    </div>
+  </div>
+</div>
+
+<!-- Bulk CB Import Modal -->
+<div class="modal-overlay" id="bulkCBModal" onclick="if(event.target===this)closeBulkCBModal()" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:1000;align-items:center;justify-content:center">
+  <div style="background:var(--bg-secondary);border:1px solid var(--border);border-radius:var(--radius);width:90%;max-width:560px;padding:24px">
+    <h3 style="margin:0 0 16px;font-size:16px">Bulk Import CodeBuddy Keys</h3>
+    <div style="margin-bottom:8px;font-size:12px;color:var(--text-tertiary)">Paste keys — one per line, or comma-separated. Duplicates are skipped automatically.</div>
+    <div style="margin-bottom:16px">
+      <textarea id="bulkCBInput" placeholder="ck_abc123&#10;ck_def456&#10;ck_ghi789" rows="10" style="width:100%;padding:8px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg-primary);color:var(--text);font-family:var(--mono);font-size:12px;resize:vertical"></textarea>
+    </div>
+    <div id="bulkCBResult" style="margin-bottom:12px;display:none;padding:10px;border-radius:var(--radius-sm);font-size:13px"></div>
+    <div style="display:flex;gap:8px;justify-content:flex-end">
+      <button class="btn-ghost" onclick="closeBulkCBModal()" style="padding:8px 16px;font-size:13px">Cancel</button>
+      <button class="btn-primary" id="bulkCBSave" onclick="submitBulkCB()" style="padding:8px 16px;border-radius:var(--radius-sm);background:var(--brand);color:#fff;border:none;font-size:13px;font-weight:500;cursor:pointer">Import</button>
+    </div>
+  </div>
+</div>
+
+<!-- Add Grok Account Modal -->
+<div class="modal-overlay" id="addGrokModal" onclick="if(event.target===this)closeAddGrokModal()" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:1000;align-items:center;justify-content:center">
+  <div style="background:var(--bg-secondary);border:1px solid var(--border);border-radius:var(--radius);width:90%;max-width:560px;padding:24px;max-height:90vh;overflow-y:auto">
+    <h3 style="margin:0 0 16px;font-size:16px">Add Grok Account</h3>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
+      <div>
+        <label style="font-size:12px;color:var(--text-tertiary);display:block;margin-bottom:6px">Email *</label>
+        <input type="text" id="grokEmail" placeholder="user@example.com" style="width:100%;padding:8px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg-primary);color:var(--text);font-size:13px" />
+      </div>
+      <div>
+        <label style="font-size:12px;color:var(--text-tertiary);display:block;margin-bottom:6px">Expires In (seconds)</label>
+        <input type="number" id="grokExpiresIn" placeholder="21600 (6h default)" style="width:100%;padding:8px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg-primary);color:var(--text);font-size:13px" />
+      </div>
+    </div>
+    <div style="margin-bottom:12px">
+      <label style="font-size:12px;color:var(--text-tertiary);display:block;margin-bottom:6px">Access Token *</label>
+      <textarea id="grokAccessToken" rows="3" placeholder="eyJ..." style="width:100%;padding:8px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg-primary);color:var(--text);font-family:var(--mono);font-size:12px;resize:vertical"></textarea>
+    </div>
+    <div style="margin-bottom:12px">
+      <label style="font-size:12px;color:var(--text-tertiary);display:block;margin-bottom:6px">Refresh Token *</label>
+      <textarea id="grokRefreshToken" rows="3" placeholder="..." style="width:100%;padding:8px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg-primary);color:var(--text);font-family:var(--mono);font-size:12px;resize:vertical"></textarea>
+    </div>
+    <div style="margin-bottom:16px">
+      <label style="font-size:12px;color:var(--text-tertiary);display:block;margin-bottom:6px">ID Token (optional)</label>
+      <textarea id="grokIDToken" rows="2" placeholder="..." style="width:100%;padding:8px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg-primary);color:var(--text);font-family:var(--mono);font-size:12px;resize:vertical"></textarea>
+    </div>
+    <div style="display:flex;gap:8px;justify-content:flex-end">
+      <button class="btn-ghost" onclick="closeAddGrokModal()" style="padding:8px 16px;font-size:13px">Cancel</button>
+      <button class="btn-primary" onclick="submitAddGrok()" style="padding:8px 16px;border-radius:var(--radius-sm);background:var(--brand);color:#fff;border:none;font-size:13px;font-weight:500;cursor:pointer">Add</button>
+    </div>
+  </div>
+</div>
+
+<!-- Bulk Grok Import Modal -->
+<div class="modal-overlay" id="bulkGrokModal" onclick="if(event.target===this)closeBulkGrokModal()" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:1000;align-items:center;justify-content:center">
+  <div style="background:var(--bg-secondary);border:1px solid var(--border);border-radius:var(--radius);width:90%;max-width:640px;padding:24px;max-height:90vh;overflow-y:auto">
+    <h3 style="margin:0 0 16px;font-size:16px">Bulk Import Grok Accounts</h3>
+    <div style="margin-bottom:8px;font-size:12px;color:var(--text-tertiary)">Paste JSON array. Existing accounts are updated (tokens refreshed).</div>
+    <div style="margin-bottom:16px">
+      <textarea id="bulkGrokInput" rows="12" placeholder='[
+  {
+    "email": "user1@example.com",
+    "access_token": "eyJ...",
+    "refresh_token": "...",
+    "id_token": "...",
+    "expires_in": 21600
+  },
+  {
+    "email": "user2@example.com",
+    "access_token": "eyJ...",
+    "refresh_token": "..."
+  }
+]' style="width:100%;padding:8px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg-primary);color:var(--text);font-family:var(--mono);font-size:12px;resize:vertical"></textarea>
+    </div>
+    <div id="bulkGrokResult" style="margin-bottom:12px;display:none;padding:10px;border-radius:var(--radius-sm);font-size:13px"></div>
+    <div style="display:flex;gap:8px;justify-content:flex-end">
+      <button class="btn-ghost" onclick="closeBulkGrokModal()" style="padding:8px 16px;font-size:13px">Cancel</button>
+      <button class="btn-primary" id="bulkGrokSave" onclick="submitBulkGrok()" style="padding:8px 16px;border-radius:var(--radius-sm);background:var(--brand);color:#fff;border:none;font-size:13px;font-weight:500;cursor:pointer">Import</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// === Add/Bulk CB Key ===
+function showAddCBModal() {
+  document.getElementById('addCBKeyInput').value = '';
+  document.getElementById('addCBModal').style.display = 'flex';
+  document.getElementById('addCBKeyInput').focus();
+}
+function closeAddCBModal() { document.getElementById('addCBModal').style.display = 'none'; }
+
+function submitAddCB() {
+  var key = document.getElementById('addCBKeyInput').value.trim();
+  if (!key) { alert('API key is required'); return; }
+  apiFetch('/cb/import', { method: 'POST', body: JSON.stringify({ api_key: key }) })
+    .then(function(d) {
+      alert(d.added ? 'Key added successfully (' + d.total + ' total)' : 'Key already exists (' + d.total + ' total)');
+      closeAddCBModal();
+      loadCBStats();
+    })
+    .catch(function(e) { alert('Error: ' + e.message); });
+}
+
+function showBulkCBModal() {
+  document.getElementById('bulkCBInput').value = '';
+  document.getElementById('bulkCBResult').style.display = 'none';
+  document.getElementById('bulkGrokModal'); // ensure not conflicting
+  document.getElementById('bulkCBModal').style.display = 'flex';
+  document.getElementById('bulkCBInput').focus();
+}
+function closeBulkCBModal() { document.getElementById('bulkCBModal').style.display = 'none'; }
+
+function submitBulkCB() {
+  var raw = document.getElementById('bulkCBInput').value.trim();
+  if (!raw) { alert('Paste at least one key'); return; }
+  var lines = raw.split(/[\n,\r\t ]+/).map(function(s){return s.trim()}).filter(Boolean);
+  if (lines.length === 0) { alert('No valid keys found'); return; }
+  if (!confirm('Import ' + lines.length + ' keys? Duplicates will be skipped.')) return;
+  document.getElementById('bulkCBSave').textContent = 'Importing...';
+  document.getElementById('bulkCBSave').disabled = true;
+  apiFetch('/cb/import/bulk', { method: 'POST', body: JSON.stringify({ api_keys: lines }) })
+    .then(function(d) {
+      var res = document.getElementById('bulkCBResult');
+      res.style.display = 'block';
+      res.style.background = d.added > 0 ? 'rgba(34,197,94,0.1)' : 'rgba(234,179,8,0.1)';
+      res.style.color = d.added > 0 ? 'var(--green)' : 'var(--yellow)';
+      res.innerHTML = '✓ Added: <b>' + d.added + '</b> · Skipped: ' + d.skipped + ' · Total: ' + d.total;
+      document.getElementById('bulkCBSave').textContent = 'Done';
+      document.getElementById('bulkCBSave').disabled = false;
+      document.getElementById('bulkCBSave').onclick = function() { closeBulkCBModal(); loadCBStats(); };
+    })
+    .catch(function(e) {
+      var res = document.getElementById('bulkCBResult');
+      res.style.display = 'block';
+      res.style.background = 'rgba(239,68,68,0.1)';
+      res.style.color = 'var(--red)';
+      res.textContent = '✗ Error: ' + e.message;
+      document.getElementById('bulkCBSave').textContent = 'Import';
+      document.getElementById('bulkCBSave').disabled = false;
+    });
+}
+
+// === Add/Bulk Grok Account ===
+function showAddGrokModal() {
+  ['grokEmail','grokExpiresIn','grokAccessToken','grokRefreshToken','grokIDToken'].forEach(function(id) {
+    document.getElementById(id).value = '';
+  });
+  document.getElementById('addGrokModal').style.display = 'flex';
+  document.getElementById('grokEmail').focus();
+}
+function closeAddGrokModal() { document.getElementById('addGrokModal').style.display = 'none'; }
+
+function submitAddGrok() {
+  var email = document.getElementById('grokEmail').value.trim();
+  var at = document.getElementById('grokAccessToken').value.trim();
+  var rt = document.getElementById('grokRefreshToken').value.trim();
+  if (!email || !at || !rt) { alert('Email, Access Token, and Refresh Token are required'); return; }
+  var body = { email: email, access_token: at, refresh_token: rt };
+  var idt = document.getElementById('grokIDToken').value.trim();
+  if (idt) body.id_token = idt;
+  var ei = parseInt(document.getElementById('grokExpiresIn').value);
+  if (ei > 0) body.expires_in = ei;
+  apiFetch('/accounts/import', { method: 'POST', body: JSON.stringify(body) })
+    .then(function(d) {
+      alert('Account imported: ' + d.email + ' (total: ' + d.total + ')');
+      closeAddGrokModal();
+      loadCBStats();
+    })
+    .catch(function(e) { alert('Error: ' + e.message); });
+}
+
+function showBulkGrokModal() {
+  document.getElementById('bulkGrokInput').value = '';
+  document.getElementById('bulkGrokResult').style.display = 'none';
+  document.getElementById('bulkGrokModal').style.display = 'flex';
+  document.getElementById('bulkGrokInput').focus();
+}
+function closeBulkGrokModal() { document.getElementById('bulkGrokModal').style.display = 'none'; }
+
+function submitBulkGrok() {
+  var raw = document.getElementById('bulkGrokInput').value.trim();
+  if (!raw) { alert('Paste JSON array'); return; }
+  var accounts;
+  try { accounts = JSON.parse(raw); }
+  catch(e) { alert('Invalid JSON: ' + e.message); return; }
+  if (!Array.isArray(accounts) || accounts.length === 0) { alert('Input must be a JSON array of account objects'); return; }
+  if (!confirm('Import ' + accounts.length + ' accounts? Existing emails will be updated.')) return;
+  document.getElementById('bulkGrokSave').textContent = 'Importing...';
+  document.getElementById('bulkGrokSave').disabled = true;
+  apiFetch('/accounts/import/bulk', { method: 'POST', body: JSON.stringify({ accounts: accounts }) })
+    .then(function(d) {
+      var res = document.getElementById('bulkGrokResult');
+      res.style.display = 'block';
+      res.style.background = d.added > 0 ? 'rgba(34,197,94,0.1)' : 'rgba(234,179,8,0.1)';
+      res.style.color = d.added > 0 ? 'var(--green)' : 'var(--yellow)';
+      res.innerHTML = '✓ Added: <b>' + d.added + '</b> · Updated: ' + d.updated + (d.failed > 0 ? ' · Failed: ' + d.failed : '') + ' · Total: ' + d.total;
+      document.getElementById('bulkGrokSave').textContent = 'Done';
+      document.getElementById('bulkGrokSave').disabled = false;
+      document.getElementById('bulkGrokSave').onclick = function() { closeBulkGrokModal(); loadCBStats(); };
+    })
+    .catch(function(e) {
+      var res = document.getElementById('bulkGrokResult');
+      res.style.display = 'block';
+      res.style.background = 'rgba(239,68,68,0.1)';
+      res.style.color = 'var(--red)';
+      res.textContent = '✗ Error: ' + e.message;
+      document.getElementById('bulkGrokSave').textContent = 'Import';
+      document.getElementById('bulkGrokSave').disabled = false;
+    });
+}
+
+// Close modals on Escape
+document.addEventListener('keydown', function(e) {
+  if (e.key === 'Escape') {
+    ['addCBModal','bulkCBModal','addGrokModal','bulkGrokModal'].forEach(function(id) {
+      var m = document.getElementById(id);
+      if (m && m.style.display === 'flex') m.style.display = 'none';
+    });
+  }
+});
+</script>
+</body>
+</html>

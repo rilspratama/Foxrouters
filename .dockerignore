@@ -1,0 +1,51 @@
+# Version control
+.git
+.gitignore
+.gitattributes
+
+# Environment files & secrets — NEVER bake into image
+*.env
+.gateway.env
+gateway-key.txt
+codebuddy-key.txt
+
+# xAI account credential dumps
+xai-*.json
+
+# CodeBuddy auth files (mounted at runtime, not baked in)
+cpa_auths/
+
+# Pre-built binary from host (image builds its own)
+foxrouters
+ai-gateway
+
+# Dev / tooling artifacts
+graphify-out/
+migrate.py
+stress_test.py
+stress_test_v2.py
+
+# Docs (except README if present)
+*.md
+!README.md
+
+# Editor / OS junk
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Docker files themselves
+Dockerfile
+.dockerignore
+docker-compose.yml
+docker-compose.yaml
+.env.example
+
+# Test binaries / coverage
+*.test
+*.out
+coverage.txt

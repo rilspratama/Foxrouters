@@ -1,0 +1,355 @@
+# FoxRouters
+
+[![Go Version](https://img.shields.io/badge/go-1.25%2B-00ADD8?logo=go)](https://go.dev/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](#license)
+[![Version](https://img.shields.io/badge/version-5.11.2-blue)](./CHANGELOG.md)
+
+Unified **OpenAI-compatible** API gateway that fronts **Grok** and **CodeBuddy** behind
+one `/v1/chat/completions` endpoint. Route by model prefix, round-robin across many
+upstream accounts/keys, refresh tokens automatically, enforce per-key quotas, and log
+every request/response to ClickHouse — all behind a single Bearer token.
+
+---
+
+## What it is
+
+- **One endpoint, many backends.** Clients hit `POST /v1/chat/completions` with an
+  OpenAI-shaped payload; the gateway dispatches by model prefix:
+  - `grok-*` → `https://cli-chat-proxy.grok.com`
+  - `cb/*`   → `https://www.codebuddy.ai/v2`
+- **Multi-account / multi-key pools** with O(k) round-robin and automatic token
+  refresh (singleflight + pre-warm), plus circuit-breaker style disable on
+  auth / credit / quota errors.
+- **Per-gateway-key** RPM, burst, token quota, model whitelist, and role
+  (`admin` vs `inference`).
+- **Redis** for hot state (tokens, credits, disabled flags, rate counters,
+  gateway keys) and **ClickHouse** for cold, full-body history (ZSTD, 90-day TTL,
+  unlimited body size).
+- **Embedded web dashboard** for stats, accounts, keys, and models.
+
+---
+
+## Features
+
+- **Model prefix routing** — `grok-*` → Grok, `cb/*` → CodeBuddy.
+- **Grok alias expansion** — `grok-4.5-{high,medium,low,xhigh,auto,none}` collapse
+  to `grok-4.5` + injected `reasoning_effort` (client value wins if set).
+- **Multi-account / multi-key round-robin** — O(k) `Next()` on the hot path,
+  background workers handle re-enable + refresh.
+- **Auto token refresh** — singleflight-guarded, lock-split (no network calls under
+  the account mutex), pre-warms tokens on a 30 s tick with a 30 min expiry window,
+  up to 10 concurrent refreshes.
+- **Circuit breaker** — passive (401/403/credit/`14018` disable + Redis persist)
+  and active health checks every ~10 min.
+- **API-key auth** with role-based access — `inference` (default) can only reach
+  `/v1/*`; `admin` reaches everything.
+- **Per-key model whitelist** with glob patterns (`grok-*`, `cb/*`, exact match).
+- **Per-key rate limits** — RPM, burst, and cumulative token quota.
+- **Redis hot state** — tokens, CB credits, disabled flags, gateway keys,
+  rate/quota counters.
+- **ClickHouse history** — full request + response JSON, ZSTD compression,
+  90-day TTL, unlimited body length; refresh events and disable events too.
+- **Web dashboard** — 4 SPA pages (stats, accounts, keys, models) served from an
+  embedded HTML file (no live gateway key ever injected server-side).
+- **Security headers** — CSP, `X-Frame-Options: DENY`, `X-Content-Type-Options:
+  nosniff`, `Referrer-Policy`.
+- **systemd hardening** — `NoNewPrivileges`, `ProtectSystem`, `ProtectHome`,
+  private `/tmp`, etc.
+- **Gzip SSE streaming fix** — correctly disables response compression on SSE
+  streams so tokens actually arrive incrementally.
+- **Graceful shutdown** — drains in-flight requests and flushes logs.
+
+---
+
+## Quick Start (Docker)
+
+> One command. The compose file wires `foxrouters`, `redis`, and `clickhouse`
+> together — no `.env` editing needed for the default stack.
+
+```bash
+git clone <this-repo> foxrouters && cd foxrouters
+
+# Start stack + capture bootstrap key (first boot auto-generates admin key)
+./start.sh
+```
+
+**Output:**
+```
+🔑 Admin Bootstrap Key
+  Key:    gw-a94c7befdb14cd6d2...819edd11
+  Login:  http://localhost:20130/login
+  Saved:  bootstrap-key.txt (chmod 600)
+```
+
+Then open `http://localhost:20130/login`, paste the key, done.
+
+**Other commands:**
+```bash
+./start.sh --status    # container + health status
+./start.sh --logs      # tail logs
+./start.sh --key       # show captured key
+./start.sh --reset     # wipe Redis volume + regenerate key
+./start.sh --stop      # stop stack
+```
+
+### When do I need to edit `.env`?
+
+| Scenario | Edit `.env`? |
+|----------|-------------|
+| Default docker-compose (Redis+CH+gw in same stack) | ❌ No — compose overrides everything |
+| Custom Redis password in compose | ✅ Set `REDIS_PASSWORD` |
+| Bare metal / systemd (Redis/CH on host) | ✅ Set `REDIS_ADDR`, `CLICKHOUSE_ADDR`, etc. |
+| External Redis (managed/Cloudflare) | ✅ Set `REDIS_ADDR=host:port` + `REDIS_PASSWORD` |
+| External ClickHouse | ✅ Set `CLICKHOUSE_ADDR` + auth |
+| Custom port (20130 → 8080) | ✅ Set `PORT=8080` |
+
+See [`.env.example`](./.env.example) for the full list of tunables.
+
+---
+
+## Quick Start (Manual)
+
+**Prerequisites**
+
+- Go **1.25+**
+- Redis (local or remote)
+- ClickHouse (local or remote; the schema is auto-migrated on boot)
+
+```bash
+# 1. Build
+export PATH=$PATH:/usr/local/go/bin
+go build -o foxrouters .
+
+# 2. Configure
+cp .env.example .env
+$EDITOR .env
+
+# 3. Run
+./foxrouters
+# → listening on :20130
+```
+
+Bootstrapping accounts / keys:
+
+```bash
+# Import a Grok account credential file (admin only)
+curl -X POST http://127.0.0.1:20130/accounts/import \
+     -H "Authorization: Bearer $ADMIN_KEY" \
+     -H "Content-Type: application/json" \
+     --data @path/to/grok-account.json
+
+# Import a CodeBuddy key
+curl -X POST http://127.0.0.1:20130/cb/import \
+     -H "Authorization: Bearer $ADMIN_KEY" \
+     -H "Content-Type: application/json" \
+     -d '{"key":"YOUR_CB_KEY_HERE"}'
+```
+
+---
+
+## Configuration
+
+All configuration is read from environment variables (or a `.env` file loaded at
+startup).
+
+| Variable | Default | Description |
+|---|---|---|
+| `PORT` | `20130` | HTTP listen port. |
+| `REDIS_ADDR` | `127.0.0.1:6379` | Redis host:port for hot state. |
+| `REDIS_PASSWORD` | *(empty)* | Redis password if AUTH is enabled. |
+| `REDIS_DB` | `0` | Redis logical DB index. |
+| `CLICKHOUSE_ADDR` | `127.0.0.1:9001` | ClickHouse native-protocol host:port. |
+| `CLICKHOUSE_DB` | `gateway` | ClickHouse database name (auto-created). |
+| `CLICKHOUSE_USER` | `default` | ClickHouse username. |
+| `CLICKHOUSE_PASSWORD` | *(empty)* | ClickHouse password. |
+| `GATEWAY_KEY_FILE` | `./gateway-key.txt` | Path to the seed admin bearer token file. |
+| `CB_KEY_FILE` | `./cb-keys.json` | Path to a JSON file of CodeBuddy keys to seed. |
+| `CPA_AUTH_DIR` | `./` | Directory scanned for `xai-*.json` Grok credential files at boot. |
+| `GATEWAY_AUTH_DISABLE` | `false` | **Dev only.** When `true`, bypasses auth on all routes. Never enable in production. |
+
+> **Do not** commit secrets. Put the `.env` outside the repo or use `chmod 600
+> .gateway.env` alongside `.gitignore`.
+
+---
+
+## API Reference
+
+Unless noted, all endpoints require `Authorization: Bearer <gateway-key>`.
+Roles: **inference** may call `/v1/*` only; **admin** may call everything.
+
+| Method | Path | Auth | Purpose |
+|---|---|---|---|
+| `POST` | `/v1/chat/completions` | inference/admin | Main OpenAI-compatible chat proxy. Model prefix decides upstream. |
+| `GET`  | `/v1/models` | inference/admin | Model list (includes Grok aliases and CB models). |
+| `GET`  | `/health` | **public** | Liveness + readiness probe. |
+| `GET`  | `/dashboard` | **public HTML** | Serves the SPA. Auth still required for its XHR calls. |
+| `GET`  | `/accounts` | admin | List Grok accounts + CB keys with status. |
+| `POST` | `/accounts/import` | admin | Import a Grok account credential JSON. |
+| `POST` | `/cb/import` | admin | Import a CodeBuddy key. |
+| `GET`  | `/cb-stats` | admin | CodeBuddy per-key credit / usage stats. |
+| `GET`  | `/api/keys` | admin | List gateway API keys. |
+| `POST` | `/api/keys` | admin | Create a gateway key (role, allowed_models, RPM, burst, quota). |
+| `PUT`  | `/api/keys` | admin | Update a gateway key. |
+| `DELETE` | `/api/keys` | admin | Revoke a gateway key. |
+| `GET`  | `/history` | admin | Aggregated stats over a time window (`?hours=24`). |
+| `GET`  | `/history/recent` | admin | Recent request previews (`?limit=50`). `id` is a JSON **string**. |
+| `GET`  | `/history/detail/:id` | admin | Full request + response JSON for one call. |
+
+### Example: chat completion
+
+```bash
+curl -s http://127.0.0.1:20130/v1/chat/completions \
+  -H "Authorization: Bearer $GATEWAY_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "grok-4.5-high",
+    "stream": true,
+    "messages": [{"role":"user","content":"hello"}]
+  }'
+```
+
+---
+
+## Authentication
+
+The gateway uses **Bearer tokens** (opaque gateway keys) with two roles:
+
+| Role | Access |
+|---|---|
+| `inference` *(default)* | `/v1/*` only. Rejected with `403` on any admin path. |
+| `admin` | All endpoints, including account/key/history management. |
+
+Each key also carries:
+
+- **`allowed_models`** — a list of glob patterns. Requests whose `model` does
+  not match any pattern get `403`. Patterns:
+  - `grok-*` — all Grok models (and aliases).
+  - `cb/*` — all CodeBuddy models.
+  - `grok-4.5` — exact match.
+  - `*` — allow everything (use sparingly).
+- **`rpm`** — max requests per minute (rolling window).
+- **`burst`** — token-bucket burst size.
+- **`token_quota`** — cumulative token budget; `429` once exhausted.
+
+Keys are created via `POST /api/keys` and stored in Redis.
+
+---
+
+## Model Routing
+
+Routing is driven purely by the `model` field of the incoming request:
+
+| Model prefix | Upstream | Notes |
+|---|---|---|
+| `grok-*` | `https://cli-chat-proxy.grok.com` | Multi-account pool, refresh + 401 retry. |
+| `cb/*` | `https://www.codebuddy.ai/v2` | Multi-key pool, credit tracking, 14018 disable. |
+
+### Grok alias expansion
+
+Convenience aliases collapse to `grok-4.5` with `reasoning_effort` injected:
+
+| Alias | Rewrites to | `reasoning_effort` |
+|---|---|---|
+| `grok-4.5-high` | `grok-4.5` | `high` |
+| `grok-4.5-medium` | `grok-4.5` | `medium` |
+| `grok-4.5-low` | `grok-4.5` | `low` |
+| `grok-4.5-xhigh` | `grok-4.5` | `xhigh` |
+| `grok-4.5-auto` | `grok-4.5` | `auto` |
+| `grok-4.5-none` | `grok-4.5` | `none` |
+
+If the client already sets `reasoning_effort` explicitly, the client value wins.
+
+---
+
+## Dashboard
+
+Served at `GET /dashboard` (public HTML; XHRs still require a gateway key stored
+in `localStorage` or provided as `?key=`). The SPA has four routes:
+
+| Route | Page |
+|---|---|
+| `#/` | **Stats** — health, request counts, token totals, recent history preview. |
+| `#/accounts` | **Accounts** — Grok accounts + CodeBuddy keys with pagination and enable/disable/refresh. |
+| `#/keys` | **Keys** — Gateway key CRUD, role picker, allowed-models selector, RPM/burst/quota inputs. |
+| `#/models` | **Models** — model list with usage stats. |
+
+Live gateway keys are **never** rendered into the HTML server-side.
+
+---
+
+## Architecture
+
+```
+Client
+  │  Bearer <gateway-key>
+  ▼
+AuthMiddleware           ── validate key, load role + limits
+  ▼
+RateLimitMiddleware      ── RPM / burst / token quota (Redis)
+  ▼
+proxyRequest             ── inspect "model", expand aliases
+  ├── grok-*  → proxyGrok         (O(k) RR, refresh, 401 retry, 403 ban)
+  └── cb/*    → proxyCodeBuddy    (RR, credit tracking, stream transform)
+  ▼
+async LogRequest → ClickHouse (full request + response, ZSTD, TTL 90d)
+```
+
+**Storage split**
+
+| Layer | Engine | Contents |
+|---|---|---|
+| Hot | **Redis** | Tokens, CB credits, disabled flags, gateway keys, rate/quota counters. |
+| Cold | **ClickHouse** | `request_logs` (full bodies), refresh events, disable events. |
+
+**Hot-path invariants**
+
+1. `Next()` is O(k) round-robin — re-enable/refresh happens in background workers.
+2. Counts come from `Len()`, never `len(GetAll())`.
+3. Refresh uses singleflight and never holds `acc.mu` across a network call.
+4. Any disable/enable/token mutation calls `Save*()` **after** the lock is
+   released.
+5. History writes are async; credentials never land in ClickHouse.
+
+---
+
+## Development
+
+```bash
+export PATH=$PATH:/usr/local/go/bin
+
+# Required before every build
+go test -count=1 -race ./...
+go vet ./...
+
+# Build
+go build -o foxrouters .
+
+# Run
+./foxrouters
+
+# Smoke
+curl -s http://127.0.0.1:20130/health
+```
+
+**Project layout**
+
+| File | Role |
+|---|---|
+| `main.go` | Version, HTTP clients, workers, routes, graceful shutdown. |
+| `proxy.go` | Model routing, alias expansion, `RequestLog` build. |
+| `grok_account.go` | Grok pool, refresh loop, `proxyGrok`, re-enable worker. |
+| `codebuddy.go` | CB pool, stream transform, `proxyCodeBuddy`, re-enable worker. |
+| `auth.go` | Bearer auth, role check, allowed-models glob match. |
+| `ratelimit.go` | RPM / burst / token-quota middleware. |
+| `health.go` | Health endpoint + active health checks. |
+| `handlers.go` | Account, key, history, dashboard handlers. |
+| `db.go` | Redis + ClickHouse clients and schema. |
+| `dashboard.html` | Embedded SPA (`go:embed`). |
+
+**Patch order (please follow):** `test → build → restart → smoke`.
+
+---
+
+## License
+
+Released under the **MIT License**. See [`LICENSE`](./LICENSE) for the full text.
