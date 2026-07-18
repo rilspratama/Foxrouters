@@ -61,13 +61,42 @@ every request/response to ClickHouse — all behind a single Bearer token.
 
 ---
 
-## Quick Start (Docker)
+## Quick Start (Docker — Pre-built Image)
+
+> Fastest path. No clone, no build — pulls image from ghcr.io.
+
+```bash
+# Download deploy script + run
+curl -sLO https://raw.githubusercontent.com/rilspratama/Foxrouters/master/deploy.sh
+chmod +x deploy.sh
+./deploy.sh
+```
+
+**Output:**
+```
+🔑 Admin Bootstrap Key
+  Key:    gw-a94c7befdb14cd6d2...819edd11
+  Login:  http://localhost:20130/login
+```
+
+Or manual:
+```bash
+curl -sLO https://raw.githubusercontent.com/rilspratama/Foxrouters/master/docker-compose.ghcr.yml
+docker compose -f docker-compose.ghcr.yml up -d
+docker compose -f docker-compose.ghcr.yml logs foxrouters | grep "Key: gw-"
+```
+
+Open `http://localhost:20130/login`, paste the key, done.
+
+---
+
+## Quick Start (Docker — Build from Source)
 
 > One command. The compose file wires `foxrouters`, `redis`, and `clickhouse`
 > together — no `.env` editing needed for the default stack.
 
 ```bash
-git clone <this-repo> foxrouters && cd foxrouters
+git clone https://github.com/rilspratama/Foxrouters.git foxrouters && cd foxrouters
 
 # Start stack + capture bootstrap key (first boot auto-generates admin key)
 ./start.sh
