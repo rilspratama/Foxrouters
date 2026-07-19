@@ -39,16 +39,14 @@ func updatePoolGauges(grokAM *GrokAccountManager, cbKM *CBKeyManager, authMgr *A
 		metrics.SetPoolGauges("codebuddy", cActive, cDisabled)
 	}
 	if authMgr != nil {
-		authMgr.mu.RLock()
 		var aActive, aDisabled int
-		for _, info := range authMgr.keys {
+		for _, info := range authMgr.GetAll() {
 			if info.Disabled {
 				aDisabled++
 			} else {
 				aActive++
 			}
 		}
-		authMgr.mu.RUnlock()
 		metrics.SetPoolGauges("auth", aActive, aDisabled)
 	}
 }

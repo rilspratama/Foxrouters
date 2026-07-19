@@ -81,8 +81,8 @@ func TestCircuitBreaker_RealUpstreamErrorsStillOpen(t *testing.T) {
 
 func TestAuthManager_ConcurrentLenIsSafe(t *testing.T) {
 	// Regression: AuthMiddleware used to call len(am.keys) without RLock.
-	// This stress-test concurrent Add/Remove/Valid while reading len under RLock.
-	am := &AuthManager{keys: make(map[string]*GatewayKeyInfo)}
+	// This stress-test concurrent Add/Remove/Valid while reading count under RLock.
+	am := NewAuthManagerForTest(nil)
 	// seed one key
 	am.Add("gw-testkey-aaaaaaaaaaaaaaaaaaaaaaaa", "seed", 0, 0, 0)
 
@@ -105,9 +105,7 @@ func TestAuthManager_ConcurrentLenIsSafe(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			for j := 0; j < 500; j++ {
-				am.mu.RLock()
-				_ = len(am.keys) == 0
-				am.mu.RUnlock()
+				_ = am.Count() == 0
 				_ = am.Valid("gw-testkey-aaaaaaaaaaaaaaaaaaaaaaaa")
 			}
 		}()

@@ -1,4 +1,11 @@
-package main
+// Package auth handles gateway API-key management, model whitelisting,
+// per-key rate/quota metadata, and the Gin middlewares that gate every
+// non-public endpoint.
+//
+// The persistence layer (Redis) is reached via internal/db.  Domain code
+// keeps rich types (GatewayKeyInfo / KeyRole); this package converts to
+// and from db.GatewayKeyDTO on the way in and out.
+package auth
 
 import (
 	cryptorand "crypto/rand"
@@ -12,6 +19,8 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+
+	"foxrouters/internal/db"
 )
 
 // KeyRole controls what a gateway key can access.
@@ -48,17 +57,17 @@ func (k *GatewayKeyInfo) IsModelAllowed(model string) bool {
 		return true // no whitelist = unrestricted
 	}
 	for _, pattern := range k.AllowedModels {
-		if matchModel(pattern, model) {
+		if MatchModel(pattern, model) {
 			return true
 		}
 	}
 	return false
 }
 
-// matchModel checks if a model matches a pattern (exact or glob suffix).
+// MatchModel checks if a model matches a pattern (exact or glob suffix).
 // Examples: "grok-*" matches "grok-4.5", "cb/*" matches "cb/gpt-5.5",
 // "grok-4.5" matches "grok-4.5" exactly.
-func matchModel(pattern, model string) bool {
+func MatchModel(pattern, model string) bool {
 	if pattern == model {
 		return true
 	}
@@ -74,17 +83,17 @@ func matchModel(pattern, model string) bool {
 	return false
 }
 
-// maskKey returns a masked version of the key: first 8 + ... + last 4.
-func maskKey(key string) string {
+// MaskKey returns a masked version of the key: first 8 + ... + last 4.
+func MaskKey(key string) string {
 	if len(key) > 12 {
 		return key[:8] + "..." + key[len(key)-4:]
 	}
 	return key
 }
 
-// generateRandomKey returns a URL-safe random string of n bytes (2n hex chars).
+// GenerateRandomKey returns a URL-safe random string of n bytes (2n hex chars).
 // Uses crypto/rand — suitable for API keys.
-func generateRandomKey(n int) string {
+func GenerateRandomKey(n int) string {
 	b := make([]byte, n)
 	if _, err := cryptorand.Read(b); err != nil {
 		// crypto/rand failure is unrecoverable — never use a deterministic fallback
@@ -94,19 +103,22 @@ func generateRandomKey(n int) string {
 	return hex.EncodeToString(b)
 }
 
-// AuthManager validates client API keys with per-key metadata + usage tracking.
-type AuthManager struct {
+// Manager validates client API keys with per-key metadata + usage tracking.
+type Manager struct {
 	keys map[string]*GatewayKeyInfo
 	mu   sync.RWMutex
-	db   *DBStore
+	db   *db.Store
 }
 
-func newAuthManager(db *DBStore) *AuthManager {
-	am := &AuthManager{keys: make(map[string]*GatewayKeyInfo), db: db}
+// NewManager loads keys from Redis (if available), bootstraps from
+// GATEWAY_API_KEYS / GATEWAY_KEY_FILE / ./gateway-key.txt if the pool is
+// empty, and auto-generates a random admin key on very first boot.
+func NewManager(store *db.Store) *Manager {
+	am := &Manager{keys: make(map[string]*GatewayKeyInfo), db: store}
 
 	// 1. Load from Redis (single source of truth)
-	if db != nil {
-		if redisKeys, err := dbLoadGatewayKeys(db); err == nil && len(redisKeys) > 0 {
+	if store != nil {
+		if redisKeys, err := loadGatewayKeys(store); err == nil && len(redisKeys) > 0 {
 			for _, info := range redisKeys {
 				am.keys[info.Key] = info
 			}
@@ -151,7 +163,7 @@ func newAuthManager(db *DBStore) *AuthManager {
 			if _, exists := am.keys[k]; !exists {
 				info := &GatewayKeyInfo{
 					Key:        k,
-					KeyMasked:  maskKey(k),
+					KeyMasked:  MaskKey(k),
 					Name:       "bootstrap",
 					Role:       RoleAdmin,
 					RPM:        0,
@@ -160,8 +172,8 @@ func newAuthManager(db *DBStore) *AuthManager {
 					CreatedAt:  time.Now(),
 				}
 				am.keys[k] = info
-				if db != nil {
-					dbSaveGatewayKey(db, info)
+				if store != nil {
+					saveGatewayKey(store, info)
 				}
 			}
 		}
@@ -179,10 +191,10 @@ func newAuthManager(db *DBStore) *AuthManager {
 			// Auto-bootstrap: generate a random admin key on first boot,
 			// persist to Redis, print to log ONCE, write to bootstrap-key.txt.
 			// User reads log/file, logs in to dashboard, then deletes the file.
-			bootstrapKey := "gw-" + generateRandomKey(32)
+			bootstrapKey := "gw-" + GenerateRandomKey(32)
 			info := &GatewayKeyInfo{
 				Key:        bootstrapKey,
-				KeyMasked:  maskKey(bootstrapKey),
+				KeyMasked:  MaskKey(bootstrapKey),
 				Name:       "bootstrap",
 				Role:       RoleAdmin,
 				RPM:        0,
@@ -191,8 +203,8 @@ func newAuthManager(db *DBStore) *AuthManager {
 				CreatedAt:  time.Now(),
 			}
 			am.keys[bootstrapKey] = info
-			if db != nil {
-				dbSaveGatewayKey(db, info)
+			if store != nil {
+				saveGatewayKey(store, info)
 			}
 			// Write to bootstrap-key.txt (chmod 600) so user can retrieve it.
 			// File is gitignored. Delete after first login.
@@ -224,8 +236,19 @@ func newAuthManager(db *DBStore) *AuthManager {
 	return am
 }
 
+// NewManagerForTest constructs an empty Manager (no db) suitable for
+// whitebox tests that just want to exercise Add/Remove/Valid.
+// The optional `keys` map lets callers pre-seed the pool.
+func NewManagerForTest(keys map[string]*GatewayKeyInfo) *Manager {
+	am := &Manager{keys: make(map[string]*GatewayKeyInfo)}
+	for k, v := range keys {
+		am.keys[k] = v
+	}
+	return am
+}
+
 // Valid checks if a key is authorized and not disabled.
-func (am *AuthManager) Valid(key string) bool {
+func (am *Manager) Valid(key string) bool {
 	am.mu.RLock()
 	defer am.mu.RUnlock()
 	// Fail-closed: no keys = reject. Auth bypass only via GATEWAY_AUTH_DISABLE env
@@ -238,7 +261,7 @@ func (am *AuthManager) Valid(key string) bool {
 }
 
 // Get returns the GatewayKeyInfo for a key, or nil.
-func (am *AuthManager) Get(key string) *GatewayKeyInfo {
+func (am *Manager) Get(key string) *GatewayKeyInfo {
 	am.mu.RLock()
 	defer am.mu.RUnlock()
 	return am.keys[key]
@@ -246,7 +269,7 @@ func (am *AuthManager) Get(key string) *GatewayKeyInfo {
 
 // LookupKey implements ratelimit.AuthLookup. Returns per-key rpm/burst if
 // the key is registered. ok=false means the key isn't in the pool.
-func (am *AuthManager) LookupKey(key string) (rpm, burst int, ok bool) {
+func (am *Manager) LookupKey(key string) (rpm, burst int, ok bool) {
 	am.mu.RLock()
 	defer am.mu.RUnlock()
 	info, exists := am.keys[key]
@@ -257,7 +280,7 @@ func (am *AuthManager) LookupKey(key string) (rpm, burst int, ok bool) {
 }
 
 // GetAll returns a slice copy of all keys.
-func (am *AuthManager) GetAll() []*GatewayKeyInfo {
+func (am *Manager) GetAll() []*GatewayKeyInfo {
 	am.mu.RLock()
 	defer am.mu.RUnlock()
 	result := make([]*GatewayKeyInfo, 0, len(am.keys))
@@ -268,18 +291,18 @@ func (am *AuthManager) GetAll() []*GatewayKeyInfo {
 }
 
 // Add creates a new inference-role key with metadata and persists to Redis.
-func (am *AuthManager) Add(key, name string, rpm, burst int, tokenQuota int64) *GatewayKeyInfo {
+func (am *Manager) Add(key, name string, rpm, burst int, tokenQuota int64) *GatewayKeyInfo {
 	return am.AddWithRole(key, name, RoleInference, nil, rpm, burst, tokenQuota)
 }
 
 // AddWithRole creates a key with an explicit role and persists to Redis.
-func (am *AuthManager) AddWithRole(key, name string, role KeyRole, allowedModels []string, rpm, burst int, tokenQuota int64) *GatewayKeyInfo {
+func (am *Manager) AddWithRole(key, name string, role KeyRole, allowedModels []string, rpm, burst int, tokenQuota int64) *GatewayKeyInfo {
 	if role == "" {
 		role = RoleInference
 	}
 	info := &GatewayKeyInfo{
 		Key:           key,
-		KeyMasked:     maskKey(key),
+		KeyMasked:     MaskKey(key),
 		Name:          name,
 		Role:          role,
 		AllowedModels: allowedModels,
@@ -292,13 +315,13 @@ func (am *AuthManager) AddWithRole(key, name string, role KeyRole, allowedModels
 	am.keys[key] = info
 	am.mu.Unlock()
 	if am.db != nil {
-		dbSaveGatewayKey(am.db, info)
+		saveGatewayKey(am.db, info)
 	}
 	return info
 }
 
 // Remove deletes a key from memory + Redis.
-func (am *AuthManager) Remove(key string) {
+func (am *Manager) Remove(key string) {
 	am.mu.Lock()
 	delete(am.keys, key)
 	am.mu.Unlock()
@@ -308,7 +331,7 @@ func (am *AuthManager) Remove(key string) {
 }
 
 // Update modifies key metadata in memory + Redis.
-func (am *AuthManager) Update(key, name string, role KeyRole, allowedModels []string, rpm, burst int, tokenQuota int64, disabled *bool) bool {
+func (am *Manager) Update(key, name string, role KeyRole, allowedModels []string, rpm, burst int, tokenQuota int64, disabled *bool) bool {
 	am.mu.Lock()
 	info, ok := am.keys[key]
 	if !ok {
@@ -336,17 +359,17 @@ func (am *AuthManager) Update(key, name string, role KeyRole, allowedModels []st
 	if disabled != nil {
 		info.Disabled = *disabled
 	}
-	info.KeyMasked = maskKey(info.Key)
+	info.KeyMasked = MaskKey(info.Key)
 	am.mu.Unlock()
 	if am.db != nil {
-		dbSaveGatewayKey(am.db, info)
+		saveGatewayKey(am.db, info)
 	}
 	return true
 }
 
 // IncrementTokens adds to the token usage for a key (memory + Redis).
 // If quota is set and exceeded, auto-disables the key.
-func (am *AuthManager) IncrementTokens(key string, amount int64) {
+func (am *Manager) IncrementTokens(key string, amount int64) {
 	am.mu.Lock()
 	info, ok := am.keys[key]
 	if !ok {
@@ -360,7 +383,7 @@ func (am *AuthManager) IncrementTokens(key string, amount int64) {
 		info.Disabled = true
 		slog.Warn("key auto-disabled (quota exceeded)",
 			"module", "auth",
-			"key", maskKey(key),
+			"key", MaskKey(key),
 			"tokens_used", info.TokensUsed,
 			"token_quota", info.TokenQuota)
 	}
@@ -369,13 +392,13 @@ func (am *AuthManager) IncrementTokens(key string, amount int64) {
 		am.db.IncrementGatewayKeyTokens(key, amount)
 		am.db.IncrementGatewayKeyRequests(key)
 		if info.Disabled {
-			dbSaveGatewayKey(am.db, info)
+			saveGatewayKey(am.db, info)
 		}
 	}
 }
 
 // IncrementRequests adds 1 to the request count for a key.
-func (am *AuthManager) IncrementRequests(key string) {
+func (am *Manager) IncrementRequests(key string) {
 	am.mu.Lock()
 	info, ok := am.keys[key]
 	if !ok {
@@ -389,8 +412,8 @@ func (am *AuthManager) IncrementRequests(key string) {
 	}
 }
 
-// generateGatewayKey creates a new random key: gw- + 32 chars base62.
-func generateGatewayKey() string {
+// GenerateGatewayKey creates a new random key: gw- + 32 chars base62.
+func GenerateGatewayKey() string {
 	b := make([]byte, 24) // 24 bytes → 32 base64 chars
 	if _, err := cryptorand.Read(b); err != nil {
 		// crypto/rand failure is unrecoverable — never use a predictable fallback
@@ -402,8 +425,8 @@ func generateGatewayKey() string {
 	return "gw-" + encoded
 }
 
-// resolveKey resolves a full key from either a full key or a masked key.
-func (am *AuthManager) resolveKey(keyOrMasked string) (string, bool) {
+// ResolveKey resolves a full key from either a full key or a masked key.
+func (am *Manager) ResolveKey(keyOrMasked string) (string, bool) {
 	am.mu.RLock()
 	defer am.mu.RUnlock()
 	// Direct lookup
@@ -412,18 +435,26 @@ func (am *AuthManager) resolveKey(keyOrMasked string) (string, bool) {
 	}
 	// Try masked match
 	for k, info := range am.keys {
-		if info.KeyMasked == keyOrMasked || maskKey(k) == keyOrMasked {
+		if info.KeyMasked == keyOrMasked || MaskKey(k) == keyOrMasked {
 			return k, true
 		}
 	}
 	return "", false
 }
 
+// Count returns the number of registered keys (thread-safe).
+// Used by tests + middleware fail-closed checks.
+func (am *Manager) Count() int {
+	am.mu.RLock()
+	defer am.mu.RUnlock()
+	return len(am.keys)
+}
+
 // AdminMiddleware gates an endpoint to admin-role keys only.
 // Must run AFTER AuthMiddleware (which sets "client_key" in context).
 // Endpoints mounting this middleware: /api/keys*, /accounts*, /cb/import,
 // /history*, /cb-stats — everything except /v1/* and /health.
-func AdminMiddleware(am *AuthManager) gin.HandlerFunc {
+func AdminMiddleware(am *Manager) gin.HandlerFunc {
 	authDisabled := os.Getenv("GATEWAY_AUTH_DISABLE") == "1"
 	return func(c *gin.Context) {
 		// If auth is explicitly disabled (dev mode), allow all as admin.
@@ -454,7 +485,10 @@ func AdminMiddleware(am *AuthManager) gin.HandlerFunc {
 	}
 }
 
-func AuthMiddleware(am *AuthManager) gin.HandlerFunc {
+// AuthMiddleware validates Bearer tokens (or session cookies) against the
+// key pool. Public paths bypass; unauthenticated browser requests to
+// text/html endpoints redirect to /login.
+func AuthMiddleware(am *Manager) gin.HandlerFunc {
 	// Fail-closed by default: if no keys are loaded, reject all requests
 	// EXCEPT when GATEWAY_AUTH_DISABLE=1 is set explicitly (dev mode).
 	authDisabled := os.Getenv("GATEWAY_AUTH_DISABLE") == "1"
@@ -519,7 +553,67 @@ func AuthMiddleware(am *AuthManager) gin.HandlerFunc {
 		}
 		// Store FULL key for rate limiter + token tracking; mask only for display/logging
 		c.Set("client_key", key)
-		c.Set("client_key_masked", maskKey(key))
+		c.Set("client_key_masked", MaskKey(key))
 		c.Next()
 	}
+}
+
+// ---------------------------------------------------------------------------
+// Persistence bridge — GatewayKeyInfo ↔ db.GatewayKeyDTO
+// ---------------------------------------------------------------------------
+
+// saveGatewayKey persists a GatewayKeyInfo. The caller should own the read
+// lock or work on a private copy — we don't grab am.mu here.
+func saveGatewayKey(s *db.Store, info *GatewayKeyInfo) {
+	if s == nil || info == nil {
+		return
+	}
+	s.SaveGatewayKey(db.GatewayKeyDTO{
+		Key:           info.Key,
+		Name:          info.Name,
+		Role:          string(info.Role),
+		AllowedModels: info.AllowedModels,
+		RPM:           info.RPM,
+		Burst:         info.Burst,
+		TokenQuota:    info.TokenQuota,
+		TokensUsed:    info.TokensUsed,
+		Requests:      info.Requests,
+		CreatedAt:     info.CreatedAt,
+		Disabled:      info.Disabled,
+	})
+}
+
+// loadGatewayKeys returns []*GatewayKeyInfo rehydrated from Redis DTOs.
+// The role-fallback (empty → RoleAdmin) preserves pre-role-field bootstrap
+// key behavior.
+func loadGatewayKeys(s *db.Store) ([]*GatewayKeyInfo, error) {
+	if s == nil {
+		return nil, nil
+	}
+	dtos, err := s.LoadGatewayKeys()
+	if err != nil {
+		return nil, err
+	}
+	out := make([]*GatewayKeyInfo, 0, len(dtos))
+	for _, d := range dtos {
+		info := &GatewayKeyInfo{
+			Key:           d.Key,
+			KeyMasked:     MaskKey(d.Key),
+			Name:          d.Name,
+			Role:          KeyRole(d.Role),
+			AllowedModels: append([]string(nil), d.AllowedModels...),
+			RPM:           d.RPM,
+			Burst:         d.Burst,
+			TokenQuota:    d.TokenQuota,
+			TokensUsed:    d.TokensUsed,
+			Requests:      d.Requests,
+			CreatedAt:     d.CreatedAt,
+			Disabled:      d.Disabled,
+		}
+		if info.Role == "" {
+			info.Role = RoleAdmin
+		}
+		out = append(out, info)
+	}
+	return out, nil
 }

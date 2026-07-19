@@ -275,9 +275,7 @@ func main() {
 		"grok_accounts", grokAM.Len(),
 		"cb_keys", cbKM.Len(),
 		"auth", func() string {
-			authMgr.mu.RLock()
-			n := len(authMgr.keys)
-			authMgr.mu.RUnlock()
+			n := authMgr.Count()
 			if n > 0 {
 				return fmt.Sprintf("%d keys", n)
 			}

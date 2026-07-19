@@ -75,61 +75,9 @@ func dbSaveCBKey(s *DBStore, key string, creditsUsed float64, totalReqs int64, d
 	})
 }
 
-// dbSaveGatewayKey persists a GatewayKeyInfo (mutex-safely: reads should
-// happen under the manager's lock or on a private copy).
-func dbSaveGatewayKey(s *DBStore, info *GatewayKeyInfo) {
-	if s == nil || info == nil {
-		return
-	}
-	s.SaveGatewayKey(db.GatewayKeyDTO{
-		Key:           info.Key,
-		Name:          info.Name,
-		Role:          string(info.Role),
-		AllowedModels: info.AllowedModels,
-		RPM:           info.RPM,
-		Burst:         info.Burst,
-		TokenQuota:    info.TokenQuota,
-		TokensUsed:    info.TokensUsed,
-		Requests:      info.Requests,
-		CreatedAt:     info.CreatedAt,
-		Disabled:      info.Disabled,
-	})
-}
-
-// dbLoadGatewayKeys returns []*GatewayKeyInfo rehydrated from Redis DTOs.
-// The role-fallback (empty → RoleAdmin) preserves pre-role-field bootstrap
-// key behavior — kept here (not in internal/db) because KeyRole lives in
-// package main.
-func dbLoadGatewayKeys(s *DBStore) ([]*GatewayKeyInfo, error) {
-	if s == nil {
-		return nil, nil
-	}
-	dtos, err := s.LoadGatewayKeys()
-	if err != nil {
-		return nil, err
-	}
-	out := make([]*GatewayKeyInfo, 0, len(dtos))
-	for _, d := range dtos {
-		info := &GatewayKeyInfo{
-			Key:           d.Key,
-			Name:          d.Name,
-			Role:          KeyRole(d.Role),
-			AllowedModels: append([]string(nil), d.AllowedModels...),
-			RPM:           d.RPM,
-			Burst:         d.Burst,
-			TokenQuota:    d.TokenQuota,
-			TokensUsed:    d.TokensUsed,
-			Requests:      d.Requests,
-			CreatedAt:     d.CreatedAt,
-			Disabled:      d.Disabled,
-		}
-		if info.Role == "" {
-			info.Role = RoleAdmin
-		}
-		out = append(out, info)
-	}
-	return out, nil
-}
+// dbSaveGatewayKey / dbLoadGatewayKeys used to live here as the DTO
+// conversion bridge for auth. That bridge now lives inside internal/auth
+// itself (auth owns its own persistence, GatewayKeyInfo is its type).
 
 // UpsertGrokAccount/UpsertCBKey were no-op sinks kept for API compatibility
 // with earlier callers. Preserve the same no-op behavior in this package

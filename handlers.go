@@ -615,7 +615,7 @@ func handleCreateKey(am *AuthManager) gin.HandlerFunc {
 func handleDeleteKey(am *AuthManager) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		keyParam := c.Param("key")
-		fullKey, ok := am.resolveKey(keyParam)
+		fullKey, ok := am.ResolveKey(keyParam)
 		if !ok {
 			c.JSON(404, gin.H{"error": "key not found"})
 			return
@@ -630,7 +630,7 @@ func handleDeleteKey(am *AuthManager) gin.HandlerFunc {
 func handleUpdateKey(am *AuthManager) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		keyParam := c.Param("key")
-		fullKey, ok := am.resolveKey(keyParam)
+		fullKey, ok := am.ResolveKey(keyParam)
 		if !ok {
 			c.JSON(404, gin.H{"error": "key not found"})
 			return
@@ -709,7 +709,7 @@ func handleUpdateKey(am *AuthManager) gin.HandlerFunc {
 func handleKeyUsage(am *AuthManager) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		keyParam := c.Param("key")
-		fullKey, ok := am.resolveKey(keyParam)
+		fullKey, ok := am.ResolveKey(keyParam)
 		if !ok {
 			c.JSON(404, gin.H{"error": "key not found"})
 			return
@@ -765,10 +765,7 @@ func handleLogin(am *AuthManager) gin.HandlerFunc {
 		}
 		req.Key = strings.TrimSpace(req.Key)
 
-		am.mu.RLock()
-		_, valid := am.keys[req.Key]
-		am.mu.RUnlock()
-		if !valid {
+		if !am.Valid(req.Key) {
 			c.Data(200, "text/html; charset=utf-8", []byte(loginPageHTMLWithError("Invalid API key")))
 			return
 		}

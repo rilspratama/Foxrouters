@@ -196,7 +196,7 @@ func TestCBKeyAddKeyConcurrent(t *testing.T) {
 // (unlimited) bypasses the rate limiter entirely and is NOT subject to
 // the global default RPM. Bug found by GLM-5.2 review.
 func TestRateLimitRPMZeroUnlimited(t *testing.T) {
-	am := &AuthManager{keys: make(map[string]*GatewayKeyInfo)}
+	am := NewAuthManagerForTest(nil)
 	// Bootstrap key with RPM=0 (unlimited) — should bypass rate limit
 	am.Add("gw-test-unlimited", "test", 0, 0, 0)
 
