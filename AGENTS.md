@@ -7,7 +7,7 @@ Unified OpenAI-compatible API gateway for **Grok + CodeBuddy**. Routes by model 
 Multi-account/key round-robin, auto-refresh (singleflight + pre-warm), circuit breaker,
 API key auth, per-key RPM/quota, Redis hot-state, **ClickHouse** full-body history, web dashboard.
 
-**Version:** 5.11.2 (`const Version` in `main.go`)
+**Version:** v1.4.8 (`-X main.Version` build flag)
 **Port:** 20130 · **systemd:** `foxrouters.service`  
 **Path:** `/root/nexus-workspace/foxrouters/`
 
@@ -52,15 +52,24 @@ Client → AuthMiddleware (Bearer) → RateLimitMiddleware
 ## File map
 | File | Role |
 |------|------|
-| `main.go` | Version, HTTP clients, workers, routes, graceful shutdown |
+| `main.go` | Version, HTTP clients, workers, routes, middleware, graceful shutdown |
+| `auth_adapter.go` | Type aliases + bridges to `internal/auth` (Manager, SessionStore, etc.) |
+| `handlers_adapter.go` | Handler function wrappers (for signature-changed handlers) |
+| `csrf_guard.go` | Origin/Referer check on cookie-authed mutations (P2-2) |
+| `login_limiter.go` | IP-based rate limiter for `/login` (5/min + 20/hour) |
 | `grok_account.go` | Grok pool, refresh, proxyGrok, reenableWorker |
 | `codebuddy.go` | CB pool, transform, proxyCodeBuddy, reenableCBWorker |
 | `proxy.go` | Routing, RequestLog build |
 | `db.go` | Redis + ClickHouse |
 | `handlers.go` | health, accounts, history, keys, dashboard static |
 | `auth.go` / `ratelimit.go` / `health.go` | Auth, RPM, circuit |
-| `dashboard.html` | SPA `#/` `#/accounts` `#/keys` `#/models` |
-| `CHANGELOG.md` | Version history for this tree |
+| `dashboard.html` | SPA — 4 nav routes, Models page has 3 tabs (Models/Custom/Combos) |
+| `internal/auth/session_store.go` | Session token → API key map (P3-3, 256-bit random tokens) |
+| `internal/proxy/validate.go` | `validateName()` regex for id/alias/combo (P3-5) |
+| `internal/proxy/combo.go` | ComboRegistry — fallback + round_robin strategies |
+| `internal/handlers/combos.go` | Combos CRUD endpoints |
+| `internal/handlers/custom.go` | Custom models + aliases CRUD endpoints |
+| `CHANGELOG.md` | Version history (v1.4.0 → v1.4.8) |
 | `.gateway.env` | Secrets (chmod 600, gitignored) |
 
 ## Env (essentials)
@@ -70,6 +79,7 @@ CLICKHOUSE_ADDR=127.0.0.1:9000
 CLICKHOUSE_DB=gateway
 GATEWAY_KEY_FILE / CB_KEY_FILE
 PORT=20130
+COOKIE_SECURE=0  # dev HTTP; omit for prod (defaults to HTTPS-only)
 ```
 
 ## Build / test / deploy

@@ -2,9 +2,130 @@
 
 **Service:** `foxrouters.service` · port **20130** · binary `foxrouters`  
 **Repo:** `/root/nexus-workspace/foxrouters/`  
-**Live version:** `const Version` in `main.go` (currently **5.11.2**)
+**Live version:** `const Version` in `main.go` (currently **v1.4.8-health-session**)
 
 Policy: **test (`go test -race`) before build/restart**. Secrets only via `.gateway.env` (gitignored).
+
+---
+
+## v1.4.8 — /health session cookie fix (2026-07-19)
+
+### What changed
+
+| Area | Before | After |
+|------|--------|-------|
+| `/health` endpoint | cookie = raw API key (pre-P3-3) → `am.Get(ck)` worked | cookie = session token (P3-3) → `am.Get(ck)` returned nil → minimal response |
+| Dashboard stats | "CB KEYS: undefined active", circuit cards "—" | proper counts (976 keys, 502 grok accounts, upstreams populated) |
+| JS console | `Cannot read properties of undefined (reading 'grok')` | 0 errors |
+
+### Fix
+
+`HandleHealth` now accepts a `sessions` parameter and resolves `cookie → session token → API key` via `sessions.Lookup()` before `am.Get(key)`.
+
+### Files
+
+- `internal/handlers/handlers.go` — `HandleHealth` +1 param
+- `handlers_adapter.go` — `handleHealth`/`handleLogin`/`handleLogout` → function wrappers (var aliases don't match new signatures)
+- `main.go` — pass `sessions` to `handleHealth`
+
+---
+
+## v1.4.7 — Security re-audit fixes (2026-07-19)
+
+7 bugs fixed from second security audit (commit `a49df94`):
+
+| # | Bug | Fix |
+|---|-----|-----|
+| P2-1 | Login rate-limit bypass via `X-Forwarded-For` spoofing | `r.SetTrustedProxies(nil)` — don't trust XFF |
+| P2-2 | CSRF on admin mutations (cookie session + no Origin check) | New `csrf_guard.go` — Origin/Referer check on cookie-authed POST/PUT/DELETE |
+| P3-1 | Admin can delete last admin key → self-DoS | `CountAdmins()` + 409 refuse if last admin |
+| P3-2 | Unbounded combo `models` array → Redis DoS | Cap `len(c.Models) <= 32` |
+| P3-3 | Session fixation (cookie = raw API key) | New `internal/auth/session_store.go` — 256-bit random session tokens, 7-day TTL |
+| P4-1 | `loginLimiter.cleanup()` trimmed minuteWindow by hourCutoff | 1-char fix: `hourCutoff` → `minCutoff` |
+| P4-2 | Legacy inline `onclick` on pagination buttons (10 occurrences) | Migrated to `data-page`/`data-action` + event delegation |
+
+### New files
+
+- `csrf_guard.go` — Origin/Referer check middleware
+- `internal/auth/session_store.go` — `SessionStore` (in-memory token → key map)
+
+### Compliance
+
+12/12 security checklist items ✅ (was 9/12 after v1.4.6)
+
+---
+
+## v1.4.6 — Security audit fixes (2026-07-19)
+
+9 bugs fixed from first security audit (commit `3f0c82e`):
+
+| # | Bug | Fix |
+|---|-----|-----|
+| P1-1 | Stored XSS in dashboard (6 `onclick` handlers) | `data-*` attributes + global event delegation |
+| P2-2 | 26 Go stdlib CVEs (Go 1.25.0 stale) | `go.mod` → `go 1.25.12` (auto-upgrade) |
+| P2-3 | Cookie missing `Secure` flag | `Secure: true` default + `COOKIE_SECURE=0` dev override |
+| P3-4 | `key_full` leak in `/accounts` + `/cb-stats` | Removed; `ResolveKey(masked)` server-side on delete |
+| P3-5 | No input validation (id/alias/combo) | `validateName()` regex `^[A-Za-z0-9._/\-]{1,64}$` |
+| P3-6 | No rate limit on `/login` | `login_limiter.go` — 5/min + 20/hour per IP |
+| P3-7 | Upstream `requestId` leak in errors | Generic error message only |
+| P3-8 | Empty role → admin fallback | Default → `RoleInference` (least privilege) |
+| P4-9 | Dead path check (`path != "/api/"`) | `!strings.HasPrefix(path, "/api/")` |
+
+### New files
+
+- `internal/proxy/validate.go` — `validateName()` helper
+- `login_limiter.go` — IP-based rate limiter for `/login`
+
+### Verification
+
+- `govulncheck ./...` → 0 vulnerabilities (26 CVEs gone)
+- `go test -race` → 62/62 PASS
+
+---
+
+## v1.4.5 — Custom Models tab + Combos selector (2026-07-19)
+
+### UI restructure
+
+| Area | Before | After |
+|------|--------|-------|
+| Nav bar | 5 items (Dashboard, Accounts, Keys, Models, Custom) | 4 items (Dashboard, Accounts, Keys, Models) |
+| Custom Models | Separate page (`#/custom`) | Tab inside page Models |
+| Combos form | Textarea (manual model input) | Checkbox selector (mirip API keys) |
+| Models page | Single view | 3 tabs: **Models** \| **Custom** \| **Combos** |
+
+### Combos model selector
+
+- `loadComboModelSelector()` — fetch `/v1/models`, cache, render grouped checkboxes
+- `toggleAllComboModels(check)` / `toggleComboGroup(prefix)` — bulk select
+- `getSelectedComboModels()` — return checked values
+- `updateComboSelectedCount()` — real-time counter
+
+---
+
+## v1.4.3 — Combos moved to tab in Models page (2026-07-19)
+
+- Removed nav item "Combos" + route `#/combos` + `page-combos`
+- Added tab selector: `[Models] [Combos]` at top of page-models
+- Combo content moved to `#mtab-pane-combos` (default hidden)
+- `switchMTab('models'|'combos')` function for tab switching
+- `loadCombos()` auto-triggered on tab switch
+
+---
+
+## v1.4.2 — CB key masked fix in /cb-stats (2026-07-19)
+
+**Root cause:** Fix sebelumnya (`36b5602`) cuma `/accounts` yang dapat `key_full`, padahal dashboard `refresh()` pakai `/cb-stats` buat render CB table → key masih masked → delete 404.
+
+**Fix:** Tambah `key_full` ke `/cb-stats` response juga (main.go inline handler). *(Note: `key_full` removed again in v1.4.6 in favor of server-side `ResolveKey(masked)`.)*
+
+---
+
+## v1.4.1 — CB key delete 404 fix (2026-07-19)
+
+**Bug:** CB key delete return 404 karena dashboard pass masked key (`ck_abcde...wxyz`) ke DELETE endpoint, tapi backend expect full key.
+
+**Fix:** Backend return `key_full` field di `/accounts` response (admin-only via `adminAuth`). Dashboard pakai `k.key_full || k.key` buat delete (backward compat). *(Note: `key_full` removed in v1.4.6; delete now resolves masked → full server-side.)*
 
 ---
 

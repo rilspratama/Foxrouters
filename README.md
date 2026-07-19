@@ -1,8 +1,10 @@
 # FoxRouters
 
-[![Go Version](https://img.shields.io/badge/go-1.25%2B-00ADD8?logo=go)](https://go.dev/)
+[![Go Version](https://img.shields.io/badge/go-1.25.12%2B-00ADD8?logo=go)](https://go.dev/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](#license)
-[![Version](https://img.shields.io/badge/version-5.11.2-blue)](./CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-v1.4.8-blue)](./CHANGELOG.md)
+[![Security](https://img.shields.io/badge/security-audited%202x-brightgreen)](./CHANGELOG.md#v146--security-audit-fixes-2026-07-19)
+[![Tests](https://img.shields.io/badge/tests-62%2F62%20PASS%20(%2Brace)-success)](./)
 
 Unified **OpenAI-compatible** API gateway that fronts **Grok** and **CodeBuddy** behind
 one `/v1/chat/completions` endpoint. Route by model prefix, round-robin across many
@@ -41,16 +43,25 @@ every request/response to ClickHouse — all behind a single Bearer token.
   up to 10 concurrent refreshes.
 - **Circuit breaker** — passive (401/403/credit/`14018` disable + Redis persist)
   and active health checks every ~10 min.
-- **API-key auth** with role-based access — `inference` (default) can only reach
-  `/v1/*`; `admin` reaches everything.
+- **Custom models + aliases** (v1.3.0) — runtime-configurable model aliases
+  (`cb/kimi-k3` → `cb/gpt-5.5`) backed by Redis, no restart needed.
+- **Combos** (v1.4.0) — group N models under `combo/<name>` virtual alias with
+  **fallback** or **round_robin** strategy. Round-robin uses atomic Redis `INCR`
+  (cluster-safe).
+- **API-key auth** with role-based access — `inference` (default, least privilege)
+  can only reach `/v1/*`; `admin` reaches everything.
 - **Per-key model whitelist** with glob patterns (`grok-*`, `cb/*`, exact match).
 - **Per-key rate limits** — RPM, burst, and cumulative token quota.
 - **Redis hot state** — tokens, CB credits, disabled flags, gateway keys,
   rate/quota counters.
 - **ClickHouse history** — full request + response JSON, ZSTD compression,
   90-day TTL, unlimited body length; refresh events and disable events too.
-- **Web dashboard** — 4 SPA pages (stats, accounts, keys, models) served from an
-  embedded HTML file (no live gateway key ever injected server-side).
+- **Web dashboard** — 4 nav items (Dashboard, Accounts & Keys, Gateway API Keys,
+  Models) with Models page containing 3 tabs (Models \| Custom \| Combos).
+- **Security hardened** (v1.4.6–v1.4.7, 2x audited) — XSS-safe `data-*` event
+  delegation, CSRF guard (Origin/Referer check), session token indirection
+  (cookie ≠ API key), login rate limit (IP-based, XFF-proof), input validation
+  regex, last-admin lockout guard, `Secure`+`HttpOnly`+`SameSite=Lax` cookies.
 - **Security headers** — CSP, `X-Frame-Options: DENY`, `X-Content-Type-Options:
   nosniff`, `Referrer-Policy`.
 - **systemd hardening** — `NoNewPrivileges`, `ProtectSystem`, `ProtectHome`,
@@ -192,6 +203,7 @@ startup).
 | `CB_KEY_FILE` | `./cb-keys.json` | Path to a JSON file of CodeBuddy keys to seed. |
 | `CPA_AUTH_DIR` | `./` | Directory scanned for `xai-*.json` Grok credential files at boot. |
 | `GATEWAY_AUTH_DISABLE` | `false` | **Dev only.** When `true`, bypasses auth on all routes. Never enable in production. |
+| `COOKIE_SECURE` | `1` | Session cookie `Secure` flag. Set to `0` for dev HTTP (localhost). Default `1` = HTTPS-only. |
 
 > **Do not** commit secrets. Put the `.env` outside the repo or use `chmod 600
 > .gateway.env` alongside `.gitignore`.
@@ -202,6 +214,15 @@ startup).
 
 Unless noted, all endpoints require `Authorization: Bearer <gateway-key>`.
 Roles: **inference** may call `/v1/*` only; **admin** may call everything.
+
+**Auth flow:**
+- **API clients:** `Authorization: Bearer gw-...` header (preferred).
+- **Dashboard:** session cookie (`foxrouters_session`) — random 256-bit token
+  bound to API key server-side (NOT the raw key). 7-day TTL, sliding window.
+- **Login:** `POST /login` with `key=gw-...` form body. Rate-limited 5/min per IP
+  (XFF-spoof-proof via `SetTrustedProxies(nil)`).
+- **CSRF:** cookie-authed mutations (POST/PUT/DELETE) require same-origin
+  `Origin`/`Referer`. Bearer-authed calls are exempt.
 
 | Method | Path | Auth | Purpose |
 |---|---|---|---|
@@ -411,17 +432,18 @@ If the client already sets `reasoning_effort` explicitly, the client value wins.
 
 ## Dashboard
 
-Served at `GET /dashboard` (public HTML; XHRs still require a gateway key stored
-in `localStorage` or provided as `?key=`). The SPA has four routes:
+Served at `GET /dashboard` (public HTML; XHRs still require a gateway key via
+session cookie or `?key=`). The SPA has four nav routes:
 
 | Route | Page |
 |---|---|
-| `#/` | **Stats** — health, request counts, token totals, recent history preview. |
-| `#/accounts` | **Accounts** — Grok accounts + CodeBuddy keys with pagination and enable/disable/refresh. |
-| `#/keys` | **Keys** — Gateway key CRUD, role picker, allowed-models selector, RPM/burst/quota inputs. |
-| `#/models` | **Models** — model list with usage stats. |
+| `#/` | **Dashboard** — health, request counts, token totals, recent history preview. |
+| `#/accounts` | **Accounts & Keys** — Grok accounts + CodeBuddy keys with pagination and enable/disable/refresh. |
+| `#/keys` | **Gateway API Keys** — key CRUD, role picker, allowed-models selector, RPM/burst/quota inputs. |
+| `#/models` | **Models** — 3 tabs: **Models** (usage stats) \| **Custom** (custom models + aliases) \| **Combos** (group models under virtual alias). |
 
-Live gateway keys are **never** rendered into the HTML server-side.
+Live gateway keys are **never** rendered into the HTML server-side. Delete buttons
+use `data-*` attributes + event delegation (XSS-safe, no inline `onclick`).
 
 ---
 
