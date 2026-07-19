@@ -2739,7 +2739,7 @@ async function loadCustomModels() {
         '<td style="padding:8px;border-bottom:1px solid var(--border)">' + escHtml(m.upstream || '') + '</td>' +
         '<td style="padding:8px;border-bottom:1px solid var(--border);font-family:var(--mono)">' + escHtml(m.model_name || '') + '</td>' +
         '<td style="padding:8px;border-bottom:1px solid var(--border)">' + escHtml(m.owned_by || '') + '</td>' +
-        '<td style="padding:8px;border-bottom:1px solid var(--border)"><button class="btn-ghost" onclick="deleteCustomModel(' + JSON.stringify(id) + ')" style="padding:4px 10px;font-size:11px;color:var(--red)">Delete</button></td>' +
+        '<td style="padding:8px;border-bottom:1px solid var(--border)"><button class="btn-ghost" onclick="deleteCustomModel(\'' + id.replace(/'/g, "\\'") + '\')" style="padding:4px 10px;font-size:11px;color:var(--red)">Delete</button></td>' +
         '</tr>';
     }).join('');
   } catch (e) {
@@ -2802,7 +2802,7 @@ async function loadAliases() {
       return '<tr>' +
         '<td style="padding:8px;border-bottom:1px solid var(--border);font-family:var(--mono);color:var(--emerald)">' + escHtml(a) + '</td>' +
         '<td style="padding:8px;border-bottom:1px solid var(--border);font-family:var(--mono)">' + escHtml(aliases[a]) + '</td>' +
-        '<td style="padding:8px;border-bottom:1px solid var(--border)"><button class="btn-ghost" onclick="deleteAlias(' + JSON.stringify(a) + ')" style="padding:4px 10px;font-size:11px;color:var(--red)">Delete</button></td>' +
+        '<td style="padding:8px;border-bottom:1px solid var(--border)"><button class="btn-ghost" onclick="deleteAlias(\'' + a.replace(/'/g, "\\'") + '\')" style="padding:4px 10px;font-size:11px;color:var(--red)">Delete</button></td>' +
         '</tr>';
     }).join('');
   } catch (e) {
