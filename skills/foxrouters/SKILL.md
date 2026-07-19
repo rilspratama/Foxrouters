@@ -13,7 +13,7 @@ Unified OpenAI-compatible API gateway. Routes by model prefix: `grok-*` → Grok
 
 | Param | Value |
 |-------|-------|
-| **Base URL** | `http://127.0.0.1:20130` (localhost) or `http://76.13.18.146:20130` (public) |
+| **Base URL** | `http://127.0.0.1:20130` (localhost) or `http://<your-vps-ip>:20130` (public) |
 | **Auth (API)** | `Authorization: Bearer <GATEWAY_KEY>` |
 | **Auth (Dashboard)** | Cookie-based — visit `/login`, enter key, HttpOnly cookie set (v5.11.6). No more `?key=` URL param or localStorage. |
 | **Gateway key file** | `/root/nexus-workspace/foxrouters/gateway-key.txt` (first line = admin key). On fresh deploy with empty Redis, gateway auto-generates a bootstrap admin key and writes it to `bootstrap-key.txt` (v5.11.6). |
