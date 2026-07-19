@@ -721,3 +721,49 @@ func HandleLogout() gin.HandlerFunc {
 		c.Redirect(302, "/login")
 	}
 }
+
+// ============================================================================
+// CB KEY MANAGEMENT (delete + cleanup)
+// ============================================================================
+
+// HandleDeleteCBKey deletes a CodeBuddy key by its key string.
+func HandleDeleteCBKey(cbKM *upstream.CBKeyManager) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		key := c.Param("key")
+		if key == "" {
+			c.JSON(400, gin.H{"error": "key required"})
+			return
+		}
+		if !cbKM.DeleteKey(key) {
+			c.JSON(404, gin.H{"error": "cb key not found", "key": key})
+			return
+		}
+		remaining := cbKM.Len()
+		slog.Info("deleted cb key", "module", "cb", "remaining", remaining)
+		c.JSON(200, gin.H{"status": "deleted", "remaining": remaining})
+	}
+}
+
+// HandleCleanupDisabled removes all permanently disabled keys/accounts.
+// Query param ?type=grok|cb|all (default: all)
+func HandleCleanupDisabled(grokAM *upstream.GrokAccountManager, cbKM *upstream.CBKeyManager) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		typ := c.DefaultQuery("type", "all")
+		result := gin.H{"type": typ}
+
+		if typ == "grok" || typ == "all" {
+			removed := grokAM.CleanupDisabled()
+			result["grok_removed"] = removed
+			result["grok_remaining"] = grokAM.Len()
+		}
+		if typ == "cb" || typ == "all" {
+			removed := cbKM.CleanupDisabled()
+			result["cb_removed"] = removed
+			result["cb_remaining"] = cbKM.Len()
+		}
+
+		slog.Info("cleanup disabled", "module", "admin", "type", typ,
+			"grok_removed", result["grok_removed"], "cb_removed", result["cb_removed"])
+		c.JSON(200, result)
+	}
+}

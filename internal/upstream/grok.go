@@ -846,3 +846,30 @@ var sseBufPool = sync.Pool{
 		return &b
 	},
 }
+
+// CleanupDisabled removes all permanently disabled grok accounts (disabledAt is zero time).
+// Returns the count of removed accounts. Does NOT affect cooldown accounts (disabledAt set).
+func (am *GrokAccountManager) CleanupDisabled() int {
+	am.mu.Lock()
+	var removed int
+	var kept []*GrokAccount
+	for _, a := range am.accounts {
+		a.mu.RLock()
+		permDisabled := a.disabled && a.disabledAt.IsZero()
+		a.mu.RUnlock()
+		if permDisabled {
+			removed++
+			if am.db != nil {
+				am.db.DeleteGrokAccount(a.Email)
+			}
+		} else {
+			kept = append(kept, a)
+		}
+	}
+	am.accounts = kept
+	am.mu.Unlock()
+	if removed > 0 {
+		slog.Info("cleanup disabled grok accounts", "module", "grok", "removed", removed, "remaining", am.Len())
+	}
+	return removed
+}

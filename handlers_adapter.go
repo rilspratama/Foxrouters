@@ -23,6 +23,8 @@ var (
 	handleImportCBKeyBulk  = handlers.HandleImportCBKeyBulk
 	handleImportAccountBulk = handlers.HandleImportAccountBulk
 	handleDeleteAccount    = handlers.HandleDeleteAccount
+	handleDeleteCBKey      = handlers.HandleDeleteCBKey
+	handleCleanupDisabled  = handlers.HandleCleanupDisabled
 	handleHistory          = handlers.HandleHistory
 	handleRecentRequests   = handlers.HandleRecentRequests
 	handleHistoryDetail    = handlers.HandleHistoryDetail

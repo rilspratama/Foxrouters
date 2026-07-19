@@ -615,3 +615,49 @@ func ProxyCodeBuddy(c *gin.Context, body []byte, bodyMap map[string]any, km *CBK
 		}
 	}
 }
+
+// DeleteKey removes a CodeBuddy key by its key string.
+// Returns true if the key was found and removed.
+func (km *CBKeyManager) DeleteKey(key string) bool {
+	km.mu.Lock()
+	for i, k := range km.keys {
+		if k.Key == key {
+			km.keys = append(km.keys[:i], km.keys[i+1:]...)
+			km.mu.Unlock()
+			if km.db != nil {
+				km.db.DeleteCBKey(key)
+			}
+			slog.Info("deleted cb key", "module", "cb", "key", key[:8]+"..."+key[len(key)-4:])
+			return true
+		}
+	}
+	km.mu.Unlock()
+	return false
+}
+
+// CleanupDisabled removes all permanently disabled keys (disabledAt is zero time).
+// Returns the count of removed keys. Does NOT affect cooldown keys (disabledAt set).
+func (km *CBKeyManager) CleanupDisabled() int {
+	km.mu.Lock()
+	var removed int
+	var kept []*CBKey
+	for _, k := range km.keys {
+		k.mu.RLock()
+		permDisabled := k.disabled && k.disabledAt.IsZero()
+		k.mu.RUnlock()
+		if permDisabled {
+			removed++
+			if km.db != nil {
+				km.db.DeleteCBKey(k.Key)
+			}
+		} else {
+			kept = append(kept, k)
+		}
+	}
+	km.keys = kept
+	km.mu.Unlock()
+	if removed > 0 {
+		slog.Info("cleanup disabled cb keys", "module", "cb", "removed", removed, "remaining", km.Len())
+	}
+	return removed
+}

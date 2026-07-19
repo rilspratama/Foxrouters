@@ -338,6 +338,30 @@ func (s *Store) DeleteGrokAccount(email string) {
 	}
 }
 
+// DeleteCBKey removes the Redis HASH for a codebuddy key.
+func (s *Store) DeleteCBKey(key string) {
+	if s == nil || s.rdb == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+	if err := s.rdb.Del(ctx, RK_CB_KEY+key).Err(); err != nil {
+		slog.Warn("DEL cb key failed", "module", "db-redis", "key", key, "error", err)
+	}
+}
+
+// DeleteGatewayKey removes the Redis HASH for a gateway API key.
+func (s *Store) DeleteGatewayKey(key string) {
+	if s == nil || s.rdb == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+	if err := s.rdb.Del(ctx, RK_GATEWAY_KEY+key).Err(); err != nil {
+		slog.Warn("DEL gateway key failed", "module", "db-redis", "key", key, "error", err)
+	}
+}
+
 // ============================================================================
 // REDIS — Grok accounts
 // ============================================================================
@@ -494,19 +518,6 @@ func (s *Store) LoadGatewayKeys() ([]GatewayKeyDTO, error) {
 		return nil, err
 	}
 	return results, nil
-}
-
-// DeleteGatewayKey removes a gateway key from Redis.
-func (s *Store) DeleteGatewayKey(key string) {
-	if s == nil {
-		return
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
-	defer cancel()
-	rk := RK_GATEWAY_KEY + key
-	if err := s.rdb.Del(ctx, rk).Err(); err != nil {
-		slog.Warn("DEL failed", "module", "db-redis", "key", rk, "error", err)
-	}
 }
 
 // IncrementGatewayKeyTokens atomically increments tokens_used for a key.
