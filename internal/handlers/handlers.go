@@ -147,6 +147,7 @@ func HandleAccounts(grokAM *upstream.GrokAccountManager, cbKM *upstream.CBKeyMan
 			cbResult = append(cbResult, gin.H{
 				"provider":       "codebuddy",
 				"key":            k.Key[:8] + "..." + k.Key[len(k.Key)-4:],
+				"key_full":       k.Key, // full key for admin delete operations
 				"disabled":       disabled,
 				"credits_used":   credits,
 				"credits_left":   upstream.CB_CREDIT_LIMIT - credits,

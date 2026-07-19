@@ -1743,7 +1743,7 @@ function renderCBPage() {
       '<td><div class="pbar"><div class="pbar-fill ' + color + '" style="width:' + pct + '%"></div></div>' + (k.credit_limit - k.credits_used).toFixed(1) + ' left</td>' +
       '<td class="mono">' + k.total_requests + '</td>' +
       '<td>' + status + '</td>' +
-      '<td><button class="btn-ghost" onclick="deleteCBKey(\'' + escHtml(k.key) + '\')" style="padding:3px 8px;font-size:12px;color:var(--red)">Delete</button></td>' +
+      '<td><button class="btn-ghost" onclick="deleteCBKey(\'' + escHtml(k.key_full || k.key) + '\')" style="padding:3px 8px;font-size:12px;color:var(--red)">Delete</button></td>' +
     '</tr>';
   }
   document.getElementById('cbBody').innerHTML = cbRows || '<tr><td colspan="6" class="history-empty">No CodeBuddy keys loaded</td></tr>';
