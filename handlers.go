@@ -1,7 +1,9 @@
 package main
 
 import (
+	"html"
 	"log"
+	"net/http"
 	"os"
 	"strconv"
 	"strings"
@@ -768,7 +770,11 @@ func handleLogin(am *AuthManager) gin.HandlerFunc {
 		}
 
 		// Set HttpOnly cookie — 7 day expiry, not accessible via JS (XSS protection)
-		c.SetCookie("foxrouters_session", req.Key, 7*24*3600, "/", "", false, true)
+		// SameSite=Lax prevents CSRF on cross-site form submissions.
+		// Secure flag is configurable via COOKIE_SECURE=1 (default: false for reverse-proxy setups).
+		c.SetSameSite(http.SameSiteLaxMode)
+		secureCookie := os.Getenv("COOKIE_SECURE") == "1"
+		c.SetCookie("foxrouters_session", req.Key, 7*24*3600, "/", "", secureCookie, true)
 		c.Redirect(302, "/dashboard")
 	}
 }
@@ -873,8 +879,10 @@ body {
 </html>`
 
 // loginPageHTMLWithError returns the login page with an error message.
+// Note: msg MUST be HTML-escaped before injection to prevent XSS.
 func loginPageHTMLWithError(msg string) string {
+	safeMsg := html.EscapeString(msg)
 	return strings.Replace(loginPageHTML,
 		`<div class="login-sub">Gateway Control Panel</div>`,
-		`<div class="login-sub">Gateway Control Panel</div><div class="login-error">`+msg+`</div>`, 1)
+		`<div class="login-sub">Gateway Control Panel</div><div class="login-error">`+safeMsg+`</div>`, 1)
 }

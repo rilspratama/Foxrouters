@@ -4,7 +4,6 @@ import (
 	cryptorand "crypto/rand"
 	"encoding/base64"
 	"encoding/hex"
-	"fmt"
 	"log"
 	"os"
 	"path/filepath"
@@ -88,8 +87,8 @@ func maskKey(key string) string {
 func generateRandomKey(n int) string {
 	b := make([]byte, n)
 	if _, err := cryptorand.Read(b); err != nil {
-		// Fallback: shouldn't happen, but fail safe
-		return "00000000000000000000000000000000"
+		// crypto/rand failure is unrecoverable — never use a deterministic fallback
+		log.Fatalf("[fatal] crypto/rand.Read failed: %v", err)
 	}
 	return hex.EncodeToString(b)
 }
@@ -209,7 +208,7 @@ func newAuthManager(db *DBStore) *AuthManager {
 			}
 			log.Printf("╔══════════════════════════════════════════════════════════════╗")
 			log.Printf("║  [auth] AUTO-BOOTSTRAP: generated admin key (first boot)     ║")
-			log.Printf("║  Key: %s", bootstrapKey)
+			log.Printf("║  Key (masked): %s", maskKey(bootstrapKey))
 			log.Printf("║  Saved to: %s (chmod 600 — delete after first login)", bootstrapFile)
 			port := os.Getenv("PORT")
 			if port == "" {
@@ -378,8 +377,8 @@ func (am *AuthManager) IncrementRequests(key string) {
 func generateGatewayKey() string {
 	b := make([]byte, 24) // 24 bytes → 32 base64 chars
 	if _, err := cryptorand.Read(b); err != nil {
-		// Fallback (should never happen)
-		return "gw-" + fmt.Sprintf("%d", time.Now().UnixNano())
+		// crypto/rand failure is unrecoverable — never use a predictable fallback
+		log.Fatalf("[fatal] crypto/rand.Read failed: %v", err)
 	}
 	// URL-safe base64, strip padding
 	encoded := base64.RawURLEncoding.EncodeToString(b)
