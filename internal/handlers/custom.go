@@ -9,6 +9,7 @@ package handlers
 import (
 	"foxrouters/internal/db"
 	"foxrouters/internal/proxy"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 )
@@ -126,7 +127,7 @@ func HandleDeleteAlias(reg *proxy.CustomRegistry) gin.HandlerFunc {
 			c.JSON(500, gin.H{"error": "custom registry not initialised"})
 			return
 		}
-		alias := c.Param("alias")
+		alias := strings.TrimPrefix(c.Param("alias"), "/")
 		if alias == "" {
 			c.JSON(400, gin.H{"error": "alias required"})
 			return

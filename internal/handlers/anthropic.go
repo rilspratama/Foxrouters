@@ -281,6 +281,7 @@ type streamWriter struct {
 	outputToks int
 	textBuf    strings.Builder
 	carry      string // partial line from previous Write
+	errBuf     []byte // upstream error body captured before streaming started
 	// Headers set by the downstream proxy — we don't forward them; we set our own.
 	sinkHeader http.Header
 	statusCode int
@@ -306,12 +307,11 @@ func (w *streamWriter) Written() bool        { return w.started }
 func (w *streamWriter) WriteHeaderNow()      {}
 
 func (w *streamWriter) WriteHeader(code int) {
-	// First real write commits our Anthropic-format headers on the outer writer.
+	// Capture status but DON'T commit to real writer yet.
+	// The outer handler will decide format (SSE vs JSON error) based on
+	// whether streaming actually started. This prevents double WriteHeader
+	// and lets us surface upstream error bodies cleanly.
 	w.statusCode = code
-	if code >= 400 {
-		// Upstream errored before streaming — pass status through and stop pretending.
-		w.real.WriteHeader(code)
-	}
 }
 
 // ensureStart emits message_start + content_block_start on the wire, once.
@@ -363,6 +363,13 @@ func (w *streamWriter) emitEvent(name string, data any) {
 }
 
 func (w *streamWriter) Write(p []byte) (int, error) {
+	// If upstream errored before streaming started, buffer the error body
+	// so the outer handler can surface it to the client. Without this, the
+	// line-splitter below would silently drop non-SSE bytes.
+	if !w.started && w.statusCode >= 400 {
+		w.errBuf = append(w.errBuf, p...)
+		return len(p), nil
+	}
 	// Feed bytes through a line splitter; parse `data: {...}` frames.
 	chunk := w.carry + string(p)
 	lines := strings.Split(chunk, "\n")
@@ -373,6 +380,10 @@ func (w *streamWriter) Write(p []byte) (int, error) {
 	}
 	return len(p), nil
 }
+
+// ErrBuffer returns bytes captured while in the pre-start error state.
+// Returns nil once streaming has begun.
+func (w *streamWriter) ErrBuffer() []byte { return w.errBuf }
 
 // processLine parses a single OpenAI-format SSE line.
 func (w *streamWriter) processLine(line string) {
@@ -564,16 +575,32 @@ func HandleMessages(grokAM *upstream.GrokAccountManager, cbKM *upstream.CBKeyMan
 				if status < 400 {
 					status = 502
 				}
-				body := ""
-				if rb, ok := c.Get("response_body"); ok {
+				// Prefer the error body we buffered directly from the upstream
+				// response (P2 fix: streamWriter.Write now buffers non-SSE bytes
+				// when !started && statusCode>=400, instead of dropping them).
+				var bodyBytes []byte
+				if len(sw.errBuf) > 0 {
+					bodyBytes = sw.errBuf
+				} else if rb, ok := c.Get("response_body"); ok {
 					if rm, ok := rb.(json.RawMessage); ok {
-						body = string(rm)
+						bodyBytes = []byte(rm)
 					}
 				}
+				// P3 fix: parse + extract human-readable message instead of
+				// embedding raw JSON string (avoids double-escaped output).
+				var raw any
+				if len(bodyBytes) > 0 {
+					_ = json.Unmarshal(bodyBytes, &raw)
+				}
+				msg := extractUpstreamErrorMessage(raw, bodyBytes)
 				c.Writer = origWriter
 				c.Writer.Header().Set("Content-Type", "application/json")
 				c.Writer.WriteHeader(status)
-				fmt.Fprintf(c.Writer, `{"type":"error","error":{"type":"api_error","message":%q}}`, body)
+				out, _ := json.Marshal(map[string]any{
+					"type":  "error",
+					"error": map[string]any{"type": "api_error", "message": msg},
+				})
+				c.Writer.Write(out)
 			}
 			return
 		}
@@ -612,15 +639,18 @@ func HandleMessages(grokAM *upstream.GrokAccountManager, cbKM *upstream.CBKeyMan
 		// scanning `data:` lines.
 		bodyBytes := cap.buf.Bytes()
 		if upstreamErr {
-			// Just echo upstream error verbatim in Anthropic-shaped envelope.
+			// Parse upstream error body and extract a human-readable message
+			// (P3 fix: avoid double-escaped JSON-in-JSON-in-JSON error envelope).
+			// Anthropic spec: error.message should be a short string.
 			status := cap.status
 			c.Writer.Header().Set("Content-Type", "application/json")
 			c.Writer.WriteHeader(status)
 			var raw any
 			_ = json.Unmarshal(bodyBytes, &raw)
+			msg := extractUpstreamErrorMessage(raw, bodyBytes)
 			out, _ := json.Marshal(map[string]any{
 				"type":  "error",
-				"error": map[string]any{"type": "api_error", "message": string(bodyBytes), "upstream": raw},
+				"error": map[string]any{"type": "api_error", "message": msg},
 			})
 			c.Writer.Write(out)
 			return
@@ -658,6 +688,36 @@ func HandleMessages(grokAM *upstream.GrokAccountManager, cbKM *upstream.CBKeyMan
 
 // extractFromCapturedBody parses either a JSON chat.completion body OR a
 // buffered SSE stream and returns (text, finish_reason).
+// extractUpstreamErrorMessage walks common upstream error JSON shapes and
+// returns a short human-readable message. Falls back to the raw body if it
+// isn't JSON or no known field is found. Avoids embedding JSON strings
+// inside JSON strings (the old behaviour caused triple-escaped output).
+func extractUpstreamErrorMessage(raw any, bodyBytes []byte) string {
+	if m, ok := raw.(map[string]any); ok {
+		// Common fields in order of preference.
+		for _, k := range []string{"message", "msg", "error", "detail", "detail.message", "error.message"} {
+			if v, ok := m[k]; ok {
+				if s, ok := v.(string); ok && s != "" {
+					return s
+				}
+				// Nested map: e.g. {"error": {"message": "..."}}
+				if sub, ok := v.(map[string]any); ok {
+					if s, ok := sub["message"].(string); ok && s != "" {
+						return s
+					}
+				}
+			}
+		}
+	}
+	// Non-JSON or no known field — return the raw body (at least it's a string,
+	// not a JSON-encoded object embedded in a string field).
+	s := strings.TrimSpace(string(bodyBytes))
+	if s == "" {
+		return "upstream error"
+	}
+	return s
+}
+
 func extractFromCapturedBody(b []byte) (string, string) {
 	if len(b) == 0 {
 		return "", ""

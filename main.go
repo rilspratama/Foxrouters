@@ -217,7 +217,7 @@ func main() {
 	r.DELETE("/api/models/custom/*id", adminAuth, handleDeleteCustomModel(customReg))
 	r.GET("/api/aliases", adminAuth, handleListAliases(customReg))
 	r.POST("/api/aliases", adminAuth, handleAddAlias(customReg))
-	r.DELETE("/api/aliases/:alias", adminAuth, handleDeleteAlias(customReg))
+	r.DELETE("/api/aliases/*alias", adminAuth, handleDeleteAlias(customReg))
 
 	// /v1/*path catch-all — gin's httprouter doesn't allow a static
 	// /v1/messages segment alongside /v1/*path, so we dispatch the
