@@ -214,7 +214,11 @@ func (r *ComboRegistry) AddCombo(c Combo) error {
 			cleaned = append(cleaned, m)
 		}
 	}
-	if len(cleaned) < 1 {
+	// P3-2: cap combo size to prevent Redis memory DoS.
+	if len(cleaned) > 32 {
+		return fmt.Errorf("combo models list too long (max 32, got %d)", len(cleaned))
+	}
+	if len(cleaned) == 0 {
 		return fmt.Errorf("at least one model required")
 	}
 	c.Models = cleaned

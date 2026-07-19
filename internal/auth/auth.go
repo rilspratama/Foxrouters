@@ -290,6 +290,19 @@ func (am *Manager) GetAll() []*GatewayKeyInfo {
 	return result
 }
 
+// CountAdmins returns the number of admin-role keys (P3-1: last-admin lockout guard).
+func (am *Manager) CountAdmins() int {
+	am.mu.RLock()
+	defer am.mu.RUnlock()
+	count := 0
+	for _, info := range am.keys {
+		if info.Role == RoleAdmin && !info.Disabled {
+			count++
+		}
+	}
+	return count
+}
+
 // Add creates a new inference-role key with metadata and persists to Redis.
 func (am *Manager) Add(key, name string, rpm, burst int, tokenQuota int64) *GatewayKeyInfo {
 	return am.AddWithRole(key, name, RoleInference, nil, rpm, burst, tokenQuota)
@@ -488,10 +501,14 @@ func AdminMiddleware(am *Manager) gin.HandlerFunc {
 // AuthMiddleware validates Bearer tokens (or session cookies) against the
 // key pool. Public paths bypass; unauthenticated browser requests to
 // text/html endpoints redirect to /login.
-func AuthMiddleware(am *Manager) gin.HandlerFunc {
+func AuthMiddleware(am *Manager, sessionLookup ...func(string) string) gin.HandlerFunc {
 	// Fail-closed by default: if no keys are loaded, reject all requests
 	// EXCEPT when GATEWAY_AUTH_DISABLE=1 is set explicitly (dev mode).
 	authDisabled := os.Getenv("GATEWAY_AUTH_DISABLE") == "1"
+	var sl func(string) string
+	if len(sessionLookup) > 0 {
+		sl = sessionLookup[0]
+	}
 	return func(c *gin.Context) {
 		// Skip auth for public endpoints
 		path := c.Request.URL.Path
@@ -523,7 +540,12 @@ func AuthMiddleware(am *Manager) gin.HandlerFunc {
 		if strings.HasPrefix(auth, "Bearer ") {
 			key = strings.TrimPrefix(auth, "Bearer ")
 		} else if ck, err := c.Cookie("foxrouters_session"); err == nil && ck != "" {
-			key = ck
+			// P3-3: cookie value is a session token, resolve to API key.
+			if sl != nil {
+				key = sl(ck)
+			} else {
+				key = ck // legacy: cookie was raw key (pre-P3-3)
+			}
 		}
 
 		if key == "" {

@@ -82,9 +82,10 @@ func (l *loginLimiter) cleanup() {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	now := time.Now()
+	minCutoff := now.Add(-1 * time.Minute)  // P4-1: was hourCutoff (bug)
 	hourCutoff := now.Add(-1 * time.Hour)
 	for ip, e := range l.entries {
-		e.minuteWindow = trimBefore(e.minuteWindow, hourCutoff)
+		e.minuteWindow = trimBefore(e.minuteWindow, minCutoff)
 		e.hourWindow = trimBefore(e.hourWindow, hourCutoff)
 		if len(e.hourWindow) == 0 {
 			delete(l.entries, ip)

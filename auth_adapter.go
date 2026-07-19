@@ -12,6 +12,7 @@ import (
 type AuthManager = auth.Manager
 type GatewayKeyInfo = auth.GatewayKeyInfo
 type KeyRole = auth.KeyRole
+type SessionStore = auth.SessionStore
 
 const (
 	RoleInference = auth.RoleInference
@@ -26,6 +27,9 @@ var (
 
 // newAuthManager preserves the old lowercase constructor name.
 func newAuthManager(s *DBStore) *AuthManager { return auth.NewManager(s) }
+
+// NewSessionStore bridges to auth.NewSessionStore (P3-3).
+func NewSessionStore() *SessionStore { return auth.NewSessionStore() }
 
 // NewAuthManagerForTest returns an empty in-memory Manager (no db) with the
 // provided pre-seeded keys. Package-main tests use this to avoid reaching

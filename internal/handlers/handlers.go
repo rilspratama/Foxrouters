@@ -544,6 +544,13 @@ func HandleDeleteKey(am *auth.Manager) gin.HandlerFunc {
 			c.JSON(404, gin.H{"error": "key not found"})
 			return
 		}
+		// P3-1: prevent last-admin lockout (self-DoS).
+		// Refuse to delete if this key is admin AND it's the only admin left.
+		info := am.Get(fullKey)
+		if info != nil && info.Role == auth.RoleAdmin && am.CountAdmins() <= 1 {
+			c.JSON(409, gin.H{"error": "cannot delete the last admin key — create another admin key first"})
+			return
+		}
 		am.Remove(fullKey)
 		slog.Info("deleted key", "module", "auth", "key", auth.MaskKey(fullKey))
 		c.JSON(200, gin.H{"deleted": auth.MaskKey(fullKey)})
@@ -681,8 +688,9 @@ func HandleDashboard() gin.HandlerFunc {
 }
 
 // HandleLogin serves the login page (GET) and processes login (POST).
-// On successful auth, sets an HttpOnly cookie with the gateway key and redirects to /dashboard.
-func HandleLogin(am *auth.Manager) gin.HandlerFunc {
+// On successful auth, sets an HttpOnly cookie with a random session token
+// (NOT the raw API key — P3-3 session fixation fix) and redirects to /dashboard.
+func HandleLogin(am *auth.Manager, sessions *auth.SessionStore) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if c.Request.Method == "GET" {
 			c.Data(200, "text/html; charset=utf-8", []byte(loginPageHTML))
@@ -704,21 +712,25 @@ func HandleLogin(am *auth.Manager) gin.HandlerFunc {
 			return
 		}
 
-		// Set HttpOnly cookie — 7 day expiry, not accessible via JS (XSS protection)
-		// SameSite=Lax prevents CSRF on cross-site form submissions (most browsers default to Lax,
-		// but we set it explicitly for defense-in-depth). Secure=false because the gateway
-		// typically runs behind a reverse proxy that terminates TLS.
+		// P3-3: issue a random session token bound to the key (not the key itself).
+		token, err := sessions.Create(req.Key)
+		if err != nil {
+			c.Data(200, "text/html; charset=utf-8", []byte(loginPageHTMLWithError("Session error")))
+			return
+		}
+
 		c.SetSameSite(http.SameSiteLaxMode)
-		// Secure flag: default true (HTTPS-only). Set COOKIE_SECURE=0 for dev HTTP.
 		cookieSecure := os.Getenv("COOKIE_SECURE") != "0"
-		c.SetCookie("foxrouters_session", req.Key, 7*24*3600, "/", "", cookieSecure, true)
+		c.SetCookie("foxrouters_session", token, int(auth.SessionTTL.Seconds()), "/", "", cookieSecure, true)
 		c.Redirect(302, "/dashboard")
 	}
 }
 
 // HandleLogout clears the session cookie and redirects to /login.
-func HandleLogout() gin.HandlerFunc {
+func HandleLogout(sessions *auth.SessionStore) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		token, _ := c.Cookie("foxrouters_session")
+		sessions.Revoke(token)
 		cookieSecure := os.Getenv("COOKIE_SECURE") != "0"
 		c.SetCookie("foxrouters_session", "", -1, "/", "", cookieSecure, true)
 		c.Redirect(302, "/login")

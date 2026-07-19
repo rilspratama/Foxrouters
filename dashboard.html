@@ -1585,6 +1585,27 @@ document.addEventListener('click', function(e) {
   }
 });
 
+// ══════════════════════════════════════════════════════════
+// PAGINATION HANDLERS (P4-2: replace legacy inline onclick)
+// ══════════════════════════════════════════════════════════
+document.addEventListener('click', function(e) {
+  var btn = e.target.closest('button.pg-btn');
+  if (!btn || btn.disabled) return;
+  var action = btn.getAttribute('data-action');
+  var page = btn.getAttribute('data-page');
+  if (btn.classList.contains('pg-grok-prev') || btn.classList.contains('pg-grok-next') || btn.classList.contains('pg-grok-num')) {
+    if (action === 'prev') window._grokPage = Math.max(1, (window._grokPage || 1) - 1);
+    else if (action === 'next') window._grokPage = (window._grokPage || 1) + 1;
+    else if (page) window._grokPage = parseInt(page, 10);
+    renderGrokPage();
+  } else if (btn.classList.contains('pg-cb-prev') || btn.classList.contains('pg-cb-next') || btn.classList.contains('pg-cb-num')) {
+    if (action === 'prev') window._cbPage = Math.max(1, (window._cbPage || 1) - 1);
+    else if (action === 'next') window._cbPage = (window._cbPage || 1) + 1;
+    else if (page) window._cbPage = parseInt(page, 10);
+    renderCBPage();
+  }
+});
+
 /* ══════════════════════════════════════════════════════════
    REFRESH (health + accounts + cb-stats + models)
    ══════════════════════════════════════════════════════════ */
@@ -1721,29 +1742,29 @@ function renderGrokPage() {
   });
   html += '</select>';
   // Prev
-  html += '<button onclick="window._grokPage--;renderGrokPage()" style="padding:4px 10px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg-elevated);color:var(--text-secondary);cursor:pointer;font-size:12px"' + (page <= 1 ? ' disabled' : '') + '>‹ Prev</button>';
+  html += '<button class="pg-btn pg-grok-prev" data-action="prev" style="padding:4px 10px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg-elevated);color:var(--text-secondary);cursor:pointer;font-size:12px"' + (page <= 1 ? ' disabled' : '') + '>‹ Prev</button>';
   // Page numbers
   var maxButtons = 7;
   var fromPg = Math.max(1, page - Math.floor(maxButtons / 2));
   var toPg = Math.min(totalPages, fromPg + maxButtons - 1);
   if (toPg - fromPg < maxButtons - 1) fromPg = Math.max(1, toPg - maxButtons + 1);
   if (fromPg > 1) {
-    html += '<button onclick="window._grokPage=1;renderGrokPage()" style="padding:4px 10px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg-elevated);color:var(--text-secondary);cursor:pointer;font-size:12px">1</button>';
+    html += '<button class="pg-btn pg-grok-num" data-page="1" style="padding:4px 10px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg-elevated);color:var(--text-secondary);cursor:pointer;font-size:12px">1</button>';
     if (fromPg > 2) html += '<span style="padding:0 2px">…</span>';
   }
   for (var p = fromPg; p <= toPg; p++) {
     if (p === page) {
       html += '<button style="padding:4px 10px;border:1px solid var(--brand);border-radius:var(--radius-sm);background:var(--brand);color:#fff;font-size:12px;cursor:default">' + p + '</button>';
     } else {
-      html += '<button onclick="window._grokPage=' + p + ';renderGrokPage()" style="padding:4px 10px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg-elevated);color:var(--text-secondary);cursor:pointer;font-size:12px">' + p + '</button>';
+      html += '<button class="pg-btn pg-grok-num' + (p === page ? ' pg-active' : '') + '" data-page="' + p + '" style="padding:4px 10px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg-elevated);color:var(--text-secondary);cursor:pointer;font-size:12px">' + p + '</button>';
     }
   }
   if (toPg < totalPages) {
     if (toPg < totalPages - 1) html += '<span style="padding:0 2px">…</span>';
-    html += '<button onclick="window._grokPage=' + totalPages + ';renderGrokPage()" style="padding:4px 10px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg-elevated);color:var(--text-secondary);cursor:pointer;font-size:12px">' + totalPages + '</button>';
+    html += '<button class="pg-btn pg-grok-num" data-page="' + totalPages + '" style="padding:4px 10px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg-elevated);color:var(--text-secondary);cursor:pointer;font-size:12px">' + totalPages + '</button>';
   }
   // Next
-  html += '<button onclick="window._grokPage++;renderGrokPage()" style="padding:4px 10px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg-elevated);color:var(--text-secondary);cursor:pointer;font-size:12px"' + (page >= totalPages ? ' disabled' : '') + '>Next ›</button>';
+  html += '<button class="pg-btn pg-grok-next" data-action="next" style="padding:4px 10px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg-elevated);color:var(--text-secondary);cursor:pointer;font-size:12px"' + (page >= totalPages ? ' disabled' : '') + '>Next ›</button>';
   // Info
   html += '<span style="margin-left:auto">' + (start + 1) + '–' + end + ' of ' + all.length + '</span>';
   pager.innerHTML = html;
@@ -1790,27 +1811,27 @@ function renderCBPage() {
     html += '<option value="' + n + '"' + (size === n ? ' selected' : '') + '>' + n + '</option>';
   });
   html += '</select>';
-  html += '<button onclick="window._cbPage--;renderCBPage()" style="padding:4px 10px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg-elevated);color:var(--text-secondary);cursor:pointer;font-size:12px"' + (page <= 1 ? ' disabled' : '') + '>‹ Prev</button>';
+  html += '<button class="pg-btn pg-cb-prev" data-action="prev" style="padding:4px 10px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg-elevated);color:var(--text-secondary);cursor:pointer;font-size:12px"' + (page <= 1 ? ' disabled' : '') + '>‹ Prev</button>';
   var maxButtons = 7;
   var fromPg = Math.max(1, page - Math.floor(maxButtons / 2));
   var toPg = Math.min(totalPages, fromPg + maxButtons - 1);
   if (toPg - fromPg < maxButtons - 1) fromPg = Math.max(1, toPg - maxButtons + 1);
   if (fromPg > 1) {
-    html += '<button onclick="window._cbPage=1;renderCBPage()" style="padding:4px 10px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg-elevated);color:var(--text-secondary);cursor:pointer;font-size:12px">1</button>';
+    html += '<button class="pg-btn pg-cb-num" data-page="1" style="padding:4px 10px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg-elevated);color:var(--text-secondary);cursor:pointer;font-size:12px">1</button>';
     if (fromPg > 2) html += '<span style="padding:0 2px">…</span>';
   }
   for (var p = fromPg; p <= toPg; p++) {
     if (p === page) {
       html += '<button style="padding:4px 10px;border:1px solid var(--brand);border-radius:var(--radius-sm);background:var(--brand);color:#fff;font-size:12px;cursor:default">' + p + '</button>';
     } else {
-      html += '<button onclick="window._cbPage=' + p + ';renderCBPage()" style="padding:4px 10px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg-elevated);color:var(--text-secondary);cursor:pointer;font-size:12px">' + p + '</button>';
+      html += '<button class="pg-btn pg-cb-num" data-page="' + p + '" style="padding:4px 10px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg-elevated);color:var(--text-secondary);cursor:pointer;font-size:12px">' + p + '</button>';
     }
   }
   if (toPg < totalPages) {
     if (toPg < totalPages - 1) html += '<span style="padding:0 2px">…</span>';
-    html += '<button onclick="window._cbPage=' + totalPages + ';renderCBPage()" style="padding:4px 10px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg-elevated);color:var(--text-secondary);cursor:pointer;font-size:12px">' + totalPages + '</button>';
+    html += '<button class="pg-btn pg-cb-num" data-page="' + totalPages + '" style="padding:4px 10px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg-elevated);color:var(--text-secondary);cursor:pointer;font-size:12px">' + totalPages + '</button>';
   }
-  html += '<button onclick="window._cbPage++;renderCBPage()" style="padding:4px 10px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg-elevated);color:var(--text-secondary);cursor:pointer;font-size:12px"' + (page >= totalPages ? ' disabled' : '') + '>Next ›</button>';
+  html += '<button class="pg-btn pg-cb-next" data-action="next" style="padding:4px 10px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg-elevated);color:var(--text-secondary);cursor:pointer;font-size:12px"' + (page >= totalPages ? ' disabled' : '') + '>Next ›</button>';
   html += '<span style="margin-left:auto">' + (start + 1) + '–' + end + ' of ' + all.length + '</span>';
   pager.innerHTML = html;
 }
