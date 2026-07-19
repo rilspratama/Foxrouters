@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 
+	"foxrouters/internal/metrics"
+
 	"github.com/gin-gonic/gin"
 )
 
@@ -243,8 +245,8 @@ func proxyRequest(grokAM *GrokAccountManager, cbKM *CBKeyManager, hc *HealthChec
 		// standard histogram buckets. Cheap: label lookups + atomic increments.
 		elapsed := time.Since(startTime).Seconds()
 		status := strconv.Itoa(c.Writer.Status())
-		requestsTotal.WithLabelValues(upstream, status).Inc()
-		requestDuration.WithLabelValues(upstream).Observe(elapsed)
+		metrics.RequestsTotal.WithLabelValues(upstream, status).Inc()
+		metrics.RequestDuration.WithLabelValues(upstream).Observe(elapsed)
 
 		// Per-key token quota tracking
 		fullKey = c.GetString("client_key")
