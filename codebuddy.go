@@ -118,7 +118,7 @@ func (km *CBKeyManager) LoadFromRedis() error {
 		km.keys = append(km.keys, key)
 		// Persist to Redis immediately
 		if km.db != nil {
-			km.db.SaveCBKey(k, 0, 0, false, time.Time{})
+			dbSaveCBKey(km.db, k, 0, 0, false, time.Time{})
 		}
 		seedCount++
 	}
@@ -185,7 +185,7 @@ func (km *CBKeyManager) AddKey(apiKey string) (added bool, total int) {
 	km.mu.Unlock()
 	// Persist outside manager lock (Redis I/O must not hold km.mu)
 	if km.db != nil {
-		km.db.SaveCBKey(key.Key, key.creditsUsed, key.totalReqs, key.disabled, key.disabledAt)
+		dbSaveCBKey(km.db, key.Key, key.creditsUsed, key.totalReqs, key.disabled, key.disabledAt)
 	}
 	return true, total
 }
@@ -205,7 +205,7 @@ func (km *CBKeyManager) reenableCooldowns() {
 	}
 	for _, key := range reenabled {
 		if key.db != nil {
-			key.db.SaveCBKey(key.Key, key.creditsUsed, key.totalReqs, key.disabled, key.disabledAt)
+			dbSaveCBKey(key.db, key.Key, key.creditsUsed, key.totalReqs, key.disabled, key.disabledAt)
 		}
 		slog.Info("re-enabled cooldown key", "module", "cb", "key", key.Key[:8]+"..."+key.Key[len(key.Key)-4:])
 	}
@@ -246,8 +246,8 @@ func (k *CBKey) AddCredits(c float64) {
 	k.mu.Unlock()
 	// Persist outside lock
 	if k.db != nil {
-		k.db.SaveCBKey(key, credits, reqs, disabled, disabledAt)
-		k.db.UpsertCBKey(key, credits, reqs, disabled)
+		dbSaveCBKey(k.db, key, credits, reqs, disabled, disabledAt)
+		dbUpsertCBKey(k.db, key, credits, reqs, disabled)
 	}
 }
 
@@ -421,7 +421,7 @@ func proxyCodeBuddy(c *gin.Context, body []byte, bodyMap map[string]any, km *CBK
 			}
 			key.mu.Unlock()
 			if key.db != nil {
-				key.db.SaveCBKey(key.Key, key.creditsUsed, key.totalReqs, key.disabled, key.disabledAt)
+				dbSaveCBKey(key.db, key.Key, key.creditsUsed, key.totalReqs, key.disabled, key.disabledAt)
 			}
 			if resp.StatusCode == 401 {
 				slog.Warn("key disabled (401 unauthorized, permanent)", "module", "cb", "key", key.Key[:8]+"..."+key.Key[len(key.Key)-4:])
@@ -443,7 +443,7 @@ func proxyCodeBuddy(c *gin.Context, body []byte, bodyMap map[string]any, km *CBK
 				key.disabledAt = time.Time{} // permanent
 				key.mu.Unlock()
 				if key.db != nil {
-					key.db.SaveCBKey(key.Key, key.creditsUsed, key.totalReqs, key.disabled, key.disabledAt)
+					dbSaveCBKey(key.db, key.Key, key.creditsUsed, key.totalReqs, key.disabled, key.disabledAt)
 				}
 				slog.Warn("key disabled (credits exhausted, code 14018)", "module", "cb", "key", key.Key[:8]+"..."+key.Key[len(key.Key)-4:])
 				continue
@@ -476,7 +476,7 @@ func proxyCodeBuddy(c *gin.Context, body []byte, bodyMap map[string]any, km *CBK
 			key.disabledAt = time.Now()
 			key.mu.Unlock()
 			if key.db != nil {
-				key.db.SaveCBKey(key.Key, key.creditsUsed, key.totalReqs, key.disabled, key.disabledAt)
+				dbSaveCBKey(key.db, key.Key, key.creditsUsed, key.totalReqs, key.disabled, key.disabledAt)
 			}
 			slog.Warn("key disabled (4xx)", "module", "cb", "key", key.Key[:8]+"..."+key.Key[len(key.Key)-4:], "status", resp.StatusCode, "body", truncateLog(bodyStr, 200))
 			continue
@@ -545,7 +545,7 @@ func proxyCodeBuddy(c *gin.Context, body []byte, bodyMap map[string]any, km *CBK
 								lastKey.disabledAt = time.Time{}
 								lastKey.mu.Unlock()
 								if lastKey.db != nil {
-									lastKey.db.SaveCBKey(lastKey.Key, lastKey.creditsUsed, lastKey.totalReqs, lastKey.disabled, lastKey.disabledAt)
+									dbSaveCBKey(lastKey.db, lastKey.Key, lastKey.creditsUsed, lastKey.totalReqs, lastKey.disabled, lastKey.disabledAt)
 								}
 								slog.Warn("key disabled (credits exhausted in stream)", "module", "cb", "key", lastKey.Key[:8]+"..."+lastKey.Key[len(lastKey.Key)-4:])
 							}

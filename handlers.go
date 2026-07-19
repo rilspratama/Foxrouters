@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"log/slog"
 	"net/http"
 	"os"
@@ -234,7 +233,7 @@ func handleImportAccount(grokAM *GrokAccountManager) gin.HandlerFunc {
 		}
 		// Save to Redis
 		if grokAM.db != nil {
-			grokAM.db.SaveGrokAccount(acc)
+			dbSaveGrokAccount(grokAM.db, acc)
 		}
 		// Add to runtime pool — capture total under lock (race-free)
 		grokAM.mu.Lock()
@@ -256,7 +255,7 @@ func handleImportAccount(grokAM *GrokAccountManager) gin.HandlerFunc {
 				existing.mu.Unlock()
 				// Persist mutated state to Redis (P1 fix: was missing SaveGrokAccount on existing-account update)
 				if grokAM.db != nil {
-					grokAM.db.SaveGrokAccount(existing)
+					dbSaveGrokAccount(grokAM.db, existing)
 				}
 				found = true
 				break
@@ -377,7 +376,7 @@ func handleImportAccountBulk(grokAM *GrokAccountManager) gin.HandlerFunc {
 				db:            grokAM.db,
 			}
 			if grokAM.db != nil {
-				grokAM.db.SaveGrokAccount(acc)
+				dbSaveGrokAccount(grokAM.db, acc)
 			}
 			grokAM.mu.Lock()
 			found := false
@@ -396,7 +395,7 @@ func handleImportAccountBulk(grokAM *GrokAccountManager) gin.HandlerFunc {
 					existing.disabledAt = time.Time{}
 					existing.mu.Unlock()
 					if grokAM.db != nil {
-						grokAM.db.SaveGrokAccount(existing)
+						dbSaveGrokAccount(grokAM.db, existing)
 					}
 					found = true
 					break
@@ -431,11 +430,7 @@ func handleDeleteAccount(grokAM *GrokAccountManager) gin.HandlerFunc {
 			return
 		}
 		// Remove from Redis
-		if grokAM.db != nil && grokAM.db.rdb != nil {
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			defer cancel()
-			grokAM.db.rdb.Del(ctx, "grok:account:"+email)
-		}
+		grokAM.db.DeleteGrokAccount(email)
 		// Remove from runtime pool
 		grokAM.mu.Lock()
 		for i, acc := range grokAM.accounts {

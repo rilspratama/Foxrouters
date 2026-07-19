@@ -1,7 +1,15 @@
-// db.go — Redis (hot state) + ClickHouse (persistent history) integration layer.
-// Redis: account tokens, CB key credits, rate limit buckets — sub-ms reads.
-// ClickHouse: request_logs, token_refresh_history, account_events — full-body history.
-package main
+// Package db is the Redis (hot state) + ClickHouse (persistent history)
+// integration layer for FoxRouters.
+//
+//   Redis: account tokens, CB key credits, rate limit buckets — sub-ms reads.
+//   ClickHouse: request_logs, token_refresh_history, account_events — full-body history.
+//
+// This package deliberately does NOT depend on the concrete domain types
+// (GrokAccount, GatewayKeyInfo, CBKey). Instead it defines a small set of
+// DTOs — GrokAccountDTO, GatewayKeyDTO, CBKeyDTO — that callers convert
+// to/from before persistence. That keeps the import graph one-directional
+// (auth/upstream → db) and avoids any circular-import trap.
+package db
 
 import (
 	"context"
@@ -22,18 +30,14 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-// ============================================================================
-// CONFIG — secrets via env (fallback defaults for local VPS only)
-// ============================================================================
-
+// Redis key prefixes (exported so upstream packages can compose their own
+// keys/scan patterns if they need to).
 const (
-	// Redis key prefixes
 	RK_GROK_ACCOUNT = "grok:account:" // HASH: access_token, refresh_token, expires_at, disabled, etc.
 	RK_CB_KEY       = "cb:key:"       // HASH: credits_used, total_requests, disabled
 	RK_GATEWAY_KEY  = "gw:key:"       // HASH: name, total_requests
 	RK_RATE_LIMIT   = "rate:"         // STRING: token bucket state per client key
 
-	// Async log buffer sizes
 	LOG_BUFFER_SIZE    = 10000
 	LOG_FLUSH_INTERVAL = 2 * time.Second
 )
@@ -48,46 +52,41 @@ func envOr(key, def string) string {
 
 // redisConfig resolves Redis connection from env:
 // REDIS_ADDR (default 127.0.0.1:6379), REDIS_PASSWORD, REDIS_DB (default 0).
-func redisConfig() (addr, password string, db int) {
+func redisConfig() (addr, password string, database int) {
 	addr = envOr("REDIS_ADDR", "127.0.0.1:6379")
 	password = envOr("REDIS_PASSWORD", "")
-	db = 0
+	database = 0
 	if v := os.Getenv("REDIS_DB"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil {
-			db = n
+			database = n
 		}
 	}
 	return
 }
 
 // clickhouseAddr returns host:port for native protocol (default 127.0.0.1:9000).
-func clickhouseAddr() string {
-	return envOr("CLICKHOUSE_ADDR", "127.0.0.1:9000")
-}
+func clickhouseAddr() string { return envOr("CLICKHOUSE_ADDR", "127.0.0.1:9000") }
 
-func clickhouseDatabase() string {
-	return envOr("CLICKHOUSE_DB", "gateway")
-}
+func clickhouseDatabase() string { return envOr("CLICKHOUSE_DB", "gateway") }
 
 // ============================================================================
-// DB STORE — unified Redis + ClickHouse manager
+// STORE
 // ============================================================================
 
-type DBStore struct {
+// Store is the unified Redis + ClickHouse manager.
+type Store struct {
 	rdb *redis.Client
 	ch  driver.Conn
 
-	// done signals consumer goroutines to drain and exit.
 	done chan struct{}
-	// wg tracks consumer goroutines so Close() can wait for them to flush.
-	wg sync.WaitGroup
+	wg   sync.WaitGroup
 
-	// Async log channels (non-blocking writes to ClickHouse)
 	reqLogCh  chan RequestLog
 	refreshCh chan RefreshLog
 	eventCh   chan AccountEvent
 }
 
+// RequestLog is a single row for the ClickHouse request_logs table.
 type RequestLog struct {
 	Timestamp    time.Time
 	RequestID    string
@@ -102,7 +101,7 @@ type RequestLog struct {
 	ErrorMsg     string
 	InputText    string          // quick preview (last user msg, 500 chars)
 	OutputText   string          // quick preview (first 1000 chars)
-	RequestBody  json.RawMessage // full request JSON (messages, tools, etc.)
+	RequestBody  json.RawMessage // full request JSON
 	ResponseBody json.RawMessage // full response JSON
 }
 
@@ -123,7 +122,52 @@ type AccountEvent struct {
 	EventData map[string]interface{}
 }
 
-func NewDBStore() (*DBStore, error) {
+// ============================================================================
+// DTOs — the persistence-friendly shape of domain types
+// ============================================================================
+
+// GrokAccountDTO carries the subset of a GrokAccount that lives in Redis.
+type GrokAccountDTO struct {
+	Email        string
+	AccessToken  string
+	RefreshToken string
+	IDToken      string
+	ExpiresAt    time.Time
+	ExpiresIn    int
+	Expired      string
+	LastRefresh  string
+	Sub          string
+	Disabled     bool
+	DisabledAt   time.Time
+}
+
+// GatewayKeyDTO carries the persisted shape of an auth key.
+type GatewayKeyDTO struct {
+	Key           string
+	Name          string
+	Role          string
+	AllowedModels []string
+	RPM           int
+	Burst         int
+	TokenQuota    int64
+	TokensUsed    int64
+	Requests      int64
+	CreatedAt     time.Time
+	Disabled      bool
+}
+
+// CBKeyDTO is the persisted shape of a CodeBuddy pool key.
+type CBKeyDTO struct {
+	Key          string
+	CreditsUsed  float64
+	TotalReqs    int64
+	Disabled     bool
+	DisabledAt   time.Time
+}
+
+// NewStore initializes Redis + ClickHouse, ensures schema, and spawns the
+// async log consumers. Call Close() to flush + tear down.
+func NewStore() (*Store, error) {
 	rAddr, rPass, rDB := redisConfig()
 	rdb := redis.NewClient(&redis.Options{
 		Addr:         rAddr,
@@ -136,7 +180,6 @@ func NewDBStore() (*DBStore, error) {
 		WriteTimeout: 2 * time.Second,
 	})
 
-	// Test Redis connection
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 	if err := rdb.Ping(ctx).Err(); err != nil {
@@ -149,7 +192,6 @@ func NewDBStore() (*DBStore, error) {
 	chPass := envOr("CLICKHOUSE_PASSWORD", "")
 
 	// Connect to 'default' database first to ensure target DB exists.
-	// Fresh ClickHouse deployments only have the 'default' database.
 	bootstrapCh, err := clickhouse.Open(&clickhouse.Options{
 		Addr: []string{chAddr},
 		Auth: clickhouse.Auth{
@@ -162,8 +204,6 @@ func NewDBStore() (*DBStore, error) {
 	if err != nil {
 		return nil, fmt.Errorf("clickhouse open (bootstrap): %w", err)
 	}
-	// Create target database if missing (idempotent).
-	// Validate database name to prevent SQL injection via env var.
 	if len(chDB) == 0 || !regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_]*$`).MatchString(chDB) {
 		return nil, fmt.Errorf("invalid CLICKHOUSE_DB name %q: must be alphanumeric/underscore, start with letter", chDB)
 	}
@@ -172,7 +212,6 @@ func NewDBStore() (*DBStore, error) {
 	}
 	bootstrapCh.Close()
 
-	// Now connect to the target database.
 	ch, err := clickhouse.Open(&clickhouse.Options{
 		Addr: []string{chAddr},
 		Auth: clickhouse.Auth{
@@ -198,7 +237,7 @@ func NewDBStore() (*DBStore, error) {
 		return nil, fmt.Errorf("clickhouse ping: %w", err)
 	}
 
-	s := &DBStore{
+	s := &Store{
 		rdb:       rdb,
 		ch:        ch,
 		done:      make(chan struct{}),
@@ -207,12 +246,10 @@ func NewDBStore() (*DBStore, error) {
 		eventCh:   make(chan AccountEvent, LOG_BUFFER_SIZE),
 	}
 
-	// Ensure schema exists (idempotent)
 	if err := s.ensureClickHouseSchema(ctx); err != nil {
 		slog.Warn("ensure schema failed", "module", "db-ch", "error", err)
 	}
 
-	// Start async log consumers
 	s.wg.Add(3)
 	go s.consumeRequestLogs()
 	go s.consumeRefreshLogs()
@@ -222,7 +259,7 @@ func NewDBStore() (*DBStore, error) {
 	return s, nil
 }
 
-func (s *DBStore) ensureClickHouseSchema(ctx context.Context) error {
+func (s *Store) ensureClickHouseSchema(ctx context.Context) error {
 	stmts := []string{
 		`CREATE TABLE IF NOT EXISTS request_logs (
 			id UInt64,
@@ -246,7 +283,6 @@ func (s *DBStore) ensureClickHouseSchema(ctx context.Context) error {
 		ORDER BY (timestamp, id)
 		TTL toDateTime(timestamp) + INTERVAL 90 DAY
 		SETTINGS index_granularity = 8192`,
-		// Migration: add request_id column to existing table (idempotent)
 		`ALTER TABLE request_logs ADD COLUMN IF NOT EXISTS request_id String AFTER timestamp`,
 		`CREATE TABLE IF NOT EXISTS token_refresh_history (
 			timestamp DateTime64(3, 'UTC'),
@@ -278,7 +314,6 @@ func (s *DBStore) ensureClickHouseSchema(ctx context.Context) error {
 	return nil
 }
 
-// newLogID generates a random UInt64 id for request_logs rows.
 func newLogID() uint64 {
 	var b [8]byte
 	if _, err := rand.Read(b[:]); err != nil {
@@ -287,39 +322,57 @@ func newLogID() uint64 {
 	return binary.LittleEndian.Uint64(b[:])
 }
 
+// Ready returns true if the store's Redis connection is initialized.
+// Used by callers who want a fast pre-check before attempting a query.
+func (s *Store) Ready() bool { return s != nil && s.rdb != nil }
+
+// DeleteGrokAccount removes the Redis HASH for a grok account by email.
+func (s *Store) DeleteGrokAccount(email string) {
+	if s == nil || s.rdb == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+	if err := s.rdb.Del(ctx, RK_GROK_ACCOUNT+email).Err(); err != nil {
+		slog.Warn("DEL grok account failed", "module", "db-redis", "email", email, "error", err)
+	}
+}
+
 // ============================================================================
-// REDIS — Grok Account State
+// REDIS — Grok accounts
 // ============================================================================
 
 // SaveGrokAccount writes account state to Redis (non-blocking, best-effort).
-func (s *DBStore) SaveGrokAccount(acc *GrokAccount) {
-	if s == nil || acc == nil {
+func (s *Store) SaveGrokAccount(dto GrokAccountDTO) {
+	if s == nil {
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 	defer cancel()
 
 	data := map[string]interface{}{
-		"email":         acc.Email,
-		"access_token":  acc.AccessToken,
-		"refresh_token": acc.RefreshToken,
-		"id_token":      acc.IDToken,
-		"expires_at":    acc.expiresAt.Unix(),
-		"expires_in":    acc.ExpiresIn,
-		"expired":       acc.Expired,
-		"last_refresh":  acc.LastRefresh,
-		"sub":           acc.Sub,
-		"disabled":      acc.disabled,
-		"disabled_at":   acc.disabledAt.Unix(),
+		"email":         dto.Email,
+		"access_token":  dto.AccessToken,
+		"refresh_token": dto.RefreshToken,
+		"id_token":      dto.IDToken,
+		"expires_at":    dto.ExpiresAt.Unix(),
+		"expires_in":    dto.ExpiresIn,
+		"expired":       dto.Expired,
+		"last_refresh":  dto.LastRefresh,
+		"sub":           dto.Sub,
+		"disabled":      dto.Disabled,
+		"disabled_at":   dto.DisabledAt.Unix(),
 	}
-	key := RK_GROK_ACCOUNT + acc.Email
+	key := RK_GROK_ACCOUNT + dto.Email
 	if err := s.rdb.HSet(ctx, key, data).Err(); err != nil {
 		slog.Warn("HSet failed", "module", "db-redis", "key", key, "error", err)
 	}
 }
 
-// LoadGrokAccounts reads all grok accounts from Redis into a map keyed by email.
-func (s *DBStore) LoadGrokAccounts() (map[string]map[string]string, error) {
+// LoadGrokAccounts returns raw Redis hash maps keyed by email. Callers
+// parse the field values themselves — the raw shape hasn't changed since
+// the flat-package era and grok_account.go's parser expects it.
+func (s *Store) LoadGrokAccounts() (map[string]map[string]string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
@@ -343,10 +396,10 @@ func (s *DBStore) LoadGrokAccounts() (map[string]map[string]string, error) {
 }
 
 // ============================================================================
-// REDIS — CodeBuddy Key State
+// REDIS — CodeBuddy keys
 // ============================================================================
 
-func (s *DBStore) SaveCBKey(key string, creditsUsed float64, totalReqs int64, disabled bool, disabledAt time.Time) {
+func (s *Store) SaveCBKey(dto CBKeyDTO) {
 	if s == nil {
 		return
 	}
@@ -354,19 +407,19 @@ func (s *DBStore) SaveCBKey(key string, creditsUsed float64, totalReqs int64, di
 	defer cancel()
 
 	data := map[string]interface{}{
-		"credits_used":   creditsUsed,
-		"total_requests": totalReqs,
-		"disabled":       disabled,
-		"disabled_at":    disabledAt.Unix(),
+		"credits_used":   dto.CreditsUsed,
+		"total_requests": dto.TotalReqs,
+		"disabled":       dto.Disabled,
+		"disabled_at":    dto.DisabledAt.Unix(),
 		"updated_at":     time.Now().Unix(),
 	}
-	rk := RK_CB_KEY + key
+	rk := RK_CB_KEY + dto.Key
 	if err := s.rdb.HSet(ctx, rk, data).Err(); err != nil {
 		slog.Warn("HSet failed", "module", "db-redis", "key", rk, "error", err)
 	}
 }
 
-func (s *DBStore) LoadCBKeys() (map[string]map[string]string, error) {
+func (s *Store) LoadCBKeys() (map[string]map[string]string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
@@ -387,44 +440,44 @@ func (s *DBStore) LoadCBKeys() (map[string]map[string]string, error) {
 }
 
 // ============================================================================
-// REDIS — Gateway Client Key State (full CRUD + usage tracking)
+// REDIS — Gateway keys (auth)
 // ============================================================================
 
-// SaveGatewayKey writes a full GatewayKeyInfo to Redis HASH.
-func (s *DBStore) SaveGatewayKey(info *GatewayKeyInfo) {
-	if s == nil || info == nil {
+// SaveGatewayKey writes a full GatewayKeyDTO to Redis HASH.
+func (s *Store) SaveGatewayKey(dto GatewayKeyDTO) {
+	if s == nil {
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 	defer cancel()
 	data := map[string]interface{}{
-		"key":            info.Key,
-		"name":           info.Name,
-		"role":           string(info.Role),
-		"allowed_models": strings.Join(info.AllowedModels, ","), // comma-separated
-		"rpm":            info.RPM,
-		"burst":          info.Burst,
-		"token_quota":    info.TokenQuota,
-		"tokens_used":    info.TokensUsed,
-		"requests":       info.Requests,
-		"created_at":     info.CreatedAt.Unix(),
-		"disabled":       info.Disabled,
+		"key":            dto.Key,
+		"name":           dto.Name,
+		"role":           dto.Role,
+		"allowed_models": strings.Join(dto.AllowedModels, ","),
+		"rpm":            dto.RPM,
+		"burst":          dto.Burst,
+		"token_quota":    dto.TokenQuota,
+		"tokens_used":    dto.TokensUsed,
+		"requests":       dto.Requests,
+		"created_at":     dto.CreatedAt.Unix(),
+		"disabled":       dto.Disabled,
 		"updated_at":     time.Now().Unix(),
 	}
-	rk := RK_GATEWAY_KEY + info.Key
+	rk := RK_GATEWAY_KEY + dto.Key
 	if err := s.rdb.HSet(ctx, rk, data).Err(); err != nil {
 		slog.Warn("HSet failed", "module", "db-redis", "key", rk, "error", err)
 	}
 }
 
-// LoadGatewayKeys scans Redis for all gateway keys and returns them.
-func (s *DBStore) LoadGatewayKeys() ([]*GatewayKeyInfo, error) {
+// LoadGatewayKeys scans Redis for all gateway keys and returns them as DTOs.
+func (s *Store) LoadGatewayKeys() ([]GatewayKeyDTO, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
 	pattern := RK_GATEWAY_KEY + "*"
 	iter := s.rdb.Scan(ctx, 0, pattern, 100).Iterator()
-	var results []*GatewayKeyInfo
+	var results []GatewayKeyDTO
 
 	for iter.Next(ctx) {
 		rk := iter.Val()
@@ -432,9 +485,9 @@ func (s *DBStore) LoadGatewayKeys() ([]*GatewayKeyInfo, error) {
 		if err != nil {
 			continue
 		}
-		info := parseGatewayKeyFromRedis(vals)
-		if info != nil {
-			results = append(results, info)
+		dto, ok := parseGatewayKeyFromRedis(vals)
+		if ok {
+			results = append(results, dto)
 		}
 	}
 	if err := iter.Err(); err != nil {
@@ -444,7 +497,7 @@ func (s *DBStore) LoadGatewayKeys() ([]*GatewayKeyInfo, error) {
 }
 
 // DeleteGatewayKey removes a gateway key from Redis.
-func (s *DBStore) DeleteGatewayKey(key string) {
+func (s *Store) DeleteGatewayKey(key string) {
 	if s == nil {
 		return
 	}
@@ -457,7 +510,7 @@ func (s *DBStore) DeleteGatewayKey(key string) {
 }
 
 // IncrementGatewayKeyTokens atomically increments tokens_used for a key.
-func (s *DBStore) IncrementGatewayKeyTokens(key string, amount int64) {
+func (s *Store) IncrementGatewayKeyTokens(key string, amount int64) {
 	if s == nil {
 		return
 	}
@@ -470,7 +523,7 @@ func (s *DBStore) IncrementGatewayKeyTokens(key string, amount int64) {
 }
 
 // IncrementGatewayKeyRequests atomically increments requests count for a key.
-func (s *DBStore) IncrementGatewayKeyRequests(key string) {
+func (s *Store) IncrementGatewayKeyRequests(key string) {
 	if s == nil {
 		return
 	}
@@ -482,16 +535,17 @@ func (s *DBStore) IncrementGatewayKeyRequests(key string) {
 	}
 }
 
-// parseGatewayKeyFromRedis builds a GatewayKeyInfo from Redis HASH fields.
-func parseGatewayKeyFromRedis(vals map[string]string) *GatewayKeyInfo {
+// parseGatewayKeyFromRedis builds a GatewayKeyDTO from Redis HASH fields.
+// Second return is false when the row is empty/malformed.
+func parseGatewayKeyFromRedis(vals map[string]string) (GatewayKeyDTO, bool) {
 	key := vals["key"]
 	if key == "" {
-		return nil
+		return GatewayKeyDTO{}, false
 	}
-	info := &GatewayKeyInfo{
+	dto := GatewayKeyDTO{
 		Key:        key,
 		Name:       vals["name"],
-		Role:       KeyRole(vals["role"]),
+		Role:       vals["role"],
 		RPM:        atoiSafe(vals["rpm"]),
 		Burst:      atoiSafe(vals["burst"]),
 		TokenQuota: atollSafe(vals["token_quota"]),
@@ -499,24 +553,18 @@ func parseGatewayKeyFromRedis(vals map[string]string) *GatewayKeyInfo {
 		Requests:   atollSafe(vals["requests"]),
 		Disabled:   vals["disabled"] == "true" || vals["disabled"] == "1",
 	}
-	// Backward compat: keys created before role field existed default to admin
-	// (they were bootstrap/trusted keys). New keys get role from API.
-	if info.Role == "" {
-		info.Role = RoleAdmin
-	}
-	// Parse allowed_models (comma-separated → []string)
 	if am := vals["allowed_models"]; am != "" {
 		for _, m := range strings.Split(am, ",") {
 			m = strings.TrimSpace(m)
 			if m != "" {
-				info.AllowedModels = append(info.AllowedModels, m)
+				dto.AllowedModels = append(dto.AllowedModels, m)
 			}
 		}
 	}
 	if ts := atollSafe(vals["created_at"]); ts > 0 {
-		info.CreatedAt = time.Unix(ts, 0)
+		dto.CreatedAt = time.Unix(ts, 0)
 	}
-	return info
+	return dto, true
 }
 
 // atoiSafe parses an int from string, returning 0 on error.
@@ -537,14 +585,13 @@ func atollSafe(s string) int64 {
 	return n
 }
 
-
 // ============================================================================
-// CLICKHOUSE — Async Log Writers (non-blocking via channels)
+// CLICKHOUSE — async log writers (non-blocking via channels)
 // ============================================================================
 
 // LogRequest queues a request log for async ClickHouse insert.
 // Non-blocking: drops if buffer full (never blocks request processing).
-func (s *DBStore) LogRequest(r RequestLog) {
+func (s *Store) LogRequest(r RequestLog) {
 	if s == nil {
 		return
 	}
@@ -555,7 +602,7 @@ func (s *DBStore) LogRequest(r RequestLog) {
 	}
 }
 
-func (s *DBStore) LogRefresh(r RefreshLog) {
+func (s *Store) LogRefresh(r RefreshLog) {
 	if s == nil {
 		return
 	}
@@ -566,7 +613,7 @@ func (s *DBStore) LogRefresh(r RefreshLog) {
 	}
 }
 
-func (s *DBStore) LogEvent(e AccountEvent) {
+func (s *Store) LogEvent(e AccountEvent) {
 	if s == nil {
 		return
 	}
@@ -581,11 +628,10 @@ func bodyString(raw json.RawMessage) string {
 	if len(raw) == 0 {
 		return ""
 	}
-	// Unlimited full body — ClickHouse ZSTD handles large chat payloads.
 	return string(raw)
 }
 
-func (s *DBStore) consumeRequestLogs() {
+func (s *Store) consumeRequestLogs() {
 	defer s.wg.Done()
 	batch := make([]RequestLog, 0, 200)
 	ticker := time.NewTicker(LOG_FLUSH_INTERVAL)
@@ -650,7 +696,6 @@ func (s *DBStore) consumeRequestLogs() {
 		case <-ticker.C:
 			flush()
 		case <-s.done:
-			// Drain remaining items from channel on shutdown.
 			flush()
 			return
 		}
@@ -664,7 +709,7 @@ func max0(n int) int {
 	return n
 }
 
-func (s *DBStore) consumeRefreshLogs() {
+func (s *Store) consumeRefreshLogs() {
 	defer s.wg.Done()
 	batch := make([]RefreshLog, 0, 50)
 	ticker := time.NewTicker(LOG_FLUSH_INTERVAL)
@@ -712,7 +757,7 @@ func (s *DBStore) consumeRefreshLogs() {
 	}
 }
 
-func (s *DBStore) consumeAccountEvents() {
+func (s *Store) consumeAccountEvents() {
 	defer s.wg.Done()
 	batch := make([]AccountEvent, 0, 50)
 	ticker := time.NewTicker(LOG_FLUSH_INTERVAL)
@@ -761,20 +806,20 @@ func (s *DBStore) consumeAccountEvents() {
 }
 
 // ============================================================================
-// CLICKHOUSE — History Queries (dashboard / analytics)
+// CLICKHOUSE — history queries (dashboard / analytics)
 // ============================================================================
 
 type RequestStats struct {
-	TotalRequests   int     `json:"total_requests"`
-	TotalErrors     int     `json:"total_errors"`
-	ErrorRate       float64 `json:"error_rate_pct"`
-	AvgLatencyMs    float64 `json:"avg_latency_ms"`
-	TotalTokensIn   int     `json:"total_tokens_in"`
-	TotalTokensOut  int     `json:"total_tokens_out"`
-	TotalTokens     int     `json:"total_tokens"`
+	TotalRequests  int     `json:"total_requests"`
+	TotalErrors    int     `json:"total_errors"`
+	ErrorRate      float64 `json:"error_rate_pct"`
+	AvgLatencyMs   float64 `json:"avg_latency_ms"`
+	TotalTokensIn  int     `json:"total_tokens_in"`
+	TotalTokensOut int     `json:"total_tokens_out"`
+	TotalTokens    int     `json:"total_tokens"`
 }
 
-func (s *DBStore) GetRequestStats(since time.Time) (*RequestStats, error) {
+func (s *Store) GetRequestStats(since time.Time) (*RequestStats, error) {
 	if s == nil || s.ch == nil {
 		return &RequestStats{}, nil
 	}
@@ -810,16 +855,16 @@ func (s *DBStore) GetRequestStats(since time.Time) (*RequestStats, error) {
 }
 
 type ModelStats struct {
-	Model         string  `json:"model"`
-	TotalRequests int     `json:"total_requests"`
-	TotalErrors   int     `json:"total_errors"`
-	AvgLatencyMs  float64 `json:"avg_latency_ms"`
-	TotalTokensIn int     `json:"total_tokens_in"`
-	TotalTokensOut int    `json:"total_tokens_out"`
-	TotalTokens   int     `json:"total_tokens"`
+	Model          string  `json:"model"`
+	TotalRequests  int     `json:"total_requests"`
+	TotalErrors    int     `json:"total_errors"`
+	AvgLatencyMs   float64 `json:"avg_latency_ms"`
+	TotalTokensIn  int     `json:"total_tokens_in"`
+	TotalTokensOut int     `json:"total_tokens_out"`
+	TotalTokens    int     `json:"total_tokens"`
 }
 
-func (s *DBStore) GetModelStats(since time.Time, limit int) ([]ModelStats, error) {
+func (s *Store) GetModelStats(since time.Time, limit int) ([]ModelStats, error) {
 	if s == nil || s.ch == nil {
 		return []ModelStats{}, nil
 	}
@@ -865,17 +910,6 @@ func (s *DBStore) GetModelStats(since time.Time, limit int) ([]ModelStats, error
 	return results, nil
 }
 
-// UpsertGrokAccount is a no-op for history DB — Redis is source of truth.
-// Kept for API compatibility with Refresh() callers.
-func (s *DBStore) UpsertGrokAccount(acc *GrokAccount) {
-	// intentionally empty — credentials live in Redis only
-}
-
-// UpsertCBKey is a no-op (Redis is source of truth for CB credits).
-func (s *DBStore) UpsertCBKey(key string, creditsUsed float64, totalReqs int64, disabled bool) {
-	// intentionally empty
-}
-
 // GetRecentRequests returns latest request logs for dashboard table.
 // ID is a decimal string so JavaScript JSON.parse does not lose UInt64 precision
 // (Number.MAX_SAFE_INTEGER is only 2^53-1; our random UInt64 ids exceed that).
@@ -895,7 +929,7 @@ type RecentRequest struct {
 	ErrorMsg   string `json:"error_msg,omitempty"`
 }
 
-func (s *DBStore) GetRecentRequests(limit int) ([]RecentRequest, error) {
+func (s *Store) GetRecentRequests(limit int) ([]RecentRequest, error) {
 	if s == nil || s.ch == nil {
 		return []RecentRequest{}, nil
 	}
@@ -946,7 +980,7 @@ func (s *DBStore) GetRecentRequests(limit int) ([]RecentRequest, error) {
 	return out, nil
 }
 
-// GetRequestDetail fetches a single request log by ID, including full JSON bodies.
+// RequestDetail is a single request log with full JSON bodies.
 type RequestDetail struct {
 	ID           string          `json:"id"`
 	Timestamp    string          `json:"timestamp"`
@@ -965,11 +999,10 @@ type RequestDetail struct {
 	ResponseBody json.RawMessage `json:"response_body"`
 }
 
-func (s *DBStore) GetRequestDetail(id uint64) (*RequestDetail, error) {
+func (s *Store) GetRequestDetail(id uint64) (*RequestDetail, error) {
 	if s == nil || s.ch == nil {
 		return nil, fmt.Errorf("clickhouse not available")
 	}
-	// Large full bodies can take longer to pull over the wire.
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	var d RequestDetail
@@ -1007,10 +1040,8 @@ func (s *DBStore) GetRequestDetail(id uint64) (*RequestDetail, error) {
 }
 
 // Close gracefully shuts down DB connections.
-func (s *DBStore) Close() {
-	// Signal consumer goroutines to drain and exit.
+func (s *Store) Close() {
 	close(s.done)
-	// Wait for consumers to flush buffered logs, with a 10s safety cap.
 	done := make(chan struct{})
 	go func() { s.wg.Wait(); close(done) }()
 	select {

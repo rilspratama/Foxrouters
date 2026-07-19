@@ -123,8 +123,8 @@ func (a *GrokAccount) refreshLocked() error {
 	slog.Info("refresh ok", "module", "grok-refresh", "email", email, "expires_in_s", expIn)
 	// Persist outside lock (singleflight guarantees one writer per email)
 	if a.db != nil {
-		a.db.SaveGrokAccount(a)
-		a.db.UpsertGrokAccount(a)
+		dbSaveGrokAccount(a.db, a)
+		dbUpsertGrokAccount(a.db, a)
 		a.db.LogRefresh(RefreshLog{
 			Timestamp: time.Now(), AccountEmail: email, Provider: "grok",
 			Success: true,
@@ -167,7 +167,7 @@ func (am *GrokAccountManager) Len() int {
 
 // LoadFromRedis loads ALL grok accounts from Redis (single source of truth).
 func (am *GrokAccountManager) LoadFromRedis() error {
-	if am.db == nil || am.db.rdb == nil {
+	if am.db == nil || !am.db.Ready() {
 		return fmt.Errorf("redis not available")
 	}
 	redisState, err := am.db.LoadGrokAccounts()
@@ -299,7 +299,7 @@ func (am *GrokAccountManager) reenableCooldowns() {
 	}
 	for _, acc := range reenabled {
 		if acc.db != nil {
-			acc.db.SaveGrokAccount(acc)
+			dbSaveGrokAccount(acc.db, acc)
 		}
 		slog.Info("re-enabled cooldown account", "module", "grok", "email", acc.Email)
 	}
@@ -350,7 +350,7 @@ func autoRefreshWorker(am *GrokAccountManager) {
 						acc.disabledAt = time.Time{}
 						acc.mu.Unlock()
 						if acc.db != nil {
-							acc.db.SaveGrokAccount(acc)
+							dbSaveGrokAccount(acc.db, acc)
 						}
 						slog.Warn("account revoked, disabled", "module", "grok-worker", "email", acc.Email)
 					} else {
@@ -494,7 +494,7 @@ func proxyGrok(c *gin.Context, body []byte, am *GrokAccountManager, clientStream
 			}
 			acc.mu.Unlock()
 			if acc.db != nil {
-				acc.db.SaveGrokAccount(acc)
+				dbSaveGrokAccount(acc.db, acc)
 			}
 			continue
 		}

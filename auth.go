@@ -106,7 +106,7 @@ func newAuthManager(db *DBStore) *AuthManager {
 
 	// 1. Load from Redis (single source of truth)
 	if db != nil {
-		if redisKeys, err := db.LoadGatewayKeys(); err == nil && len(redisKeys) > 0 {
+		if redisKeys, err := dbLoadGatewayKeys(db); err == nil && len(redisKeys) > 0 {
 			for _, info := range redisKeys {
 				am.keys[info.Key] = info
 			}
@@ -161,7 +161,7 @@ func newAuthManager(db *DBStore) *AuthManager {
 				}
 				am.keys[k] = info
 				if db != nil {
-					db.SaveGatewayKey(info)
+					dbSaveGatewayKey(db, info)
 				}
 			}
 		}
@@ -192,7 +192,7 @@ func newAuthManager(db *DBStore) *AuthManager {
 			}
 			am.keys[bootstrapKey] = info
 			if db != nil {
-				db.SaveGatewayKey(info)
+				dbSaveGatewayKey(db, info)
 			}
 			// Write to bootstrap-key.txt (chmod 600) so user can retrieve it.
 			// File is gitignored. Delete after first login.
@@ -292,7 +292,7 @@ func (am *AuthManager) AddWithRole(key, name string, role KeyRole, allowedModels
 	am.keys[key] = info
 	am.mu.Unlock()
 	if am.db != nil {
-		am.db.SaveGatewayKey(info)
+		dbSaveGatewayKey(am.db, info)
 	}
 	return info
 }
@@ -339,7 +339,7 @@ func (am *AuthManager) Update(key, name string, role KeyRole, allowedModels []st
 	info.KeyMasked = maskKey(info.Key)
 	am.mu.Unlock()
 	if am.db != nil {
-		am.db.SaveGatewayKey(info)
+		dbSaveGatewayKey(am.db, info)
 	}
 	return true
 }
@@ -369,7 +369,7 @@ func (am *AuthManager) IncrementTokens(key string, amount int64) {
 		am.db.IncrementGatewayKeyTokens(key, amount)
 		am.db.IncrementGatewayKeyRequests(key)
 		if info.Disabled {
-			am.db.SaveGatewayKey(info)
+			dbSaveGatewayKey(am.db, info)
 		}
 	}
 }
