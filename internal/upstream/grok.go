@@ -849,15 +849,34 @@ var sseBufPool = sync.Pool{
 
 // CleanupDisabled removes all permanently disabled grok accounts (disabledAt is zero time).
 // Returns the count of removed accounts. Does NOT affect cooldown accounts (disabledAt set).
+// Note: permanently disabled accounts are the same ones reported as token_status="banned".
 func (am *GrokAccountManager) CleanupDisabled() int {
+	return am.cleanupBy(func(a *GrokAccount) bool {
+		a.mu.RLock()
+		defer a.mu.RUnlock()
+		// permanently disabled == banned (disabledAt zero)
+		return a.disabled && a.disabledAt.IsZero()
+	}, "disabled")
+}
+
+// CleanupBanned removes all banned grok accounts (token_status == "banned").
+// In this codebase banned ≡ permanently disabled (disabled && disabledAt.IsZero()).
+// Cooldown accounts are preserved.
+func (am *GrokAccountManager) CleanupBanned() int {
+	return am.cleanupBy(func(a *GrokAccount) bool {
+		a.mu.RLock()
+		defer a.mu.RUnlock()
+		return a.disabled && a.disabledAt.IsZero()
+	}, "banned")
+}
+
+// cleanupBy removes accounts matching pred. Returns removed count.
+func (am *GrokAccountManager) cleanupBy(pred func(*GrokAccount) bool, label string) int {
 	am.mu.Lock()
 	var removed int
 	var kept []*GrokAccount
 	for _, a := range am.accounts {
-		a.mu.RLock()
-		permDisabled := a.disabled && a.disabledAt.IsZero()
-		a.mu.RUnlock()
-		if permDisabled {
+		if pred(a) {
 			removed++
 			if am.db != nil {
 				am.db.DeleteGrokAccount(a.Email)
@@ -869,7 +888,7 @@ func (am *GrokAccountManager) CleanupDisabled() int {
 	am.accounts = kept
 	am.mu.Unlock()
 	if removed > 0 {
-		slog.Info("cleanup disabled grok accounts", "module", "grok", "removed", removed, "remaining", am.Len())
+		slog.Info("cleanup grok accounts", "module", "grok", "kind", label, "removed", removed, "remaining", am.Len())
 	}
 	return removed
 }

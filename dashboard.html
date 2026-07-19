@@ -1092,6 +1092,7 @@ body {
             <button class="btn-ghost" id="grokAddBtn" onclick="showAddGrokModal()" style="padding:5px 12px;font-size:12px;display:none">+ Add Account</button>
             <button class="btn-ghost" id="grokBulkBtn" onclick="showBulkGrokModal()" style="padding:5px 12px;font-size:12px;display:none">Bulk Import</button>
             <button class="btn-ghost" id="grokCleanupBtn" onclick="cleanupDisabled('grok')" style="padding:5px 12px;font-size:12px;color:var(--danger);display:none">Cleanup Disabled</button>
+            <button class="btn-ghost" id="grokCleanupBannedBtn" onclick="cleanupBanned('grok')" style="padding:5px 12px;font-size:12px;color:var(--danger);display:none">Cleanup Banned</button>
           </div>
         </div>
         <div id="cbPanel" class="tbl-scroll" style="max-height:500px">
@@ -1726,11 +1727,14 @@ function showTab(e, tab) {
   e.target.classList.add('active');
   document.getElementById('cbPanel').style.display = tab === 'cb' ? '' : 'none';
   document.getElementById('grokPanel').style.display = tab === 'grok' ? '' : 'none';
-  // Toggle add/bulk buttons to match active tab
+  // Toggle add/bulk/cleanup buttons to match active tab
   document.getElementById('cbAddBtn').style.display = tab === 'cb' ? '' : 'none';
   document.getElementById('cbBulkBtn').style.display = tab === 'cb' ? '' : 'none';
+  document.getElementById('cbCleanupBtn').style.display = tab === 'cb' ? '' : 'none';
   document.getElementById('grokAddBtn').style.display = tab === 'grok' ? '' : 'none';
   document.getElementById('grokBulkBtn').style.display = tab === 'grok' ? '' : 'none';
+  document.getElementById('grokCleanupBtn').style.display = tab === 'grok' ? '' : 'none';
+  document.getElementById('grokCleanupBannedBtn').style.display = tab === 'grok' ? '' : 'none';
 }
 
 /* ══════════════════════════════════════════════════════════
@@ -2451,6 +2455,20 @@ function cleanupDisabled(type) {
     loadCBStats();
   }).catch(function(e) {
     alert('Cleanup failed: ' + e.message);
+  });
+}
+
+function cleanupBanned(type) {
+  type = type || 'grok';
+  if (!confirm('Permanently delete all BANNED Grok accounts (token_status=banned)? Cooldown accounts are preserved. This cannot be undone.')) return;
+  apiFetch('/cleanup/banned?type=' + type, {
+    method: 'POST'
+  }).then(function(data) {
+    var msg = 'Banned Grok removed: ' + (data.grok_removed || 0) + ', remaining: ' + (data.grok_remaining || 0);
+    alert(msg);
+    refresh();
+  }).catch(function(e) {
+    alert('Cleanup banned failed: ' + e.message);
   });
 }
 

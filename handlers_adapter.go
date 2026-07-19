@@ -25,6 +25,7 @@ var (
 	handleDeleteAccount    = handlers.HandleDeleteAccount
 	handleDeleteCBKey      = handlers.HandleDeleteCBKey
 	handleCleanupDisabled  = handlers.HandleCleanupDisabled
+	handleCleanupBanned    = handlers.HandleCleanupBanned
 	handleHistory          = handlers.HandleHistory
 	handleRecentRequests   = handlers.HandleRecentRequests
 	handleHistoryDetail    = handlers.HandleHistoryDetail

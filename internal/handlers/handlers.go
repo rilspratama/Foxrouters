@@ -767,3 +767,23 @@ func HandleCleanupDisabled(grokAM *upstream.GrokAccountManager, cbKM *upstream.C
 		c.JSON(200, result)
 	}
 }
+
+// HandleCleanupBanned removes all banned Grok accounts (token_status == "banned").
+// Query param ?type=grok|all (default: grok). CB has no "banned" status.
+// Note: banned ≡ permanently disabled (disabled && disabledAt zero). Cooldown preserved.
+func HandleCleanupBanned(grokAM *upstream.GrokAccountManager) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		typ := c.DefaultQuery("type", "grok")
+		result := gin.H{"type": typ}
+
+		if typ == "grok" || typ == "all" {
+			removed := grokAM.CleanupBanned()
+			result["grok_removed"] = removed
+			result["grok_remaining"] = grokAM.Len()
+		}
+
+		slog.Info("cleanup banned", "module", "admin", "type", typ,
+			"grok_removed", result["grok_removed"])
+		c.JSON(200, result)
+	}
+}

@@ -204,6 +204,7 @@ func main() {
 	r.DELETE("/accounts/:email", adminAuth, handleDeleteAccount(grokAM))
 	r.DELETE("/cb/keys/:key", adminAuth, handleDeleteCBKey(cbKM))
 	r.POST("/cleanup/disabled", adminAuth, handleCleanupDisabled(grokAM, cbKM))
+	r.POST("/cleanup/banned", adminAuth, handleCleanupBanned(grokAM))
 	r.GET("/history", adminAuth, handleHistory(db))
 	r.GET("/history/recent", adminAuth, handleRecentRequests(db))
 	r.GET("/history/detail/:id", adminAuth, handleHistoryDetail(db))
