@@ -184,7 +184,7 @@ func main() {
 	loginLimiter := newLoginLimiter()
 	r.POST("/login", loginLimiter.middleware(), handleLogin(authMgr, sessions))
 	r.GET("/logout", handleLogout(sessions))
-	r.GET("/health", handleHealth(grokAM, cbKM, hc, authMgr))
+	r.GET("/health", handleHealth(grokAM, cbKM, hc, authMgr, sessions))
 	r.HEAD("/health", handleHealthMinimal())
 	// Prometheus scrape endpoint — public, no auth (scraper isolation is
 	// upstream's responsibility, e.g. a firewall / private network scrape).

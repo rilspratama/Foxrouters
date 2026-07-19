@@ -60,7 +60,7 @@ func HandleHealthMinimal() gin.HandlerFunc {
 }
 
 // HandleHealth reports overall status + (when authed) per-upstream telemetry.
-func HandleHealth(grokAM *upstream.GrokAccountManager, cbKM *upstream.CBKeyManager, hc *upstream.HealthChecker, am *auth.Manager) gin.HandlerFunc {
+func HandleHealth(grokAM *upstream.GrokAccountManager, cbKM *upstream.CBKeyManager, hc *upstream.HealthChecker, am *auth.Manager, sessions *auth.SessionStore) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		grokStats := hc.Grok.Stats()
 		cbStats := hc.CB.Stats()
@@ -86,9 +86,18 @@ func HandleHealth(grokAM *upstream.GrokAccountManager, cbKM *upstream.CBKeyManag
 				_ = info
 			}
 		} else if ck, err := c.Cookie("foxrouters_session"); err == nil && ck != "" {
-			if info := am.Get(ck); info != nil {
-				authed = true
-				_ = info
+			// P3-3: cookie is now a session token, resolve to API key.
+			var key string
+			if sessions != nil {
+				key = sessions.Lookup(ck)
+			} else {
+				key = ck // legacy fallback (pre-P3-3)
+			}
+			if key != "" {
+				if info := am.Get(key); info != nil {
+					authed = true
+					_ = info
+				}
 			}
 		}
 		if !authed {
