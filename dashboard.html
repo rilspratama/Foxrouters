@@ -2725,7 +2725,7 @@ async function loadCustomModels() {
   var tbody = document.getElementById('cmTableBody');
   if (!tbody) return;
   try {
-    var res = await api('/api/models/custom');
+    var res = await apiFetch('/api/models/custom');
     var models = res.models || {};
     var ids = Object.keys(models).sort();
     if (ids.length === 0) {
@@ -2760,7 +2760,7 @@ async function addCustomModel() {
     return;
   }
   try {
-    await api('/api/models/custom', {
+    await apiFetch('/api/models/custom', {
       method: 'POST',
       headers: {'content-type': 'application/json'},
       body: JSON.stringify({id: id, upstream: upstream, model_name: modelName, owned_by: ownedBy})
@@ -2780,7 +2780,7 @@ async function deleteCustomModel(id) {
   try {
     // Path may contain slashes (e.g. cb/kimi-k3) — encode each segment to
     // preserve them; server DELETE /api/models/custom/*id reads the raw path.
-    await api('/api/models/custom/' + id.split('/').map(encodeURIComponent).join('/'), {method: 'DELETE'});
+    await apiFetch('/api/models/custom/' + id.split('/').map(encodeURIComponent).join('/'), {method: 'DELETE'});
     loadCustomModels();
   } catch (e) {
     alert('Delete failed: ' + e.message);
@@ -2791,7 +2791,7 @@ async function loadAliases() {
   var tbody = document.getElementById('alTableBody');
   if (!tbody) return;
   try {
-    var res = await api('/api/aliases');
+    var res = await apiFetch('/api/aliases');
     var aliases = res.aliases || {};
     var names = Object.keys(aliases).sort();
     if (names.length === 0) {
@@ -2821,7 +2821,7 @@ async function addAlias() {
     return;
   }
   try {
-    await api('/api/aliases', {
+    await apiFetch('/api/aliases', {
       method: 'POST',
       headers: {'content-type': 'application/json'},
       body: JSON.stringify({alias: alias, target: target})
@@ -2838,7 +2838,7 @@ async function addAlias() {
 async function deleteAlias(alias) {
   if (!confirm('Delete alias "' + alias + '"?')) return;
   try {
-    await api('/api/aliases/' + encodeURIComponent(alias), {method: 'DELETE'});
+    await apiFetch('/api/aliases/' + encodeURIComponent(alias), {method: 'DELETE'});
     loadAliases();
   } catch (e) {
     alert('Delete failed: ' + e.message);
