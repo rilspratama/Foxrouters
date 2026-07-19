@@ -1204,7 +1204,7 @@ body {
             Group models under a single virtual name — call it as <code>combo/&lt;name&gt;</code>.
             <strong>Fallback</strong> tries models in order (retry on 5xx). <strong>Round Robin</strong> rotates models across requests.
           </div>
-          <div style="display:grid;grid-template-columns:1.5fr 1fr 3fr 2fr auto;gap:8px;margin-bottom:12px;align-items:end">
+          <div style="display:grid;grid-template-columns:1.5fr 1fr 2fr auto;gap:8px;margin-bottom:12px;align-items:end">
             <div>
               <label style="font-size:11px;color:var(--text-tertiary);display:block;margin-bottom:4px">Name</label>
               <input type="text" id="cbxName" placeholder="smart-fallback" style="width:100%;padding:6px 10px;background:var(--bg);border:1px solid var(--border-strong);border-radius:var(--radius-sm);color:var(--text-primary);font-size:12px;font-family:var(--mono)" />
@@ -1217,14 +1217,23 @@ body {
               </select>
             </div>
             <div>
-              <label style="font-size:11px;color:var(--text-tertiary);display:block;margin-bottom:4px">Models (one per line or comma-separated)</label>
-              <textarea id="cbxModels" rows="2" placeholder="cb/gpt-5.5&#10;cb/claude-sonnet-4.6&#10;grok-4.5" style="width:100%;padding:6px 10px;background:var(--bg);border:1px solid var(--border-strong);border-radius:var(--radius-sm);color:var(--text-primary);font-size:12px;font-family:var(--mono);resize:vertical"></textarea>
-            </div>
-            <div>
               <label style="font-size:11px;color:var(--text-tertiary);display:block;margin-bottom:4px">Description (optional)</label>
               <input type="text" id="cbxDesc" placeholder="GPT then Claude" style="width:100%;padding:6px 10px;background:var(--bg);border:1px solid var(--border-strong);border-radius:var(--radius-sm);color:var(--text-primary);font-size:12px" />
             </div>
             <button class="btn-primary" onclick="addCombo()" style="padding:7px 14px;border-radius:var(--radius-sm);background:var(--brand);color:#fff;border:none;font-size:12px;font-weight:500;cursor:pointer">+ Create</button>
+          </div>
+          <div style="margin-bottom:12px">
+            <label style="font-size:11px;color:var(--text-tertiary);display:block;margin-bottom:4px">Models</label>
+            <div style="display:flex;gap:6px;margin-bottom:4px">
+              <button type="button" class="btn-ghost" onclick="toggleAllComboModels(true)" style="padding:3px 8px;font-size:11px">Select All</button>
+              <button type="button" class="btn-ghost" onclick="toggleAllComboModels(false)" style="padding:3px 8px;font-size:11px">Clear</button>
+              <button type="button" class="btn-ghost" onclick="toggleComboGroup('grok')" style="padding:3px 8px;font-size:11px">Grok only</button>
+              <button type="button" class="btn-ghost" onclick="toggleComboGroup('cb')" style="padding:3px 8px;font-size:11px">CodeBuddy only</button>
+              <span id="cbxSelectedCount" style="margin-left:auto;font-size:11px;color:var(--text-tertiary);align-self:center">0 selected</span>
+            </div>
+            <div id="cbxModelSelector" style="border:1px solid var(--border-strong);border-radius:var(--radius-sm);background:var(--bg);max-height:200px;overflow-y:auto;padding:8px">
+              <div style="text-align:center;padding:8px;color:var(--text-tertiary);font-size:12px">Loading models...</div>
+            </div>
           </div>
           <div id="cbxError" style="display:none;color:var(--red);font-size:12px;padding:6px 10px;background:rgba(255,80,80,0.08);border-radius:var(--radius-sm);margin-bottom:8px"></div>
           <table style="width:100%;border-collapse:collapse;font-size:12px">
@@ -2150,7 +2159,91 @@ function switchMTab(tab) {
   });
   if (tab === 'combos') {
     loadCombos();
+    loadComboModelSelector();
   }
+}
+
+// === Combo Model Selector (checkbox-based, mirip API keys selector) ===
+var _comboModelsCache = [];
+
+function loadComboModelSelector() {
+  var container = document.getElementById('cbxModelSelector');
+  if (!container) return;
+  if (_comboModelsCache.length > 0) {
+    renderComboModelSelector(_comboModelsCache);
+    return;
+  }
+  container.innerHTML = '<div style="text-align:center;padding:8px;color:var(--text-tertiary);font-size:12px">Loading models...</div>';
+  fetchJSON('/v1/models').then(function(data) {
+    _comboModelsCache = (data.data || []).map(function(m) { return m.id; }).sort();
+    renderComboModelSelector(_comboModelsCache);
+  }).catch(function(e) {
+    container.innerHTML = '<div style="padding:8px;color:var(--red);font-size:12px">Failed to load: ' + escHtml(e.message) + '</div>';
+  });
+}
+
+function renderComboModelSelector(models) {
+  var container = document.getElementById('cbxModelSelector');
+  if (!container) return;
+  if (!models || models.length === 0) {
+    container.innerHTML = '<div style="padding:8px;color:var(--text-tertiary);font-size:12px">No models available</div>';
+    return;
+  }
+  var groups = {};
+  models.forEach(function(m) {
+    var prefix = m.startsWith('grok-') ? 'grok' : (m.startsWith('cb/') ? 'cb' : (m.startsWith('combo/') ? 'combo' : 'other'));
+    if (!groups[prefix]) groups[prefix] = [];
+    groups[prefix].push(m);
+  });
+  var html = '';
+  ['grok', 'cb', 'combo', 'other'].forEach(function(prefix) {
+    if (!groups[prefix]) return;
+    var label = prefix === 'grok' ? 'Grok' : (prefix === 'cb' ? 'CodeBuddy' : (prefix === 'combo' ? 'Combos' : 'Other'));
+    html += '<div style="margin-bottom:6px">';
+    html += '<div style="display:flex;align-items:center;gap:6px;padding:4px 0;border-bottom:1px solid var(--border);margin-bottom:4px">';
+    html += '<span style="font-size:11px;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.5px">' + escHtml(label) + '</span>';
+    html += '</div>';
+    groups[prefix].forEach(function(m) {
+      html += '<label style="display:flex;align-items:center;gap:6px;padding:3px 8px;cursor:pointer;font-size:12px">';
+      html += '<input type="checkbox" class="comboModelCheckbox" value="' + escHtml(m) + '" style="accent-color:var(--brand)" onchange="updateComboSelectedCount()" />';
+      html += '<span style="font-family:var(--mono);color:var(--text-secondary)">' + escHtml(m) + '</span>';
+      html += '</label>';
+    });
+    html += '</div>';
+  });
+  container.innerHTML = html;
+  updateComboSelectedCount();
+}
+
+function getSelectedComboModels() {
+  var checkboxes = document.querySelectorAll('.comboModelCheckbox');
+  var selected = [];
+  checkboxes.forEach(function(cb) {
+    if (cb.checked && cb.value) selected.push(cb.value);
+  });
+  return selected;
+}
+
+function toggleAllComboModels(check) {
+  var checkboxes = document.querySelectorAll('.comboModelCheckbox');
+  checkboxes.forEach(function(cb) { cb.checked = check; });
+  updateComboSelectedCount();
+}
+
+function toggleComboGroup(prefix) {
+  var checkboxes = document.querySelectorAll('.comboModelCheckbox');
+  checkboxes.forEach(function(cb) {
+    var isGroup = (prefix === 'grok' && cb.value.startsWith('grok-')) ||
+                  (prefix === 'cb' && cb.value.startsWith('cb/'));
+    cb.checked = isGroup;
+  });
+  updateComboSelectedCount();
+}
+
+function updateComboSelectedCount() {
+  var count = getSelectedComboModels().length;
+  var el = document.getElementById('cbxSelectedCount');
+  if (el) el.textContent = count + ' selected';
 }
 
 async function loadModels() {
@@ -2970,16 +3063,12 @@ async function loadCombos() {
 async function addCombo() {
   var name = document.getElementById('cbxName').value.trim();
   var strategy = document.getElementById('cbxStrategy').value;
-  var modelsRaw = document.getElementById('cbxModels').value;
   var desc = document.getElementById('cbxDesc').value.trim();
   var errBox = document.getElementById('cbxError');
   errBox.style.display = 'none';
 
-  // Parse models: split on newline OR comma, trim, drop empties.
-  var models = modelsRaw
-    .split(/[\n,]+/)
-    .map(function(s) { return s.trim(); })
-    .filter(function(s) { return s.length > 0; });
+  // Get selected models from checkbox selector
+  var models = getSelectedComboModels();
 
   if (!name) {
     errBox.textContent = 'Name is required';
@@ -2987,7 +3076,7 @@ async function addCombo() {
     return;
   }
   if (models.length === 0) {
-    errBox.textContent = 'At least one model is required';
+    errBox.textContent = 'Select at least one model';
     errBox.style.display = 'block';
     return;
   }
@@ -2998,7 +3087,9 @@ async function addCombo() {
       body: JSON.stringify({name: name, strategy: strategy, models: models, description: desc})
     });
     document.getElementById('cbxName').value = '';
-    document.getElementById('cbxModels').value = '';
+    document.getElementById('cbxDesc').value = '';
+    // Clear all checkboxes
+    toggleAllComboModels(false);
     document.getElementById('cbxDesc').value = '';
     loadCombos();
   } catch (e) {
