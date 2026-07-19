@@ -2,7 +2,10 @@
 // Kept in a separate file to keep handlers.go focused on route logic.
 package handlers
 
-import "strings"
+import (
+	"html"
+	"strings"
+)
 
 // loginPageHTML returns the login page with FoxRouters branding.
 const loginPageHTML = `<!DOCTYPE html>
@@ -96,8 +99,10 @@ body {
 </html>`
 
 // loginPageHTMLWithError returns the login page with an error message.
+// The message is HTML-escaped to prevent reflected XSS if any future code
+// path passes user-controlled input to this function.
 func loginPageHTMLWithError(msg string) string {
 	return strings.Replace(loginPageHTML,
 		`<div class="login-sub">Gateway Control Panel</div>`,
-		`<div class="login-sub">Gateway Control Panel</div><div class="login-error">`+msg+`</div>`, 1)
+		`<div class="login-sub">Gateway Control Panel</div><div class="login-error">`+html.EscapeString(msg)+`</div>`, 1)
 }
