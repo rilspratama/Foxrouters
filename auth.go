@@ -244,6 +244,18 @@ func (am *AuthManager) Get(key string) *GatewayKeyInfo {
 	return am.keys[key]
 }
 
+// LookupKey implements ratelimit.AuthLookup. Returns per-key rpm/burst if
+// the key is registered. ok=false means the key isn't in the pool.
+func (am *AuthManager) LookupKey(key string) (rpm, burst int, ok bool) {
+	am.mu.RLock()
+	defer am.mu.RUnlock()
+	info, exists := am.keys[key]
+	if !exists {
+		return 0, 0, false
+	}
+	return info.RPM, info.Burst, true
+}
+
 // GetAll returns a slice copy of all keys.
 func (am *AuthManager) GetAll() []*GatewayKeyInfo {
 	am.mu.RLock()

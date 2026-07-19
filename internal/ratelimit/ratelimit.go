@@ -1,4 +1,11 @@
-package main
+// Package ratelimit provides per-client token-bucket rate limiting plus a
+// couple of small companion middlewares (security headers, request ID, gzip)
+// that don't really belong anywhere else.
+//
+// The rate limiter accepts an AuthLookup interface so it doesn't have to
+// depend on the concrete AuthManager type. Any type providing
+// LookupKey(key) → (rpm, burst, ok) can plug in.
+package ratelimit
 
 import (
 	"compress/gzip"
@@ -12,9 +19,22 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// securityHeadersMiddleware adds security headers to all responses.
+// AuthLookup is the tiny slice of AuthManager that the rate-limit middleware
+// needs. Kept as an interface so this package can live in internal/ without
+// pulling in the auth package (which would create a cycle once auth also
+// wants to log through internal/db, etc).
+//
+// LookupKey returns per-key overrides: rpm and burst.
+//   - ok=false  → key not registered / no override, fall back to global limits.
+//   - rpm == 0  → key is explicitly unlimited (bypass rate limit entirely).
+//   - rpm  > 0  → use this rpm (and burst if > 0).
+type AuthLookup interface {
+	LookupKey(key string) (rpm, burst int, ok bool)
+}
+
+// SecurityHeadersMiddleware adds security headers to all responses.
 // Protects dashboard from clickjacking, MIME sniffing, and limits XSS impact.
-func securityHeadersMiddleware() gin.HandlerFunc {
+func SecurityHeadersMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		h := c.Writer.Header()
 		h.Set("X-Content-Type-Options", "nosniff")
@@ -33,12 +53,11 @@ func securityHeadersMiddleware() gin.HandlerFunc {
 	}
 }
 
-// requestIDMiddleware generates a unique ID per request (or honors inbound X-Request-ID),
+// RequestIDMiddleware generates a unique ID per request (or honors inbound X-Request-ID),
 // sets it on the response header, and stores it in the gin context for logging.
 // Format: 8-byte hex (16 chars) — short enough for logs, unique enough for correlation.
-func requestIDMiddleware() gin.HandlerFunc {
+func RequestIDMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		// Honor inbound X-Request-ID if provided (e.g. from upstream load balancer)
 		rid := c.GetHeader("X-Request-ID")
 		if rid == "" {
 			b := make([]byte, 8)
@@ -54,40 +73,24 @@ func requestIDMiddleware() gin.HandlerFunc {
 	}
 }
 
-// gzipMiddleware compresses responses for clients that accept gzip.
-// Creates the gzip.Writer once, closes it once after the handler finishes.
+// GzipMiddleware compresses responses for clients that accept gzip.
 // Skips SSE / chat paths — gzip buffering breaks streaming.
-func gzipMiddleware() gin.HandlerFunc {
+func GzipMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if !strings.Contains(c.GetHeader("Accept-Encoding"), "gzip") {
 			c.Next()
 			return
 		}
-		// Skip streaming requests — gzip buffers output and breaks SSE.
-		// The OpenAI SDK sends stream:true in the JSON body, not Accept:
-		// text/event-stream, so we must check the request body too.
-		// The proxyGrok/proxyCodeBuddy handlers set Content-Type to
-		// text/event-stream on the RESPONSE, but by then gzip middleware
-		// has already wrapped the writer. So we check the Accept header
-		// OR the stream flag in the body.
 		accept := c.GetHeader("Accept")
 		if strings.Contains(accept, "text/event-stream") {
 			c.Next()
 			return
 		}
-		// Also skip for /v1/chat/completions with stream=true (OpenAI SDK
-		// sends Accept: application/json even for streaming requests)
 		if c.Request.URL.Path == "/v1/chat/completions" {
-			// Peek at body to check stream flag — but we can't re-read body.
-			// Instead, just skip gzip for ALL chat completions requests
-			// since they may be streaming. Non-stream responses are small
-			// enough that gzip doesn't matter.
+			// Chat completions may stream — skip gzip.
 			c.Next()
 			return
 		}
-		// Create writer once, close once after handler completes.
-		// Old bug: defer Close() inside Write() closed the stream after
-		// the first Write, corrupting multi-chunk JSON responses.
 		c.Header("Content-Encoding", "gzip")
 		c.Header("Vary", "Accept-Encoding")
 		gz := gzip.NewWriter(c.Writer)
@@ -110,14 +113,13 @@ func (w *gzipResponseWriter) WriteString(s string) (int, error) {
 	return w.Write([]byte(s))
 }
 
-// ClientRateLimiter implements per-client sliding window rate limiting.
-type ClientRateLimiter struct {
+// Limiter implements per-client token-bucket rate limiting.
+type Limiter struct {
 	limit   int
 	burst   int
 	window  time.Duration
 	clients map[string]*clientBucket
 	mu      sync.Mutex
-	db      *DBStore // optional: for logging rate-limited requests
 }
 
 type clientBucket struct {
@@ -125,28 +127,29 @@ type clientBucket struct {
 	lastTime time.Time
 }
 
-func newRateLimiter(limit, burst int, window time.Duration) *ClientRateLimiter {
-	rl := &ClientRateLimiter{
+// New creates a new limiter with the given global limit/burst/window.
+// A background goroutine cleans up idle clients every 5 minutes.
+func New(limit, burst int, window time.Duration) *Limiter {
+	rl := &Limiter{
 		clients: make(map[string]*clientBucket),
 		limit:   limit,
 		burst:   burst,
 		window:  window,
 	}
-	// Cleanup stale entries every 5 minutes
 	go rl.cleanup()
 	return rl
 }
 
-// Allow checks if a client is within rate limit (global default). Returns true if allowed.
-func (rl *ClientRateLimiter) Allow(clientID string) bool {
+// Allow checks if a client is within the global rate limit.
+func (rl *Limiter) Allow(clientID string) bool {
 	return rl.AllowWithLimit(clientID, rl.limit, rl.burst)
 }
 
 // AllowWithLimit checks if a client is within a specific RPM/burst limit.
-// If rpm <= 0, allows unlimited.
-func (rl *ClientRateLimiter) AllowWithLimit(clientID string, rpm, burst int) bool {
+// rpm <= 0 → allow unlimited.
+func (rl *Limiter) AllowWithLimit(clientID string, rpm, burst int) bool {
 	if rpm <= 0 {
-		return true // unlimited
+		return true
 	}
 	if burst <= 0 {
 		burst = rpm
@@ -157,7 +160,6 @@ func (rl *ClientRateLimiter) AllowWithLimit(clientID string, rpm, burst int) boo
 	now := time.Now()
 	bucket, exists := rl.clients[clientID]
 	if !exists {
-		// New client starts with burst tokens
 		rl.clients[clientID] = &clientBucket{
 			tokens:   float64(burst) - 1,
 			lastTime: now,
@@ -165,7 +167,6 @@ func (rl *ClientRateLimiter) AllowWithLimit(clientID string, rpm, burst int) boo
 		return true
 	}
 
-	// Refill tokens based on elapsed time (token bucket)
 	elapsed := now.Sub(bucket.lastTime)
 	refill := elapsed.Seconds() * float64(rpm) / rl.window.Seconds()
 	bucket.tokens += refill
@@ -181,7 +182,7 @@ func (rl *ClientRateLimiter) AllowWithLimit(clientID string, rpm, burst int) boo
 	return false
 }
 
-func (rl *ClientRateLimiter) cleanup() {
+func (rl *Limiter) cleanup() {
 	ticker := time.NewTicker(5 * time.Minute)
 	defer ticker.Stop()
 	for range ticker.C {
@@ -196,17 +197,16 @@ func (rl *ClientRateLimiter) cleanup() {
 	}
 }
 
-// RateLimitMiddleware applies per-client rate limiting with per-key overrides.
-func RateLimitMiddleware(rl *ClientRateLimiter, am *AuthManager) gin.HandlerFunc {
+// Middleware applies per-client rate limiting with per-key overrides.
+// am may be nil (falls back to global limits + client IP as the client id).
+func Middleware(rl *Limiter, am AuthLookup) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		// Skip rate limit for health/info endpoints
 		path := c.Request.URL.Path
 		if path == "/health" || path == "/" || path == "/dashboard" {
 			c.Next()
 			return
 		}
 
-		// Client ID = full API key (or IP if no auth)
 		clientID := c.ClientIP()
 		fullKey := ""
 		if key, exists := c.Get("client_key"); exists {
@@ -214,21 +214,20 @@ func RateLimitMiddleware(rl *ClientRateLimiter, am *AuthManager) gin.HandlerFunc
 			fullKey = key.(string)
 		}
 
-		// Determine per-key RPM/burst, fallback to global
 		rpm := rl.limit
 		burst := rl.burst
 		if fullKey != "" && am != nil {
-			if info := am.Get(fullKey); info != nil {
-				if info.RPM == 0 {
+			if kRPM, kBurst, ok := am.LookupKey(fullKey); ok {
+				if kRPM == 0 {
 					// RPM=0 means unlimited — bypass rate limit entirely
 					c.Next()
 					return
 				}
-				if info.RPM > 0 {
-					rpm = info.RPM
+				if kRPM > 0 {
+					rpm = kRPM
 				}
-				if info.Burst > 0 {
-					burst = info.Burst
+				if kBurst > 0 {
+					burst = kBurst
 				}
 			}
 		}

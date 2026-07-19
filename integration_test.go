@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 
+	"foxrouters/internal/ratelimit"
+
 	"github.com/gin-gonic/gin"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
@@ -15,8 +17,8 @@ import (
 func setupTestRouter() *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
-	r.Use(requestIDMiddleware())
-	r.Use(securityHeadersMiddleware())
+	r.Use(ratelimit.RequestIDMiddleware())
+	r.Use(ratelimit.SecurityHeadersMiddleware())
 
 	// Public routes (no auth)
 	r.GET("/health", func(c *gin.Context) {

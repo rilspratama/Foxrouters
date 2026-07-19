@@ -21,6 +21,8 @@ import (
 	"syscall"
 	"time"
 
+	"foxrouters/internal/ratelimit"
+
 	"github.com/gin-gonic/gin"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
@@ -165,8 +167,9 @@ func main() {
 
 	// Auth + rate limiter
 	authMgr := newAuthManager(db)
-	rateLimiter := newRateLimiter(RATE_LIMIT_RPM, RATE_LIMIT_BURST, RATE_LIMIT_WINDOW)
-	rateLimiter.db = db // enable logging of rate-limited requests
+	rateLimiter := ratelimit.New(RATE_LIMIT_RPM, RATE_LIMIT_BURST, RATE_LIMIT_WINDOW)
+	// (rateLimiter previously carried a db handle for rate-limited request
+	//  logging, but nothing actually consumed it — dropped in the split.)
 
 	go autoRefreshWorker(grokAM)
 	go reenableWorker(grokAM)
@@ -187,11 +190,11 @@ func main() {
 	r := gin.Default()
 
 	// Middleware: request ID, security headers, gzip compression, auth, rate limit
-	r.Use(requestIDMiddleware())
-	r.Use(securityHeadersMiddleware())
-	r.Use(gzipMiddleware())
+	r.Use(ratelimit.RequestIDMiddleware())
+	r.Use(ratelimit.SecurityHeadersMiddleware())
+	r.Use(ratelimit.GzipMiddleware())
 	r.Use(AuthMiddleware(authMgr))
-	r.Use(RateLimitMiddleware(rateLimiter, authMgr))
+	r.Use(ratelimit.Middleware(rateLimiter, authMgr))
 
 	// API key management endpoints — admin only
 	adminAuth := AdminMiddleware(authMgr)
