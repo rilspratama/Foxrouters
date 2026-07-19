@@ -1,4 +1,9 @@
-package main
+// Package handlers exposes the HTTP handlers wired by main.go into gin.
+//
+// External state that lives in main.go — Version, dashboardHTML — is
+// injected via package-level setters (SetVersion, SetDashboardHTML) so this
+// package stays free of the top-level embed / ldflags plumbing.
+package handlers
 
 import (
 	"log/slog"
@@ -8,31 +13,54 @@ import (
 	"strings"
 	"time"
 
+	"foxrouters/internal/auth"
+	"foxrouters/internal/db"
+	"foxrouters/internal/upstream"
+
 	"github.com/gin-gonic/gin"
 )
+
+// ============================================================================
+// INJECTED STATE (owned by main.go)
+// ============================================================================
+
+// version defaults to "dev" so tests + local runs don't segfault when main
+// forgets to call SetVersion (they see the same fallback main.go uses).
+var version = "dev"
+
+// dashboardHTML is the //go:embed dashboard.html string owned by main.
+// SetDashboardHTML is called once from main.main() before routes wire up.
+var dashboardHTML = ""
+
+// SetVersion overrides the reported gateway version (called from main).
+func SetVersion(v string) { version = v }
+
+// SetDashboardHTML injects the embedded dashboard SPA payload from main.
+func SetDashboardHTML(s string) { dashboardHTML = s }
 
 // ============================================================================
 // ENDPOINTS
 // ============================================================================
 
-// handleHealthMinimal serves a bare-bones liveness response for HEAD /health
+// HandleHealthMinimal serves a bare-bones liveness response for HEAD /health
 // and for unauthenticated GET. Avoids the full telemetry path that may hang
 // when the authed branch touches am.Get() + cbKM.GetAll() under load.
 // Gin auto-handles HEAD by calling the GET handler, but some clients send
 // HEAD without Accept-Encoding, causing the gzip middleware to wrap the
 // writer and then never flush (no body written). This explicit handler
 // short-circuits that path.
-func handleHealthMinimal() gin.HandlerFunc {
+func HandleHealthMinimal() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		c.JSON(200, gin.H{
 			"status":  "healthy",
 			"service": "foxrouters",
-			"version": Version,
+			"version": version,
 		})
 	}
 }
 
-func handleHealth(grokAM *GrokAccountManager, cbKM *CBKeyManager, hc *HealthChecker, am *AuthManager) gin.HandlerFunc {
+// HandleHealth reports overall status + (when authed) per-upstream telemetry.
+func HandleHealth(grokAM *upstream.GrokAccountManager, cbKM *upstream.CBKeyManager, hc *upstream.HealthChecker, am *auth.Manager) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		grokStats := hc.Grok.Stats()
 		cbStats := hc.CB.Stats()
@@ -52,8 +80,8 @@ func handleHealth(grokAM *GrokAccountManager, cbKM *CBKeyManager, hc *HealthChec
 		authed := false
 		if os.Getenv("GATEWAY_AUTH_DISABLE") == "1" {
 			authed = true
-		} else if auth := c.GetHeader("Authorization"); strings.HasPrefix(auth, "Bearer ") {
-			if info := am.Get(auth[7:]); info != nil {
+		} else if a := c.GetHeader("Authorization"); strings.HasPrefix(a, "Bearer ") {
+			if info := am.Get(a[7:]); info != nil {
 				authed = true
 				_ = info
 			}
@@ -67,7 +95,7 @@ func handleHealth(grokAM *GrokAccountManager, cbKM *CBKeyManager, hc *HealthChec
 			c.JSON(200, gin.H{
 				"status":  overall,
 				"service": "foxrouters",
-				"version": Version,
+				"version": version,
 			})
 			return
 		}
@@ -76,7 +104,7 @@ func handleHealth(grokAM *GrokAccountManager, cbKM *CBKeyManager, hc *HealthChec
 		c.JSON(200, gin.H{
 			"status":  overall,
 			"service": "foxrouters",
-			"version": Version,
+			"version": version,
 			"mode":    "unified (grok + codebuddy)",
 			"upstreams": gin.H{
 				"grok":      grokStats,
@@ -98,7 +126,8 @@ func handleHealth(grokAM *GrokAccountManager, cbKM *CBKeyManager, hc *HealthChec
 	}
 }
 
-func handleAccounts(grokAM *GrokAccountManager, cbKM *CBKeyManager) gin.HandlerFunc {
+// HandleAccounts lists Grok accounts and CodeBuddy keys (admin only).
+func HandleAccounts(grokAM *upstream.GrokAccountManager, cbKM *upstream.CBKeyManager) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		grokAccs := grokAM.GetAll()
 		grokResult := make([]gin.H, 0)
@@ -120,7 +149,7 @@ func handleAccounts(grokAM *GrokAccountManager, cbKM *CBKeyManager) gin.HandlerF
 				"key":            k.Key[:8] + "..." + k.Key[len(k.Key)-4:],
 				"disabled":       disabled,
 				"credits_used":   credits,
-				"credits_left":   CB_CREDIT_LIMIT - credits,
+				"credits_left":   upstream.CB_CREDIT_LIMIT - credits,
 				"total_requests": reqs,
 			})
 		}
@@ -131,7 +160,8 @@ func handleAccounts(grokAM *GrokAccountManager, cbKM *CBKeyManager) gin.HandlerF
 	}
 }
 
-func handleRefresh(grokAM *GrokAccountManager) gin.HandlerFunc {
+// HandleRefresh forces a refresh on every Grok account (admin only).
+func HandleRefresh(grokAM *upstream.GrokAccountManager) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		accounts := grokAM.GetAll()
 		results := make([]gin.H, 0)
@@ -149,9 +179,9 @@ func handleRefresh(grokAM *GrokAccountManager) gin.HandlerFunc {
 	}
 }
 
-// handleImportCBKey hot-imports a CodeBuddy API key into runtime pool + Redis.
+// HandleImportCBKey hot-imports a CodeBuddy API key into runtime pool + Redis.
 // Body: {"api_key":"ck_..."} or {"key":"ck_..."}. Idempotent — existing keys return added=false.
-func handleImportCBKey(cbKM *CBKeyManager) gin.HandlerFunc {
+func HandleImportCBKey(cbKM *upstream.CBKeyManager) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var req struct {
 			APIKey string `json:"api_key"`
@@ -186,9 +216,9 @@ func handleImportCBKey(cbKM *CBKeyManager) gin.HandlerFunc {
 	}
 }
 
-// handleImportAccount accepts a single Grok account (email + access_token + refresh_token)
+// HandleImportAccount accepts a single Grok account (email + access_token + refresh_token)
 // and stores it in Redis + adds it to the runtime pool. No JSON files needed.
-func handleImportAccount(grokAM *GrokAccountManager) gin.HandlerFunc {
+func HandleImportAccount(grokAM *upstream.GrokAccountManager) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var req struct {
 			Email        string `json:"email"`
@@ -217,10 +247,10 @@ func handleImportAccount(grokAM *GrokAccountManager) gin.HandlerFunc {
 	}
 }
 
-// handleImportCBKeyBulk imports multiple CodeBuddy API keys at once.
+// HandleImportCBKeyBulk imports multiple CodeBuddy API keys at once.
 // Body: {"api_keys":["ck_...","ck_..."]} or raw newline/comma-separated string in "raw".
 // Idempotent — existing keys are skipped (counted as skipped, not failed).
-func handleImportCBKeyBulk(cbKM *CBKeyManager) gin.HandlerFunc {
+func HandleImportCBKeyBulk(cbKM *upstream.CBKeyManager) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var req struct {
 			APIKeys []string `json:"api_keys"`
@@ -233,7 +263,7 @@ func handleImportCBKeyBulk(cbKM *CBKeyManager) gin.HandlerFunc {
 		keys := req.APIKeys
 		if len(keys) == 0 && req.Raw != "" {
 			for _, k := range strings.FieldsFunc(req.Raw, func(r rune) bool {
-				return r == ',' || r == '\n' || r == '\r' || r == ' ' || r == '	'
+				return r == ',' || r == '\n' || r == '\r' || r == ' ' || r == '\t'
 			}) {
 				k = strings.TrimSpace(k)
 				if k != "" {
@@ -268,10 +298,10 @@ func handleImportCBKeyBulk(cbKM *CBKeyManager) gin.HandlerFunc {
 	}
 }
 
-// handleImportAccountBulk imports multiple Grok accounts at once.
+// HandleImportAccountBulk imports multiple Grok accounts at once.
 // Body: {"accounts":[{"email":"...","access_token":"...","refresh_token":"..."},...]}
 // Idempotent — existing accounts are updated (counted as updated, not failed).
-func handleImportAccountBulk(grokAM *GrokAccountManager) gin.HandlerFunc {
+func HandleImportAccountBulk(grokAM *upstream.GrokAccountManager) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var req struct {
 			Accounts []struct {
@@ -316,8 +346,8 @@ func handleImportAccountBulk(grokAM *GrokAccountManager) gin.HandlerFunc {
 	}
 }
 
-// handleDeleteAccount removes a Grok account from Redis + runtime pool.
-func handleDeleteAccount(grokAM *GrokAccountManager) gin.HandlerFunc {
+// HandleDeleteAccount removes a Grok account from Redis + runtime pool.
+func HandleDeleteAccount(grokAM *upstream.GrokAccountManager) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		email := c.Param("email")
 		if email == "" {
@@ -338,7 +368,8 @@ func handleDeleteAccount(grokAM *GrokAccountManager) gin.HandlerFunc {
 // HISTORY ENDPOINTS (v5.0)
 // ============================================================================
 
-func handleHistory(db *DBStore) gin.HandlerFunc {
+// HandleHistory aggregates request stats + per-model breakdown from ClickHouse.
+func HandleHistory(store *db.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		hours := 24
 		if h := c.Query("hours"); h != "" {
@@ -348,15 +379,17 @@ func handleHistory(db *DBStore) gin.HandlerFunc {
 		}
 		since := time.Now().Add(-time.Duration(hours) * time.Hour)
 
-		stats, err := db.GetRequestStats(since)
+		stats, err := store.GetRequestStats(since)
 		if err != nil {
-			slog.Error("internal error", "module", "handler", "error", err); c.JSON(500, gin.H{"error": "internal server error"})
+			slog.Error("internal error", "module", "handler", "error", err)
+			c.JSON(500, gin.H{"error": "internal server error"})
 			return
 		}
 
-		modelStats, err := db.GetModelStats(since, 20)
+		modelStats, err := store.GetModelStats(since, 20)
 		if err != nil {
-			slog.Error("internal error", "module", "handler", "error", err); c.JSON(500, gin.H{"error": "internal server error"})
+			slog.Error("internal error", "module", "handler", "error", err)
+			c.JSON(500, gin.H{"error": "internal server error"})
 			return
 		}
 
@@ -369,13 +402,14 @@ func handleHistory(db *DBStore) gin.HandlerFunc {
 			"avg_latency_ms":   stats.AvgLatencyMs,
 			"total_tokens_in":  stats.TotalTokensIn,
 			"total_tokens_out": stats.TotalTokensOut,
-			"total_tokens":      stats.TotalTokens,
+			"total_tokens":     stats.TotalTokens,
 			"by_model":         modelStats,
 		})
 	}
 }
 
-func handleRecentRequests(db *DBStore) gin.HandlerFunc {
+// HandleRecentRequests returns recent request previews (id as string for JS).
+func HandleRecentRequests(store *db.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		limit := 50
 		if l := c.Query("limit"); l != "" {
@@ -383,16 +417,18 @@ func handleRecentRequests(db *DBStore) gin.HandlerFunc {
 				limit = v
 			}
 		}
-		logs, err := db.GetRecentRequests(limit)
+		logs, err := store.GetRecentRequests(limit)
 		if err != nil {
-			slog.Error("internal error", "module", "handler", "error", err); c.JSON(500, gin.H{"error": "internal server error"})
+			slog.Error("internal error", "module", "handler", "error", err)
+			c.JSON(500, gin.H{"error": "internal server error"})
 			return
 		}
 		c.JSON(200, gin.H{"recent_requests": logs, "count": len(logs)})
 	}
 }
 
-func handleHistoryDetail(db *DBStore) gin.HandlerFunc {
+// HandleHistoryDetail returns the full request/response JSON for a single log.
+func HandleHistoryDetail(store *db.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		idStr := c.Param("id")
 		id, err := strconv.ParseUint(idStr, 10, 64)
@@ -400,7 +436,7 @@ func handleHistoryDetail(db *DBStore) gin.HandlerFunc {
 			c.JSON(400, gin.H{"error": "invalid id"})
 			return
 		}
-		detail, err := db.GetRequestDetail(id)
+		detail, err := store.GetRequestDetail(id)
 		if err != nil {
 			c.JSON(404, gin.H{"error": "request not found"})
 			return
@@ -413,14 +449,14 @@ func handleHistoryDetail(db *DBStore) gin.HandlerFunc {
 // API KEY MANAGEMENT ENDPOINTS
 // ============================================================================
 
-// handleListKeys returns all gateway keys (masked, with metadata).
-func handleListKeys(am *AuthManager) gin.HandlerFunc {
+// HandleListKeys returns all gateway keys (masked, with metadata).
+func HandleListKeys(am *auth.Manager) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		keys := am.GetAll()
 		result := make([]gin.H, 0, len(keys))
 		for _, info := range keys {
 			result = append(result, gin.H{
-				"key_masked":     maskKey(info.Key),
+				"key_masked":     auth.MaskKey(info.Key),
 				"name":           info.Name,
 				"role":           info.Role,
 				"allowed_models": info.AllowedModels,
@@ -437,16 +473,16 @@ func handleListKeys(am *AuthManager) gin.HandlerFunc {
 	}
 }
 
-// handleCreateKey creates a new gateway key.
-func handleCreateKey(am *AuthManager) gin.HandlerFunc {
+// HandleCreateKey creates a new gateway key.
+func HandleCreateKey(am *auth.Manager) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var req struct {
-			Name          string   `json:"name"`
-			Role          KeyRole  `json:"role"`
-			AllowedModels []string `json:"allowed_models"`
-			RPM           int      `json:"rpm"`
-			Burst         int      `json:"burst"`
-			TokenQuota    int64    `json:"token_quota"`
+			Name          string        `json:"name"`
+			Role          auth.KeyRole  `json:"role"`
+			AllowedModels []string      `json:"allowed_models"`
+			RPM           int           `json:"rpm"`
+			Burst         int           `json:"burst"`
+			TokenQuota    int64         `json:"token_quota"`
 		}
 		if err := c.ShouldBindJSON(&req); err != nil {
 			c.JSON(400, gin.H{"error": "invalid JSON body"})
@@ -456,8 +492,8 @@ func handleCreateKey(am *AuthManager) gin.HandlerFunc {
 			req.Name = "unnamed"
 		}
 		// Default role = inference. Only accept "admin" or "inference".
-		if req.Role != RoleAdmin && req.Role != RoleInference {
-			req.Role = RoleInference
+		if req.Role != auth.RoleAdmin && req.Role != auth.RoleInference {
+			req.Role = auth.RoleInference
 		}
 		// Input validation: cap name length + reject control chars
 		if len(req.Name) > 128 {
@@ -470,11 +506,11 @@ func handleCreateKey(am *AuthManager) gin.HandlerFunc {
 				return
 			}
 		}
-		key := generateGatewayKey()
+		key := auth.GenerateGatewayKey()
 		info := am.AddWithRole(key, req.Name, req.Role, req.AllowedModels, req.RPM, req.Burst, req.TokenQuota)
 		slog.Info("created key",
 			"module", "auth",
-			"key", maskKey(key),
+			"key", auth.MaskKey(key),
 			"name", req.Name,
 			"role", string(req.Role),
 			"models", req.AllowedModels,
@@ -483,7 +519,7 @@ func handleCreateKey(am *AuthManager) gin.HandlerFunc {
 			"quota", req.TokenQuota)
 		c.JSON(201, gin.H{
 			"key":            info.Key,
-			"key_masked":     maskKey(info.Key),
+			"key_masked":     auth.MaskKey(info.Key),
 			"name":           info.Name,
 			"role":           info.Role,
 			"allowed_models": info.AllowedModels,
@@ -499,8 +535,8 @@ func handleCreateKey(am *AuthManager) gin.HandlerFunc {
 	}
 }
 
-// handleDeleteKey deletes a gateway key (accepts full or masked key).
-func handleDeleteKey(am *AuthManager) gin.HandlerFunc {
+// HandleDeleteKey deletes a gateway key (accepts full or masked key).
+func HandleDeleteKey(am *auth.Manager) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		keyParam := c.Param("key")
 		fullKey, ok := am.ResolveKey(keyParam)
@@ -509,13 +545,13 @@ func handleDeleteKey(am *AuthManager) gin.HandlerFunc {
 			return
 		}
 		am.Remove(fullKey)
-		slog.Info("deleted key", "module", "auth", "key", maskKey(fullKey))
-		c.JSON(200, gin.H{"deleted": maskKey(fullKey)})
+		slog.Info("deleted key", "module", "auth", "key", auth.MaskKey(fullKey))
+		c.JSON(200, gin.H{"deleted": auth.MaskKey(fullKey)})
 	}
 }
 
-// handleUpdateKey updates a gateway key's metadata.
-func handleUpdateKey(am *AuthManager) gin.HandlerFunc {
+// HandleUpdateKey updates a gateway key's metadata.
+func HandleUpdateKey(am *auth.Manager) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		keyParam := c.Param("key")
 		fullKey, ok := am.ResolveKey(keyParam)
@@ -524,21 +560,21 @@ func handleUpdateKey(am *AuthManager) gin.HandlerFunc {
 			return
 		}
 		var req struct {
-			Name          *string   `json:"name"`
-			Role          *KeyRole  `json:"role"`
-			AllowedModels *[]string `json:"allowed_models"`
-			RPM           *int      `json:"rpm"`
-			Burst         *int      `json:"burst"`
-			TokenQuota    *int64    `json:"token_quota"`
-			Disabled      *bool     `json:"disabled"`
+			Name          *string       `json:"name"`
+			Role          *auth.KeyRole `json:"role"`
+			AllowedModels *[]string     `json:"allowed_models"`
+			RPM           *int          `json:"rpm"`
+			Burst         *int          `json:"burst"`
+			TokenQuota    *int64        `json:"token_quota"`
+			Disabled      *bool         `json:"disabled"`
 		}
 		if err := c.ShouldBindJSON(&req); err != nil {
 			c.JSON(400, gin.H{"error": "invalid JSON body"})
 			return
 		}
 		name := ""
-		var role KeyRole = "" // empty = no change
-		var allowedModels []string = nil // nil = no change, empty slice = clear whitelist
+		var role auth.KeyRole = ""    // empty = no change
+		var allowedModels []string    // nil = no change, empty slice = clear whitelist
 		rpm := -1
 		burst := -1
 		var quota int64 = -1
@@ -556,7 +592,7 @@ func handleUpdateKey(am *AuthManager) gin.HandlerFunc {
 				}
 			}
 		}
-		if req.Role != nil && (*req.Role == RoleAdmin || *req.Role == RoleInference) {
+		if req.Role != nil && (*req.Role == auth.RoleAdmin || *req.Role == auth.RoleInference) {
 			role = *req.Role
 		}
 		if req.AllowedModels != nil {
@@ -576,25 +612,25 @@ func handleUpdateKey(am *AuthManager) gin.HandlerFunc {
 			return
 		}
 		info := am.Get(fullKey)
-		slog.Info("updated key", "module", "auth", "key", maskKey(fullKey))
+		slog.Info("updated key", "module", "auth", "key", auth.MaskKey(fullKey))
 		c.JSON(200, gin.H{
-			"key_masked":     maskKey(info.Key),
+			"key_masked":     auth.MaskKey(info.Key),
 			"name":           info.Name,
 			"role":           info.Role,
 			"allowed_models": info.AllowedModels,
-			"rpm":         info.RPM,
-			"burst":       info.Burst,
-			"token_quota": info.TokenQuota,
-			"tokens_used": info.TokensUsed,
-			"requests":    info.Requests,
-			"created_at":  info.CreatedAt,
-			"disabled":    info.Disabled,
+			"rpm":            info.RPM,
+			"burst":          info.Burst,
+			"token_quota":    info.TokenQuota,
+			"tokens_used":    info.TokensUsed,
+			"requests":       info.Requests,
+			"created_at":     info.CreatedAt,
+			"disabled":       info.Disabled,
 		})
 	}
 }
 
-// handleKeyUsage returns usage stats for a specific key.
-func handleKeyUsage(am *AuthManager) gin.HandlerFunc {
+// HandleKeyUsage returns usage stats for a specific key.
+func HandleKeyUsage(am *auth.Manager) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		keyParam := c.Param("key")
 		fullKey, ok := am.ResolveKey(keyParam)
@@ -604,19 +640,29 @@ func handleKeyUsage(am *AuthManager) gin.HandlerFunc {
 		}
 		info := am.Get(fullKey)
 		c.JSON(200, gin.H{
-			"key_masked":     maskKey(info.Key),
+			"key_masked":     auth.MaskKey(info.Key),
 			"name":           info.Name,
 			"role":           info.Role,
 			"allowed_models": info.AllowedModels,
 			"rpm":            info.RPM,
-			"burst":        info.Burst,
-			"token_quota":  info.TokenQuota,
-			"tokens_used":  info.TokensUsed,
-			"tokens_left":  func() int64 { if info.TokenQuota > 0 { return info.TokenQuota - info.TokensUsed }; return -1 }(),
-			"requests":     info.Requests,
-			"created_at":   info.CreatedAt,
-			"disabled":     info.Disabled,
-			"quota_pct":    func() float64 { if info.TokenQuota > 0 { return float64(info.TokensUsed) / float64(info.TokenQuota) * 100 }; return 0 }(),
+			"burst":          info.Burst,
+			"token_quota":    info.TokenQuota,
+			"tokens_used":    info.TokensUsed,
+			"tokens_left": func() int64 {
+				if info.TokenQuota > 0 {
+					return info.TokenQuota - info.TokensUsed
+				}
+				return -1
+			}(),
+			"requests":   info.Requests,
+			"created_at": info.CreatedAt,
+			"disabled":   info.Disabled,
+			"quota_pct": func() float64 {
+				if info.TokenQuota > 0 {
+					return float64(info.TokensUsed) / float64(info.TokenQuota) * 100
+				}
+				return 0
+			}(),
 		})
 	}
 }
@@ -625,18 +671,18 @@ func handleKeyUsage(am *AuthManager) gin.HandlerFunc {
 // WEB UI DASHBOARD
 // ============================================================================
 
-// handleDashboard serves the embedded SPA.
+// HandleDashboard serves the embedded SPA.
 // IMPORTANT: never inject live gateway keys into public HTML — /dashboard is
 // unauthenticated. Clients set the key via localStorage or ?key= URL param.
-func handleDashboard() gin.HandlerFunc {
+func HandleDashboard() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		c.Data(200, "text/html; charset=utf-8", []byte(dashboardHTML))
 	}
 }
 
-// handleLogin serves the login page (GET) and processes login (POST).
+// HandleLogin serves the login page (GET) and processes login (POST).
 // On successful auth, sets an HttpOnly cookie with the gateway key and redirects to /dashboard.
-func handleLogin(am *AuthManager) gin.HandlerFunc {
+func HandleLogin(am *auth.Manager) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if c.Request.Method == "GET" {
 			c.Data(200, "text/html; charset=utf-8", []byte(loginPageHTML))
@@ -668,108 +714,10 @@ func handleLogin(am *AuthManager) gin.HandlerFunc {
 	}
 }
 
-// handleLogout clears the session cookie and redirects to /login.
-func handleLogout() gin.HandlerFunc {
+// HandleLogout clears the session cookie and redirects to /login.
+func HandleLogout() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		c.SetCookie("foxrouters_session", "", -1, "/", "", false, true)
 		c.Redirect(302, "/login")
 	}
-}
-
-// loginPageHTML returns the login page with FoxRouters branding.
-const loginPageHTML = `<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>FoxRouters — Login</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;590;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
-<style>
-:root {
-  --bg: #0d1117; --bg-panel: #161b22; --bg-elevated: #21262d;
-  --text: #e6edf3; --text-tertiary: #6e7681; --text-quaternary: #484f58;
-  --brand: #6366f1; --brand-hover: #818cf8;
-  --border: #30363d; --border-bright: rgba(255,255,255,0.16);
-  --red: #f85149; --red-subtle: rgba(248,81,73,0.12);
-  --radius: 8px; --radius-lg: 12px;
-  --font: 'Inter', -apple-system, sans-serif; --mono: 'JetBrains Mono', monospace;
-  --shadow-modal: 0 8px 32px rgba(0,0,0,0.5);
-}
-* { margin:0; padding:0; box-sizing:border-box; }
-body {
-  font-family: var(--font); background: var(--bg); color: var(--text);
-  min-height: 100vh; display: flex; align-items: center; justify-content: center;
-  -webkit-font-smoothing: antialiased;
-}
-.login-card {
-  background: var(--bg-panel); border: 1px solid var(--border);
-  border-radius: var(--radius-lg); padding: 40px; width: 90%; max-width: 400px;
-  box-shadow: var(--shadow-modal);
-}
-.login-logo {
-  width: 48px; height: 48px; border-radius: var(--radius);
-  background: var(--brand); display: flex; align-items: center; justify-content: center;
-  margin: 0 auto 20px; color: #fff; box-shadow: 0 4px 12px rgba(99,102,241,0.4);
-}
-.login-title { text-align: center; font-size: 20px; font-weight: 590; margin-bottom: 6px; }
-.login-sub { text-align: center; font-size: 13px; color: var(--text-tertiary); margin-bottom: 28px; }
-.login-error {
-  background: var(--red-subtle); color: var(--red); border: 1px solid rgba(248,81,73,0.3);
-  border-radius: var(--radius); padding: 10px 14px; font-size: 13px; margin-bottom: 16px;
-  text-align: center;
-}
-.login-field { margin-bottom: 16px; }
-.login-label { font-size: 12px; color: var(--text-tertiary); display: block; margin-bottom: 6px; font-weight: 500; }
-.login-input {
-  width: 100%; padding: 10px 14px; background: var(--bg); border: 1px solid var(--border);
-  border-radius: var(--radius); color: var(--text); font-family: var(--mono); font-size: 13px;
-  transition: border-color 150ms ease;
-}
-.login-input:focus { outline: none; border-color: var(--brand); box-shadow: 0 0 0 3px rgba(99,102,241,0.15); }
-.login-btn {
-  width: 100%; padding: 11px; background: var(--brand); color: #fff; border: none;
-  border-radius: var(--radius); font-size: 14px; font-weight: 590; cursor: pointer;
-  font-family: var(--font); transition: background 150ms ease, box-shadow 150ms ease, transform 200ms ease;
-  box-shadow: 0 1px 3px rgba(99,102,241,0.3);
-}
-.login-btn:hover { background: var(--brand-hover); box-shadow: 0 4px 12px rgba(99,102,241,0.4); transform: translateY(-1px); }
-.login-btn:active { transform: translateY(0); }
-.login-footer { text-align: center; margin-top: 20px; font-size: 11px; color: var(--text-quaternary); font-family: var(--mono); }
-</style>
-</head>
-<body>
-<div class="login-card">
-  <div class="login-logo">
-    <svg width="24" height="24" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
-      <path d="M8 4L11 12L6 10L8 4Z" fill="currentColor"/>
-      <path d="M24 4L21 12L26 10L24 4Z" fill="currentColor"/>
-      <path d="M16 7C11 7 7 11 7 16C7 20 10 23 16 25C22 23 25 20 25 16C25 11 21 7 16 7Z" fill="currentColor"/>
-      <path d="M12 15C13 14 14 14 16 14C18 14 19 14 20 15" stroke="rgba(255,255,255,0.9)" stroke-width="1.2" stroke-linecap="round" fill="none"/>
-      <path d="M11 17C13 16 14.5 16 16 16C17.5 16 19 16 21 17" stroke="rgba(255,255,255,0.7)" stroke-width="1.2" stroke-linecap="round" fill="none"/>
-      <circle cx="13" cy="13" r="1.2" fill="rgba(255,255,255,0.95)"/>
-      <circle cx="19" cy="13" r="1.2" fill="rgba(255,255,255,0.95)"/>
-      <circle cx="16" cy="19" r="1" fill="rgba(255,255,255,0.9)"/>
-    </svg>
-  </div>
-  <div class="login-title">FoxRouters</div>
-  <div class="login-sub">Gateway Control Panel</div>
-  <form method="POST" action="/login">
-    <div class="login-field">
-      <label class="login-label" for="key">Gateway API Key</label>
-      <input class="login-input" type="password" id="key" name="key" placeholder="gw-..." autofocus required>
-    </div>
-    <button class="login-btn" type="submit">Sign In</button>
-  </form>
-  <div class="login-footer">FoxRouters v5.11</div>
-</div>
-</body>
-</html>`
-
-// loginPageHTMLWithError returns the login page with an error message.
-func loginPageHTMLWithError(msg string) string {
-	return strings.Replace(loginPageHTML,
-		`<div class="login-sub">Gateway Control Panel</div>`,
-		`<div class="login-sub">Gateway Control Panel</div><div class="login-error">`+msg+`</div>`, 1)
 }

@@ -21,6 +21,7 @@ import (
 	"syscall"
 	"time"
 
+	"foxrouters/internal/handlers"
 	"foxrouters/internal/ratelimit"
 
 	"github.com/gin-gonic/gin"
@@ -29,6 +30,15 @@ import (
 
 //go:embed dashboard.html
 var dashboardHTML string
+
+// Propagate main-owned state into the extracted handlers package at binary
+// startup so both `go test` and `go run` see the same dashboardHTML/Version.
+// (main() still calls SetVersion after Version is finalised, which is fine —
+// tests run without ldflags so Version stays "dev".)
+func init() {
+	handlers.SetDashboardHTML(dashboardHTML)
+	handlers.SetVersion(Version)
+}
 
 // init wires the stdlib slog default handler. LOG_LEVEL=debug (or DEBUG)
 // enables verbose output; default is info. TextHandler keeps the output
