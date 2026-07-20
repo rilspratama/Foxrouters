@@ -100,10 +100,17 @@ func (b *bufferedWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 // flush copies the captured status + headers + body onto the real writer.
 // After flush the buffered writer should not be used again — repeat flushes
 // would double-write the body.
+//
+// C9 fix: merge instead of replace. The real header map may already carry
+// entries set by upstream middleware (Vary, X-Request-ID, CSRF, etc.).
+// A blanket `realHeaders[k] = v` clobbered those; we now Add each value
+// so both middleware-set and upstream-set headers survive to the wire.
 func (b *bufferedWriter) flush() {
 	realHeaders := b.real.Header()
-	for k, v := range b.headers {
-		realHeaders[k] = v
+	for k, vs := range b.headers {
+		for _, v := range vs {
+			realHeaders.Add(k, v)
+		}
 	}
 	b.real.WriteHeader(b.status)
 	if b.buf.Len() > 0 {

@@ -437,11 +437,17 @@ func ProxyCodeBuddy(c *gin.Context, body []byte, bodyMap map[string]any, km *CBK
 	reqStart := time.Now()
 
 	for attempt := 0; attempt < total; attempt++ {
+		// C10: bail out early if the client cancelled — don't walk the
+		// whole key list burning upstream calls for a dead request.
+		if err := c.Request.Context().Err(); err != nil {
+			slog.Debug("client cancelled before attempt", "module", "cb", "attempt", attempt+1, "error", err)
+			return
+		}
 		key, err := km.Next()
 		if err != nil {
 			break
 		}
-		req, _ := http.NewRequest("POST", CB_UPSTREAM_URL, bytes.NewReader(transformed))
+		req, _ := http.NewRequestWithContext(c.Request.Context(), "POST", CB_UPSTREAM_URL, bytes.NewReader(transformed))
 		req.Header.Set("Authorization", "Bearer "+key.Key)
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Accept", "text/event-stream")
@@ -554,9 +560,17 @@ func ProxyCodeBuddy(c *gin.Context, body []byte, bodyMap map[string]any, km *CBK
 		flusher, _ := c.Writer.(http.Flusher)
 		scanner := bufio.NewScanner(lastResp.Body)
 		scanner.Buffer(make([]byte, 0, 256*1024), 1024*1024)
+		// C6: same as grok — a client disconnect must stop the stream loop
+		// promptly so we don't keep pulling from upstream forever.
+		ctx := c.Request.Context()
 		var streamContent strings.Builder
 		var streamTokensIn, streamTokensOut int
 		for scanner.Scan() {
+			if err := ctx.Err(); err != nil {
+				slog.Debug("sse loop: client cancelled", "module", "cb", "error", err)
+				lastResp.Body.Close()
+				break
+			}
 			line := scanner.Text()
 			if strings.HasPrefix(line, "data: ") {
 				data := strings.TrimPrefix(line, "data: ")
@@ -594,7 +608,11 @@ func ProxyCodeBuddy(c *gin.Context, body []byte, bodyMap map[string]any, km *CBK
 					}
 				}
 			}
-			fmt.Fprintf(c.Writer, "%s\n", line)
+			if _, werr := fmt.Fprintf(c.Writer, "%s\n", line); werr != nil {
+				slog.Debug("sse loop: write to client failed", "module", "cb", "error", werr)
+				lastResp.Body.Close()
+				break
+			}
 			if flusher != nil {
 				flusher.Flush()
 			}

@@ -116,6 +116,27 @@ func (a *GrokAccount) Snapshot() GrokAccountSnapshot {
 	return s
 }
 
+// toDTO returns a db.GrokAccountDTO snapshot of the account under RLock.
+// Use this before calling saveGrokAccount — it guarantees the persisted
+// payload is a consistent snapshot, never a partial mid-write mix.
+func (a *GrokAccount) toDTO() db.GrokAccountDTO {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	return db.GrokAccountDTO{
+		Email:        a.Email,
+		AccessToken:  a.AccessToken,
+		RefreshToken: a.RefreshToken,
+		IDToken:      a.IDToken,
+		ExpiresAt:    a.expiresAt,
+		ExpiresIn:    a.ExpiresIn,
+		Expired:      a.Expired,
+		LastRefresh:  a.LastRefresh,
+		Sub:          a.Sub,
+		Disabled:     a.disabled,
+		DisabledAt:   a.disabledAt,
+	}
+}
+
 func (a *GrokAccount) IsDisabled() bool {
 	a.mu.RLock()
 	defer a.mu.RUnlock()
@@ -193,7 +214,7 @@ func (a *GrokAccount) refreshLocked() error {
 
 	slog.Info("refresh ok", "module", "grok-refresh", "email", email, "expires_in_s", expIn)
 	if a.db != nil {
-		saveGrokAccount(a.db, a)
+		saveGrokAccount(a.db, a.toDTO())
 		a.db.LogRefresh(db.RefreshLog{
 			Timestamp: time.Now(), AccountEmail: email, Provider: "grok",
 			Success: true,
@@ -390,7 +411,7 @@ func (am *GrokAccountManager) ReenableCooldowns() {
 	}
 	for _, acc := range reenabled {
 		if acc.db != nil {
-			saveGrokAccount(acc.db, acc)
+			saveGrokAccount(acc.db, acc.toDTO())
 		}
 		slog.Info("re-enabled cooldown account", "module", "grok", "email", acc.Email)
 	}
@@ -438,7 +459,7 @@ func AutoRefreshWorker(am *GrokAccountManager) {
 						acc.disabledAt = time.Time{}
 						acc.mu.Unlock()
 						if acc.db != nil {
-							saveGrokAccount(acc.db, acc)
+							saveGrokAccount(acc.db, acc.toDTO())
 						}
 						slog.Warn("account revoked, disabled", "module", "grok-worker", "email", acc.Email)
 					} else {
@@ -507,7 +528,7 @@ func (am *GrokAccountManager) UpsertAccount(email, accessToken, refreshToken, id
 			total = len(am.accounts)
 			am.mu.Unlock()
 			if am.db != nil {
-				saveGrokAccount(am.db, existing)
+				saveGrokAccount(am.db, existing.toDTO())
 			}
 			return false, total, existing
 		}
@@ -528,7 +549,7 @@ func (am *GrokAccountManager) UpsertAccount(email, accessToken, refreshToken, id
 	total = len(am.accounts)
 	am.mu.Unlock()
 	if am.db != nil {
-		saveGrokAccount(am.db, acc)
+		saveGrokAccount(am.db, acc.toDTO())
 	}
 	return true, total, acc
 }
@@ -553,7 +574,7 @@ func (am *GrokAccountManager) DeleteAccount(email string) bool {
 // The caller mutated fields (tokens, expiry) under acc.mu already.
 func (am *GrokAccountManager) UpdateExisting(acc *GrokAccount) {
 	if am.db != nil {
-		saveGrokAccount(am.db, acc)
+		saveGrokAccount(am.db, acc.toDTO())
 	}
 }
 
@@ -639,6 +660,12 @@ func ProxyGrok(c *gin.Context, body []byte, am *GrokAccountManager, clientStream
 	reqStart := time.Now()
 
 	for attempt := 0; attempt < total; attempt++ {
+		// C10: bail out if the client already went away so we don't burn
+		// upstream tokens walking the account list for a dead request.
+		if err := c.Request.Context().Err(); err != nil {
+			slog.Debug("client cancelled before attempt", "module", "grok", "attempt", attempt+1, "error", err)
+			return
+		}
 		acc, err := am.Next()
 		if err != nil {
 			break
@@ -646,7 +673,7 @@ func ProxyGrok(c *gin.Context, body []byte, am *GrokAccountManager, clientStream
 		token := acc.GetAccessToken()
 		headers := grokHeaders(token, accept, model)
 
-		req, _ := http.NewRequest(c.Request.Method, upstreamURL, bytes.NewReader(body))
+		req, _ := http.NewRequestWithContext(c.Request.Context(), c.Request.Method, upstreamURL, bytes.NewReader(body))
 		req.Header = headers
 		resp, err := client.Do(req)
 		if err != nil {
@@ -656,14 +683,45 @@ func ProxyGrok(c *gin.Context, body []byte, am *GrokAccountManager, clientStream
 
 		if resp.StatusCode == 401 {
 			resp.Body.Close()
-			if err := acc.Refresh(); err == nil {
-				req, _ = http.NewRequest(c.Request.Method, upstreamURL, bytes.NewReader(body))
-				req.Header = grokHeaders(acc.GetAccessToken(), accept, model)
-				resp, err = client.Do(req)
-				if err != nil {
-					continue
+			refreshErr := acc.Refresh()
+			if refreshErr != nil {
+				// C8: refresh_token itself was revoked → permanent disable,
+				// matching the pre-warm worker's invalid_grant handling.
+				if strings.Contains(refreshErr.Error(), "invalid_grant") {
+					acc.mu.Lock()
+					acc.disabled = true
+					acc.disabledAt = time.Time{}
+					acc.mu.Unlock()
+					if acc.db != nil {
+						saveGrokAccount(acc.db, acc.toDTO())
+					}
+					slog.Warn("401 refresh invalid_grant, permanent disable", "module", "grok", "email", acc.Email)
+				} else {
+					slog.Warn("401 refresh failed", "module", "grok", "email", acc.Email, "error", refreshErr)
 				}
-			} else {
+				continue
+			}
+			req, _ = http.NewRequestWithContext(c.Request.Context(), c.Request.Method, upstreamURL, bytes.NewReader(body))
+			req.Header = grokHeaders(acc.GetAccessToken(), accept, model)
+			resp, err = client.Do(req)
+			if err != nil {
+				continue
+			}
+			// C8: second 401 after a successful refresh means the token
+			// pair is stale in a way refresh can't fix (server-side
+			// revocation, wrong client_id, etc). Disable permanently so
+			// we don't loop the same account forever and never return
+			// a stale 401 to the client.
+			if resp.StatusCode == 401 {
+				resp.Body.Close()
+				acc.mu.Lock()
+				acc.disabled = true
+				acc.disabledAt = time.Time{}
+				acc.mu.Unlock()
+				if acc.db != nil {
+					saveGrokAccount(acc.db, acc.toDTO())
+				}
+				slog.Warn("401 after refresh, permanent disable", "module", "grok", "email", acc.Email)
 				continue
 			}
 		}
@@ -687,7 +745,7 @@ func ProxyGrok(c *gin.Context, body []byte, am *GrokAccountManager, clientStream
 			}
 			acc.mu.Unlock()
 			if acc.db != nil {
-				saveGrokAccount(acc.db, acc)
+				saveGrokAccount(acc.db, acc.toDTO())
 			}
 			continue
 		}
@@ -741,13 +799,28 @@ func ProxyGrok(c *gin.Context, body []byte, am *GrokAccountManager, clientStream
 			sseBufPool.Put(bufPtr)
 		}()
 
+		// C6: honour client cancellation. Without this, a disconnected
+		// client keeps the upstream stream burning tokens for up to the
+		// full 300s read timeout. We poll ctx.Err() at the top of every
+		// iteration and stop copying on Writer error (client TCP dead).
+		ctx := c.Request.Context()
+
 		var streamContent strings.Builder
 		var streamTokensIn, streamTokensOut int
 		var lineCarry string
 		for {
+			if err := ctx.Err(); err != nil {
+				slog.Debug("sse loop: client cancelled", "module", "grok", "error", err)
+				lastResp.Body.Close()
+				break
+			}
 			n, err := lastResp.Body.Read(buf)
 			if n > 0 {
-				c.Writer.Write(buf[:n])
+				if _, werr := c.Writer.Write(buf[:n]); werr != nil {
+					slog.Debug("sse loop: write to client failed", "module", "grok", "error", werr)
+					lastResp.Body.Close()
+					break
+				}
 				if flusher != nil {
 					flusher.Flush()
 				}
