@@ -272,7 +272,7 @@ func (hc *HealthChecker) checkGrok() {
 	req.Header.Set("x-grok-client-identifier", "grok-shell")
 	req.Header.Set("User-Agent", "grok-shell/"+GROK_CLIENT_VERSION)
 
-	client, proxyID := getClient(healthCheckClient)
+	client, proxyID := getClient(healthCheckClient, "grok")
 	resp, err := client.Do(req)
 	latency := time.Since(start)
 	markProxyResult(proxyID, err, func() int {
@@ -365,7 +365,7 @@ func (hc *HealthChecker) checkCB() {
 	req.Header.Set("Authorization", "Bearer "+key.Key)
 	req.Header.Set("Content-Type", "application/json")
 
-	client, proxyID := getClient(healthCheckClient)
+	client, proxyID := getClient(healthCheckClient, "codebuddy")
 	resp, err := client.Do(req)
 	latency := time.Since(start)
 	markProxyResult(proxyID, err, func() int {

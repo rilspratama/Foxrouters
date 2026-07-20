@@ -176,7 +176,7 @@ func (a *GrokAccount) refreshLocked() error {
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("Accept", "application/json")
-	client, proxyID := getClient(tokenRefreshClient)
+	client, proxyID := getClient(tokenRefreshClient, "grok")
 	resp, err := client.Do(req)
 	if err != nil {
 		markProxyResult(proxyID, err, 0)
@@ -655,7 +655,7 @@ func ProxyGrok(c *gin.Context, body []byte, am *GrokAccountManager, clientStream
 		accept = "text/event-stream"
 	}
 
-	client, proxyID := getClient(upstreamClient)
+	client, proxyID := getClient(upstreamClient, "grok")
 	total := am.Len()
 
 	var lastResp *http.Response

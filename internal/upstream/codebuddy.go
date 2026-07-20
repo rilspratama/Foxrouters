@@ -446,7 +446,7 @@ func ProxyCodeBuddy(c *gin.Context, body []byte, bodyMap map[string]any, km *CBK
 		return
 	}
 
-	client, proxyID := getClient(upstreamClient)
+	client, proxyID := getClient(upstreamClient, "codebuddy")
 	total := km.Len()
 
 	var lastResp *http.Response

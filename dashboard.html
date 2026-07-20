@@ -1455,9 +1455,9 @@ body {
         <div class="tbl-scroll" style="max-height:520px">
           <table class="tbl" id="proxyTable">
             <thead><tr>
-              <th>Label</th><th>Protocol</th><th>Host:Port</th><th>Auth</th><th>Status</th><th>Fails</th><th>Last Used</th><th>Actions</th>
+              <th>Label</th><th>Protocol</th><th>Host:Port</th><th>Auth</th><th>Upstreams</th><th>Status</th><th>Fails</th><th>Last Used</th><th>Actions</th>
             </tr></thead>
-            <tbody id="proxyBody"><tr><td colspan="8" style="text-align:center;padding:24px;color:var(--text-tertiary)">Loading…</td></tr></tbody>
+            <tbody id="proxyBody"><tr><td colspan="9" style="text-align:center;padding:24px;color:var(--text-tertiary)">Loading…</td></tr></tbody>
           </table>
         </div>
         <div id="proxyTestResult" style="padding:8px 16px;font-size:12px;color:var(--text-tertiary);border-top:1px solid var(--border-strong);display:none"></div>
@@ -1502,6 +1502,20 @@ body {
           <div>
             <label style="font-size:11px;color:var(--text-tertiary);display:block;margin-bottom:4px">Label (optional)</label>
             <input type="text" id="pxLabel" placeholder="datacenter-us-east" style="width:100%;padding:8px 10px;background:var(--bg);border:1px solid var(--border-strong);border-radius:var(--radius-sm);color:var(--text-primary);font-size:13px" />
+          </div>
+          <div>
+            <label style="font-size:11px;color:var(--text-tertiary);display:block;margin-bottom:6px">Route for upstreams</label>
+            <div style="display:flex;gap:14px;align-items:center;padding:8px 10px;background:var(--bg);border:1px solid var(--border-strong);border-radius:var(--radius-sm)">
+              <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer">
+                <input type="checkbox" class="px-upstream" data-scope="all" data-target="add" checked /> All
+              </label>
+              <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer">
+                <input type="checkbox" class="px-upstream" data-scope="grok" data-target="add" /> Grok
+              </label>
+              <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer">
+                <input type="checkbox" class="px-upstream" data-scope="codebuddy" data-target="add" /> CodeBuddy
+              </label>
+            </div>
           </div>
           <div id="pxError" style="display:none;color:var(--red);font-size:12px;padding:6px 10px;background:rgba(255,80,80,0.08);border-radius:var(--radius-sm)"></div>
           <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:8px">
@@ -1551,6 +1565,20 @@ body {
           <div>
             <label style="font-size:11px;color:var(--text-tertiary);display:block;margin-bottom:4px">Label</label>
             <input type="text" id="epxLabel" style="width:100%;padding:8px 10px;background:var(--bg);border:1px solid var(--border-strong);border-radius:var(--radius-sm);color:var(--text-primary);font-size:13px" />
+          </div>
+          <div>
+            <label style="font-size:11px;color:var(--text-tertiary);display:block;margin-bottom:6px">Route for upstreams</label>
+            <div style="display:flex;gap:14px;align-items:center;padding:8px 10px;background:var(--bg);border:1px solid var(--border-strong);border-radius:var(--radius-sm)">
+              <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer">
+                <input type="checkbox" class="px-upstream" data-scope="all" data-target="edit" /> All
+              </label>
+              <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer">
+                <input type="checkbox" class="px-upstream" data-scope="grok" data-target="edit" /> Grok
+              </label>
+              <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer">
+                <input type="checkbox" class="px-upstream" data-scope="codebuddy" data-target="edit" /> CodeBuddy
+              </label>
+            </div>
           </div>
           <div id="epxError" style="display:none;color:var(--red);font-size:12px;padding:6px 10px;background:rgba(255,80,80,0.08);border-radius:var(--radius-sm)"></div>
           <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:8px">
@@ -3440,7 +3468,7 @@ async function loadProxies() {
     renderProxies();
   } catch (e) {
     if (e.message === '__redirect__') return;
-    document.getElementById('proxyBody').innerHTML = '<tr><td colspan="8" style="text-align:center;padding:24px;color:var(--red)">Load failed: ' + escHtml(e.message) + '</td></tr>';
+    document.getElementById('proxyBody').innerHTML = '<tr><td colspan="9" style="text-align:center;padding:24px;color:var(--red)">Load failed: ' + escHtml(e.message) + '</td></tr>';
   }
 }
 
@@ -3448,7 +3476,7 @@ function renderProxies() {
   var list = window._allProxies || [];
   var body = document.getElementById('proxyBody');
   if (!list.length) {
-    body.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:24px;color:var(--text-tertiary)">No proxies configured. Requests use direct connection.</td></tr>';
+    body.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:24px;color:var(--text-tertiary)">No proxies configured. Requests use direct connection.</td></tr>';
     return;
   }
   var rows = '';
@@ -3470,12 +3498,23 @@ function renderProxies() {
       }
     }
     var failStyle = p.fail_count >= 3 ? 'color:var(--red);font-weight:600' : (p.fail_count > 0 ? 'color:#e6a23c' : '');
+    var upstreams = Array.isArray(p.upstreams) && p.upstreams.length ? p.upstreams : ['all'];
+    var badges = '';
+    for (var j = 0; j < upstreams.length; j++) {
+      var u = upstreams[j];
+      var color = '#7c8590', label = u;
+      if (u === 'all')       { color = 'var(--brand)';  label = 'All'; }
+      else if (u === 'grok') { color = '#4a9eff';       label = 'Grok'; }
+      else if (u === 'codebuddy') { color = '#c084fc';  label = 'CodeBuddy'; }
+      badges += '<span style="display:inline-block;padding:2px 7px;margin-right:4px;font-size:10px;font-weight:500;border-radius:3px;background:' + color + '22;color:' + color + ';border:1px solid ' + color + '55">' + escHtml(label) + '</span>';
+    }
     rows +=
       '<tr>' +
         '<td>' + escHtml(p.label || '(no label)') + '</td>' +
         '<td class="mono" style="text-transform:uppercase;font-size:11px">' + escHtml(p.protocol) + '</td>' +
         '<td class="mono">' + escHtml(p.host) + ':' + escHtml(String(p.port)) + '</td>' +
         '<td>' + auth + '</td>' +
+        '<td>' + badges + '</td>' +
         '<td>' + status + '</td>' +
         '<td class="mono" style="' + failStyle + '">' + (p.fail_count || 0) + '</td>' +
         '<td style="color:var(--text-tertiary);font-size:11px">' + lastUsed + '</td>' +
@@ -3490,6 +3529,58 @@ function renderProxies() {
   body.innerHTML = rows;
 }
 
+// -------- upstream-checkbox helpers --------
+// Read the selected upstreams for the given modal target ("add" or "edit").
+// Returns e.g. ["all"] or ["grok","codebuddy"]. Always non-empty (falls
+// back to ["all"] if the operator unchecks everything).
+function readUpstreams(target) {
+  var boxes = document.querySelectorAll('.px-upstream[data-target="' + target + '"]');
+  var out = [];
+  for (var i = 0; i < boxes.length; i++) {
+    if (boxes[i].checked) out.push(boxes[i].getAttribute('data-scope'));
+  }
+  if (out.length === 0) out = ['all'];
+  // If "all" was checked with anything else, collapse to ["all"] to match
+  // server-side normalisation.
+  if (out.indexOf('all') !== -1) return ['all'];
+  return out;
+}
+
+// Set checkbox state for the given target from a []string list. Missing/
+// nil list defaults to ["all"].
+function writeUpstreams(target, list) {
+  var arr = (Array.isArray(list) && list.length) ? list : ['all'];
+  var boxes = document.querySelectorAll('.px-upstream[data-target="' + target + '"]');
+  for (var i = 0; i < boxes.length; i++) {
+    var scope = boxes[i].getAttribute('data-scope');
+    boxes[i].checked = arr.indexOf(scope) !== -1;
+  }
+}
+
+// Delegated change handler for upstream checkboxes:
+//   - Checking "All"      → uncheck Grok + CodeBuddy in the same target
+//   - Checking Grok or CB → uncheck "All" in the same target
+//   - Unchecking the last non-All box does NOT re-check "All" (operator
+//     might be mid-edit); readUpstreams falls back to ["all"] on submit.
+document.addEventListener('change', function(ev) {
+  var t = ev.target;
+  if (!(t && t.classList && t.classList.contains('px-upstream'))) return;
+  var target = t.getAttribute('data-target');
+  var scope = t.getAttribute('data-scope');
+  if (!target || !scope) return;
+  if (!t.checked) return; // only enforce exclusivity on check
+  var boxes = document.querySelectorAll('.px-upstream[data-target="' + target + '"]');
+  if (scope === 'all') {
+    for (var i = 0; i < boxes.length; i++) {
+      if (boxes[i].getAttribute('data-scope') !== 'all') boxes[i].checked = false;
+    }
+  } else {
+    for (var j = 0; j < boxes.length; j++) {
+      if (boxes[j].getAttribute('data-scope') === 'all') boxes[j].checked = false;
+    }
+  }
+});
+
 async function addProxy() {
   var errBox = document.getElementById('pxError');
   errBox.style.display = 'none';
@@ -3499,6 +3590,7 @@ async function addProxy() {
   var username = document.getElementById('pxUsername').value.trim();
   var password = document.getElementById('pxPassword').value;
   var label = document.getElementById('pxLabel').value.trim();
+  var upstreams = readUpstreams('add');
   if (!host || !port) {
     errBox.textContent = 'Host and port are required';
     errBox.style.display = 'block';
@@ -3508,7 +3600,7 @@ async function addProxy() {
     await apiFetch('/api/proxies', {
       method: 'POST',
       headers: {'content-type': 'application/json'},
-      body: JSON.stringify({protocol: protocol, host: host, port: port, username: username, password: password, label: label})
+      body: JSON.stringify({protocol: protocol, host: host, port: port, username: username, password: password, label: label, upstreams: upstreams})
     });
     document.getElementById('pxHost').value = '';
     document.getElementById('pxPort').value = '';
@@ -3578,6 +3670,7 @@ function showEditProxyModal(id) {
   document.getElementById('epxUsername').value = entry.username || '';
   document.getElementById('epxPassword').value = '';
   document.getElementById('epxLabel').value = entry.label || '';
+  writeUpstreams('edit', entry.upstreams);
   document.getElementById('epxError').style.display = 'none';
   document.getElementById('editProxyModal').classList.add('show');
 }
@@ -3589,6 +3682,7 @@ function showAddProxyModal() {
   document.getElementById('pxUsername').value = '';
   document.getElementById('pxPassword').value = '';
   document.getElementById('pxLabel').value = '';
+  writeUpstreams('add', ['all']);
   document.getElementById('pxError').style.display = 'none';
   document.getElementById('addProxyModal').classList.add('show');
 }
@@ -3611,6 +3705,7 @@ async function saveEditProxy() {
   var username = document.getElementById('epxUsername').value.trim();
   var passwordRaw = document.getElementById('epxPassword').value;
   var label = document.getElementById('epxLabel').value.trim();
+  var upstreams = readUpstreams('edit');
   // Blank password field = keep current (send "***" sentinel).
   var password = passwordRaw === '' ? '***' : passwordRaw;
   if (!host || !port) {
@@ -3622,7 +3717,7 @@ async function saveEditProxy() {
     await apiFetch('/api/proxies/' + encodeURIComponent(id), {
       method: 'PUT',
       headers: {'content-type': 'application/json'},
-      body: JSON.stringify({protocol: protocol, host: host, port: port, username: username, password: password, label: label})
+      body: JSON.stringify({protocol: protocol, host: host, port: port, username: username, password: password, label: label, upstreams: upstreams})
     });
     closeEditProxyModal();
     loadProxies();

@@ -39,10 +39,11 @@ type ProxyEntry struct {
 // ProxyPool is the runtime surface consumed by upstream when routing HTTP
 // requests through a dashboard-managed proxy.
 type ProxyPool interface {
-	// Next returns the next enabled proxy via round-robin, or nil with an
-	// error when the pool is empty / all disabled. A nil return is not
-	// fatal — the caller falls back to direct connection.
-	Next() (*ProxyEntry, error)
+	// Next returns the next enabled proxy scoped to the given upstream
+	// ("grok" or "codebuddy") via round-robin, or nil with an error when
+	// the pool is empty / all disabled / no proxies match the scope. A
+	// nil return is not fatal — the caller falls back to direct connection.
+	Next(upstream string) (*ProxyEntry, error)
 	// Transport returns a shared *http.Transport tuned for the given proxy.
 	// The transport is cached inside the pool — callers must NOT close it.
 	Transport(entry *ProxyEntry) (*http.Transport, error)
@@ -76,19 +77,23 @@ func getProxyPool() ProxyPool {
 }
 
 // getClient returns an http.Client to use for an upstream request. When a
-// proxy pool is configured with at least one enabled proxy the client uses
-// that proxy's transport; otherwise the caller's default client is returned
-// unchanged (direct connection).
+// proxy pool is configured with at least one enabled proxy scoped to the
+// given upstream, the client uses that proxy's transport; otherwise the
+// caller's default client is returned unchanged (direct connection).
+//
+// `upstream` is the scope identifier: "grok" for Grok chat + token
+// refresh, "codebuddy" for CodeBuddy chat. Proxies tagged with "all" match
+// every upstream.
 //
 // The returned client's Timeout is inherited from defaultClient. A best-
 // effort proxyID is returned alongside so the caller can invoke
 // MarkFailed/MarkSuccess on the pool without re-selecting.
-func getClient(defaultClient *http.Client) (*http.Client, string) {
+func getClient(defaultClient *http.Client, upstream string) (*http.Client, string) {
 	pp := getProxyPool()
 	if pp == nil {
 		return defaultClient, ""
 	}
-	entry, err := pp.Next()
+	entry, err := pp.Next(upstream)
 	if err != nil || entry == nil {
 		return defaultClient, ""
 	}
@@ -96,7 +101,7 @@ func getClient(defaultClient *http.Client) (*http.Client, string) {
 	if err != nil {
 		slog.Warn("proxy transport build failed, falling back to direct",
 			"module", "upstream-proxy",
-			"proxy_id", entry.ID, "error", err)
+			"proxy_id", entry.ID, "upstream", upstream, "error", err)
 		pp.MarkFailed(entry.ID)
 		return defaultClient, ""
 	}

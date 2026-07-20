@@ -40,8 +40,8 @@ type upstreamProxyPoolAdapter struct {
 	pool *proxy.ProxyPool
 }
 
-func (a upstreamProxyPoolAdapter) Next() (*upstream.ProxyEntry, error) {
-	e, err := a.pool.Next()
+func (a upstreamProxyPoolAdapter) Next(upstreamName string) (*upstream.ProxyEntry, error) {
+	e, err := a.pool.Next(upstreamName)
 	if err != nil || e == nil {
 		return nil, err
 	}

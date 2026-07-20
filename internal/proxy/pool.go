@@ -57,6 +57,12 @@ const (
 )
 
 // ProxyEntry is the API-visible shape of one proxy pool entry.
+//
+// Upstreams scopes which upstream families a proxy applies to. Values are
+// drawn from {"all", "grok", "codebuddy"}. An entry containing "all"
+// matches every Next(upstream) call (used for backward compatibility with
+// pre-scoping entries and for shared proxies). Otherwise the entry only
+// matches when its list contains the requested upstream name.
 type ProxyEntry struct {
 	ID         string    `json:"id"`
 	Protocol   string    `json:"protocol"` // "http" | "socks5"
@@ -66,9 +72,45 @@ type ProxyEntry struct {
 	Password   string    `json:"password,omitempty"`
 	Enabled    bool      `json:"enabled"`
 	Label      string    `json:"label,omitempty"`
+	Upstreams  []string  `json:"upstreams"` // {"all"} | subset of {"grok","codebuddy"}
 	CreatedAt  time.Time `json:"created_at"`
 	LastUsedAt time.Time `json:"last_used_at,omitempty"`
 	FailCount  int       `json:"fail_count"`
+}
+
+// UpstreamAll is the sentinel value in ProxyEntry.Upstreams meaning
+// "applies to every upstream". Entries without an explicit list default to
+// {UpstreamAll} on load.
+const (
+	UpstreamAll       = "all"
+	UpstreamGrok      = "grok"
+	UpstreamCodeBuddy = "codebuddy"
+)
+
+// validUpstreams is the set of accepted values in ProxyEntry.Upstreams.
+var validUpstreams = map[string]struct{}{
+	UpstreamAll:       {},
+	UpstreamGrok:      {},
+	UpstreamCodeBuddy: {},
+}
+
+// AppliesTo reports whether the entry is scoped to the given upstream. An
+// entry containing UpstreamAll matches everything. An empty/nil slice is
+// treated as {UpstreamAll} for backward compatibility with pre-scoping
+// entries loaded from Redis.
+func (p *ProxyEntry) AppliesTo(upstream string) bool {
+	if p == nil {
+		return false
+	}
+	if len(p.Upstreams) == 0 {
+		return true
+	}
+	for _, u := range p.Upstreams {
+		if u == UpstreamAll || u == upstream {
+			return true
+		}
+	}
+	return false
 }
 
 // URL returns the proxy URL suitable for http.Transport.Proxy or the SOCKS5
@@ -264,6 +306,12 @@ func (p *ProxyPool) Update(id string, in ProxyEntry) (ProxyEntry, error) {
 		current.Password = in.Password
 	}
 	current.Enabled = in.Enabled
+	// Upstreams: nil input means "keep existing" (older clients that don't
+	// send the field). Empty slice or a valid list overwrites. validateEntry
+	// will default nil→{"all"} on new entries and normalise here.
+	if in.Upstreams != nil {
+		current.Upstreams = in.Upstreams
+	}
 	if err := validateEntry(&current); err != nil {
 		p.mu.Unlock()
 		return ProxyEntry{}, err
@@ -354,26 +402,41 @@ func (p *ProxyPool) Toggle(id string) (bool, error) {
 	return updated.Enabled, nil
 }
 
-// Next returns the next enabled entry via round-robin. Returns
-// (nil, error) when no proxies are enabled — callers treat this as a
-// signal to use direct (no-proxy) connections.
-func (p *ProxyPool) Next() (*ProxyEntry, error) {
+// Next returns the next enabled entry scoped to the given upstream via
+// round-robin. `upstream` should be one of "grok" or "codebuddy". An
+// entry whose Upstreams list contains "all" is always eligible; otherwise
+// the list must contain the requested upstream. Returns (nil, error)
+// when no scoped proxies are enabled — callers treat this as a signal to
+// use direct (no-proxy) connections.
+func (p *ProxyPool) Next(upstream string) (*ProxyEntry, error) {
 	if p == nil {
 		return nil, fmt.Errorf("pool not initialised")
 	}
 	p.mu.RLock()
-	n := len(p.enabled)
+	// Build the scoped candidate list. Cheap linear scan — the enabled
+	// slice is small (single-digit typical) and the alternative (keeping
+	// per-upstream cached slices) would complicate every mutation path.
+	var scoped []ProxyEntry
+	for _, e := range p.enabled {
+		if e.AppliesTo(upstream) {
+			scoped = append(scoped, e)
+		}
+	}
+	n := len(scoped)
 	if n == 0 {
 		p.mu.RUnlock()
-		return nil, fmt.Errorf("no proxies enabled")
+		return nil, fmt.Errorf("no proxies enabled for upstream %q", upstream)
 	}
 
 	// Prefer Redis atomic INCR for cluster-safe RR, fall back to in-process
-	// counter when Redis is unreachable.
+	// counter when Redis is unreachable. The counter is shared across
+	// upstreams by design — the per-upstream slice is filtered locally, so
+	// a shared cursor still yields fair rotation within each scope over
+	// time. If you want strict per-upstream RR fairness, split the counter
+	// key by upstream — leaving that as a possible future refinement.
 	var idx int
 	if p.db != nil {
 		if v, err := p.db.IncrProxyRR(); err == nil {
-			// v is 1-based
 			idx = int((v - 1) % int64(n))
 			if idx < 0 {
 				idx += n
@@ -386,7 +449,7 @@ func (p *ProxyPool) Next() (*ProxyEntry, error) {
 		v := p.rrIndex.Add(1)
 		idx = int((v - 1) % uint64(n))
 	}
-	entry := p.enabled[idx]
+	entry := scoped[idx]
 	p.mu.RUnlock()
 
 	// Best-effort async touch of last_used_at so the dashboard can show
@@ -558,6 +621,15 @@ func validateEntry(e *ProxyEntry) error {
 	e.Host = strings.TrimSpace(e.Host)
 	e.Label = strings.TrimSpace(e.Label)
 	e.Username = strings.TrimSpace(e.Username)
+	// Normalise Upstreams: trim/lower, dedupe, validate. Empty/nil defaults
+	// to {UpstreamAll} for backward compatibility. If "all" appears with
+	// anything else, collapse to {"all"} — no semantic ambiguity.
+	e.Upstreams = normaliseUpstreams(e.Upstreams)
+	for _, u := range e.Upstreams {
+		if _, ok := validUpstreams[u]; !ok {
+			return fmt.Errorf("upstream must be one of 'all', 'grok', 'codebuddy' (got %q)", u)
+		}
+	}
 	switch e.Protocol {
 	case "http", "socks5":
 	default:
@@ -570,7 +642,7 @@ func validateEntry(e *ProxyEntry) error {
 		return fmt.Errorf("host too long (max 253 chars)")
 	}
 	// Reject anything that looks structural — spaces, control chars, embedded schemes.
-	if strings.ContainsAny(e.Host, " \t\r\n/\\") {
+	if strings.ContainsAny(e.Host, " 	\r\n/\\") {
 		return fmt.Errorf("host contains invalid characters")
 	}
 	if e.Port < 1 || e.Port > 65535 {
@@ -585,6 +657,39 @@ func validateEntry(e *ProxyEntry) error {
 	return nil
 }
 
+// normaliseUpstreams trims/lowercases each value, drops empties, dedupes,
+// and defaults empty/nil to {UpstreamAll}. If "all" is present alongside
+// specific upstreams, the specific ones are dropped — "all" wins.
+func normaliseUpstreams(in []string) []string {
+	if len(in) == 0 {
+		return []string{UpstreamAll}
+	}
+	seen := make(map[string]struct{}, len(in))
+	out := make([]string, 0, len(in))
+	hasAll := false
+	for _, s := range in {
+		v := strings.ToLower(strings.TrimSpace(s))
+		if v == "" {
+			continue
+		}
+		if _, dup := seen[v]; dup {
+			continue
+		}
+		seen[v] = struct{}{}
+		if v == UpstreamAll {
+			hasAll = true
+		}
+		out = append(out, v)
+	}
+	if len(out) == 0 {
+		return []string{UpstreamAll}
+	}
+	if hasAll {
+		return []string{UpstreamAll}
+	}
+	return out
+}
+
 func entryToDTO(e ProxyEntry) db.ProxyEntryDTO {
 	return db.ProxyEntryDTO{
 		ID:         e.ID,
@@ -595,6 +700,7 @@ func entryToDTO(e ProxyEntry) db.ProxyEntryDTO {
 		Password:   e.Password,
 		Enabled:    e.Enabled,
 		Label:      e.Label,
+		Upstreams:  e.Upstreams,
 		CreatedAt:  e.CreatedAt,
 		LastUsedAt: e.LastUsedAt,
 		FailCount:  e.FailCount,
@@ -602,6 +708,12 @@ func entryToDTO(e ProxyEntry) db.ProxyEntryDTO {
 }
 
 func dtoToEntry(d db.ProxyEntryDTO) ProxyEntry {
+	// Backward compat: entries persisted before per-upstream scoping
+	// come back with nil/empty Upstreams — treat as {UpstreamAll}.
+	upstreams := d.Upstreams
+	if len(upstreams) == 0 {
+		upstreams = []string{UpstreamAll}
+	}
 	return ProxyEntry{
 		ID:         d.ID,
 		Protocol:   d.Protocol,
@@ -611,6 +723,7 @@ func dtoToEntry(d db.ProxyEntryDTO) ProxyEntry {
 		Password:   d.Password,
 		Enabled:    d.Enabled,
 		Label:      d.Label,
+		Upstreams:  upstreams,
 		CreatedAt:  d.CreatedAt,
 		LastUsedAt: d.LastUsedAt,
 		FailCount:  d.FailCount,

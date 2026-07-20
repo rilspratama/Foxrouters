@@ -1279,6 +1279,10 @@ func (s *Store) IncrComboCounter(name string) (int64, error) {
 // ProxyEntryDTO is the persisted shape of one proxy pool entry.
 // Passwords are stored as-is in Redis (single-tenant admin surface); API
 // responses mask them via the pool layer.
+//
+// Upstreams scopes the proxy to specific upstream families ("all", "grok",
+// "codebuddy"). Stored as a JSON array string in the HASH. Nil/empty means
+// legacy pre-scoping entry; the pool layer treats that as ["all"].
 type ProxyEntryDTO struct {
 	ID         string
 	Protocol   string // "http" | "socks5"
@@ -1288,6 +1292,7 @@ type ProxyEntryDTO struct {
 	Password   string
 	Enabled    bool
 	Label      string
+	Upstreams  []string
 	CreatedAt  time.Time
 	LastUsedAt time.Time
 	FailCount  int
@@ -1304,6 +1309,15 @@ func (s *Store) SaveProxy(dto ProxyEntryDTO) error {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 	defer cancel()
+	// Upstreams as JSON array string. Empty slice serialises to "[]" so we
+	// can tell "explicitly no scope (illegal, but we tolerate)" from
+	// "field missing (legacy)". LoadProxies falls back to nil on parse err.
+	upstreamsJSON := "[]"
+	if len(dto.Upstreams) > 0 {
+		if b, err := json.Marshal(dto.Upstreams); err == nil {
+			upstreamsJSON = string(b)
+		}
+	}
 	data := map[string]interface{}{
 		"id":           dto.ID,
 		"protocol":     dto.Protocol,
@@ -1313,6 +1327,7 @@ func (s *Store) SaveProxy(dto ProxyEntryDTO) error {
 		"password":     dto.Password,
 		"enabled":      dto.Enabled,
 		"label":        dto.Label,
+		"upstreams":    upstreamsJSON,
 		"created_at":   dto.CreatedAt.Unix(),
 		"last_used_at": dto.LastUsedAt.Unix(),
 		"fail_count":   dto.FailCount,
@@ -1413,6 +1428,15 @@ func (s *Store) LoadProxies() ([]ProxyEntryDTO, error) {
 			Username: vals["username"],
 			Password: vals["password"],
 			Label:    vals["label"],
+		}
+		// Upstreams: parse JSON array string. Missing field or parse
+		// failure leaves it nil — the pool layer defaults nil to ["all"]
+		// for backward compatibility with pre-scoping entries.
+		if raw, ok := vals["upstreams"]; ok && raw != "" && raw != "null" {
+			var us []string
+			if err := json.Unmarshal([]byte(raw), &us); err == nil {
+				dto.Upstreams = us
+			}
 		}
 		if v, err := strconv.Atoi(vals["port"]); err == nil {
 			dto.Port = v

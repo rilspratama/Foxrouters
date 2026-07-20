@@ -17,13 +17,14 @@ import (
 
 // proxyInput is the wire schema for POST /api/proxies and PUT /api/proxies/:id.
 type proxyInput struct {
-	Protocol string `json:"protocol"`
-	Host     string `json:"host"`
-	Port     int    `json:"port"`
-	Username string `json:"username"`
-	Password string `json:"password"`
-	Label    string `json:"label"`
-	Enabled  *bool  `json:"enabled"` // pointer so we can distinguish unset vs false
+	Protocol  string   `json:"protocol"`
+	Host      string   `json:"host"`
+	Port      int      `json:"port"`
+	Username  string   `json:"username"`
+	Password  string   `json:"password"`
+	Label     string   `json:"label"`
+	Upstreams []string `json:"upstreams"` // nil = keep-existing on Update, ["all"] default on Add
+	Enabled   *bool    `json:"enabled"`   // pointer so we can distinguish unset vs false
 }
 
 // HandleListProxies: GET /api/proxies → { proxies: [ProxyEntry, …], stats: {...} }.
@@ -73,13 +74,14 @@ func HandleAddProxy(pool *proxy.ProxyPool) gin.HandlerFunc {
 			return
 		}
 		entry := proxy.ProxyEntry{
-			Protocol: in.Protocol,
-			Host:     in.Host,
-			Port:     in.Port,
-			Username: in.Username,
-			Password: in.Password,
-			Label:    in.Label,
-			Enabled:  true, // default enabled on create
+			Protocol:  in.Protocol,
+			Host:      in.Host,
+			Port:      in.Port,
+			Username:  in.Username,
+			Password:  in.Password,
+			Label:     in.Label,
+			Upstreams: in.Upstreams, // nil → validateEntry defaults to ["all"]
+			Enabled:   true,         // default enabled on create
 		}
 		if in.Enabled != nil {
 			entry.Enabled = *in.Enabled
@@ -112,12 +114,13 @@ func HandleUpdateProxy(pool *proxy.ProxyPool) gin.HandlerFunc {
 			return
 		}
 		entry := proxy.ProxyEntry{
-			Protocol: in.Protocol,
-			Host:     in.Host,
-			Port:     in.Port,
-			Username: in.Username,
-			Password: in.Password,
-			Label:    in.Label,
+			Protocol:  in.Protocol,
+			Host:      in.Host,
+			Port:      in.Port,
+			Username:  in.Username,
+			Password:  in.Password,
+			Label:     in.Label,
+			Upstreams: in.Upstreams, // nil = keep existing (Update honours this)
 		}
 		if in.Enabled != nil {
 			entry.Enabled = *in.Enabled
