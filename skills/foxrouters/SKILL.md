@@ -17,7 +17,7 @@ Unified OpenAI-compatible API gateway. Routes by model prefix: `grok-*` → Grok
 | **Auth (API)** | `Authorization: Bearer <GATEWAY_KEY>` |
 | **Auth (Dashboard)** | Cookie-based — visit `/login`, enter key, HttpOnly cookie set (v5.11.6). No more `?key=` URL param or localStorage. |
 | **Gateway key file** | `/root/nexus-workspace/foxrouters/gateway-key.txt` (first line = admin key). On fresh deploy with empty Redis, gateway auto-generates a bootstrap admin key and writes it to `bootstrap-key.txt` (v5.11.6). |
-| **Version** | 5.11.7 |
+| **Version** | v1.5.0 |
 | **Dashboard** | `/dashboard` (redirects to `/login` if no session cookie) |
 | **Deploy script** | `./start.sh` — one-command deploy (docker compose up + capture bootstrap key from logs + save to `bootstrap-key.txt`). Commands: `--reset`, `--status`, `--logs`, `--key`, `--stop`. |
 
@@ -286,61 +286,6 @@ Aliases and custom models live in Redis HASHes `custom_aliases` and
 `custom_models`; the process caches them in memory behind a `sync.RWMutex` and
 refreshes the map on every mutation.
 
-### 7. Combos (admin only, v1.4.0)
-
-Group multiple models under one virtual `combo/<name>` alias with a routing
-strategy applied per request. Two strategies: **fallback** (try in order,
-retry next on 5xx) and **round_robin** (rotate models across requests via
-atomic Redis INCR).
-
-```bash
-# List combos
-curl -s http://127.0.0.1:20130/api/combos -H "Authorization: Bearer $ADMIN_KEY"
-# → {"combos":[{"name":"smart-fallback","strategy":"fallback","models":[…]}]}
-
-# Create a Fallback combo (retry chain on 5xx)
-curl -s -X POST http://127.0.0.1:20130/api/combos \
-  -H "Authorization: Bearer $ADMIN_KEY" -H "content-type: application/json" \
-  -d '{"name":"smart-fallback","strategy":"fallback",
-       "models":["cb/gpt-5.5","cb/claude-sonnet-4.6","grok-4.5"],
-       "description":"GPT then Claude then Grok"}'
-# → {"ok":true,"name":"smart-fallback"}
-
-# Create a Round Robin combo
-curl -s -X POST http://127.0.0.1:20130/api/combos \
-  -H "Authorization: Bearer $ADMIN_KEY" -H "content-type: application/json" \
-  -d '{"name":"rr-pool","strategy":"round_robin",
-       "models":["cb/gpt-5.5","cb/claude-sonnet-4.6"]}'
-
-# Use — client calls combo/<name>, gets whichever backend model
-curl -s -X POST http://127.0.0.1:20130/v1/chat/completions \
-  -H "Authorization: Bearer $CLIENT_KEY" -H "content-type: application/json" \
-  -d '{"model":"combo/smart-fallback","messages":[{"role":"user","content":"hi"}]}'
-
-# Fetch one
-curl -s http://127.0.0.1:20130/api/combos/smart-fallback -H "Authorization: Bearer $ADMIN_KEY"
-
-# Delete (also removes the round-robin counter key)
-curl -s -X DELETE http://127.0.0.1:20130/api/combos/smart-fallback -H "Authorization: Bearer $ADMIN_KEY"
-```
-
-**Resolve order** (inside `proxy.ProxyRequest`):
-1. Custom alias (single hop)
-2. Custom-model lookup on resolved id
-3. **Combo resolve** — if `combo/<name>`, replace with next model per strategy
-4. Grok-alias expansion (`grok-4.5-high` → `grok-4.5` + `reasoning_effort`)
-5. Fall through to prefix routing (`grok-*` / `cb/*`)
-
-**Fallback semantics**
-- Only retries on 5xx. 4xx returns immediately (client error).
-- Non-streaming only — SSE bytes on the wire can't be un-sent, so streaming clients use `models[0]` without retry.
-
-**Round-robin semantics**
-- `INCR combo:counter:<name>` on every request; model = `models[counter % len]`.
-- Cluster-safe atomic — no lock contention.
-
-Combos live in Redis HASH `combos` (field=name, value=JSON) plus `combo:counter:<name>` STRING keys.
-
 ## Python Helper
 
 ```python
@@ -372,6 +317,58 @@ def health():
     r = requests.get(f"{FOXROUTERS_URL}/health", headers={"Authorization": f"Bearer {get_key()}"})
     return r.json()
 ```
+
+### 7. Proxy Pool Management (admin only, v1.5.0)
+
+Dashboard-managed HTTP/SOCKS5 proxy pool with round-robin rotation. All upstream calls (Grok, CodeBuddy, token refresh, health checks) route through enabled proxies. Per-upstream scoping — assign a proxy to Grok only, CodeBuddy only, or both.
+
+| Method | Endpoint | Purpose |
+|--------|----------|---------|
+| GET | `/api/proxies` | List all proxies (password masked) |
+| POST | `/api/proxies` | Add proxy |
+| PUT | `/api/proxies/:id` | Update proxy |
+| DELETE | `/api/proxies/:id` | Delete proxy |
+| POST | `/api/proxies/:id/toggle` | Enable/disable proxy |
+| POST | `/api/proxies/:id/test` | Test proxy connectivity (returns exit IP + latency) |
+
+**Add proxy:**
+```bash
+curl -X POST http://127.0.0.1:20130/api/proxies \
+  -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" \
+  -d '{
+    "protocol": "socks5",
+    "host": "proxy.example.com",
+    "port": 1080,
+    "username": "user",
+    "password": "pass",
+    "label": "datacenter-us",
+    "upstreams": ["grok"]
+  }'
+# upstreams: ["all"] (default), ["grok"], ["codebuddy"], or ["grok","codebuddy"]
+```
+
+**Test proxy:**
+```bash
+curl -X POST http://127.0.0.1:20130/api/proxies/abc12345/test \
+  -H "Authorization: Bearer $KEY"
+# → {"success":true,"ip":"104.28.245.128","latency_ms":554}
+```
+
+**Toggle proxy:**
+```bash
+curl -X POST http://127.0.0.1:20130/api/proxies/abc12345/toggle \
+  -H "Authorization: Bearer $KEY"
+# → {"ok":true,"id":"abc12345","enabled":false}
+```
+
+**How it works:**
+- `getClient(defaultClient, upstream)` checks pool for enabled proxies matching the upstream scope
+- If found → returns `http.Client` with proxy transport (cached per proxy ID)
+- If none → returns `defaultClient` (direct connection)
+- Auto-disable after 5 consecutive failures (transport errors, 502/503/504)
+- `MarkSuccess` resets fail count
+- Transport cache: `sync.Map[proxyID → *http.Transport]`, invalidated on update/delete
+- Round-robin: `atomic.Uint64` index, scoped by upstream filter
 
 ## Common Patterns
 
@@ -452,12 +449,20 @@ Client → AuthMiddleware (Bearer) → RateLimitMiddleware
 - **`/health` auth check honors both Bearer AND cookie** — `handleHealth` returns minimal `{service,status,version}` to public callers but full telemetry (grok_accounts, cb_keys, upstreams) to authed callers. It checks `Authorization: Bearer` OR `foxrouters_session` cookie. If a dashboard shows "undefined" for stats, the cookie wasn't being honored (was Bearer-only before v5.11.6).
 - **Gin HEAD pitfall for browser routes** — `curl -sI /login` or `curl -sI /dashboard` returns 404 because Gin only auto-registers HEAD for routes with explicit `.HEAD()`. Use `curl -s` (GET) to smoke-test browser routes. Only `/health` has explicit HEAD registration.
 - **Fresh deploy auto-bootstraps** — on first boot with empty Redis, gateway generates a random admin key (`gw-` + 32 hex bytes), persists to Redis with `role=admin, name=bootstrap`, writes to `bootstrap-key.txt` (chmod 600, gitignored), and prints the key + login URL to the log once. Set `GATEWAY_NO_AUTOBOOTSTRAP=1` to disable (fail-closed mode) or `GATEWAY_AUTH_DISABLE=1` for dev.
+- **Dashboard JS: `apiFetch` not `api`** — the dashboard has ONE fetch helper called `apiFetch(url, opts)` (async, auto-injects Bearer). Subagents writing new dashboard functions have repeatedly used `api(...)` (undefined) instead. If a dashboard page throws `api is not defined` or `X is not defined` at a custom-models/aliases button, grep `dashboard.html` for `\bapi\(` (excluding `apiFetch` / `.api` / comments) and fix every call site to `apiFetch(...)`.
+- **Dashboard JS: `</script>` placement orphans functions** — when appending new JS functions (e.g. `loadCustomModels`, `addAlias`) to `dashboard.html`, the new functions MUST sit BEFORE the final `</script>` tag. A premature `</script>` (e.g. placed after the INIT block but before function definitions) causes `ReferenceError: loadCustomModels is not defined` at boot because the browser parses them as plain text. Before committing dashboard JS, verify: `grep -nE "<script>|</script>" dashboard.html` — expect one opening `<script>` (possibly a second for modal blocks, nested) and exactly ONE closing `</script>` at end-of-file, with every `async function X` between them.
+- **DELETE route with slash-containing ids** — gin's `:param` matches a single path segment; ids like `cb/kimi-k3` or alias `foo/bar` will 404 on `DELETE /api/aliases/:alias`. Use the catch-all `*alias` / `*id` form (`r.DELETE("/api/aliases/*alias", ...)`) and strip the leading `/` inside the handler (`strings.TrimPrefix(c.Param("alias"), "/")`). The custom-models DELETE already uses `*id`; aliases had to be patched to match.
+- **Anthropic adapter error envelope** — on upstream 4xx, surface a human-readable `message` string, NOT `string(bodyBytes)`. The upstream body is usually JSON (`{"error":"model not available on CodeBuddy","detail":"..."}`); embedding it raw inside `{"error":{"message":"<raw json>"}}` produces triple-escaped `JSON-in-JSON-in-JSON`. Use `extractUpstreamErrorMessage(raw, bodyBytes)` which tries `message`/`msg`/`error`/`detail` fields (including nested `{"error":{"message":...}}`) and falls back to trimmed raw body only if not JSON.
+- **streamWriter error path** — when `stream:true` and the upstream errors BEFORE the first SSE frame, `streamWriter.WriteHeader(code)` must NOT commit to the real writer (delays double-WriteHeader panics). `streamWriter.Write` must buffer non-`data:` bytes into `errBuf` when `!started && statusCode>=400` (otherwise the line-splitter silently drops the upstream error body). The outer `HandleMessages` reads `sw.errBuf` first, falls back to `c.Get("response_body")`, then calls `extractUpstreamErrorMessage`.
+- **Public repo = leak surface** — `https://github.com/rilspratama/Foxrouters` is PUBLIC. Before any push, scan for the VPS public IP and other secrets: `grep -rnE "([0-9]{1,3}\.){3}[0-9]{1,3}" . --include="*.md" --include="*.go" --include="*.yml" --include="*.sh" --include="*.html" | grep -v ".git/" | grep -vE "127\.0\.0\.1|0\.0\.0\.0|255\.255|1\.1\.1\.1|8\.8\.8\.8|192\.168\.|10\.0\.0|172\.(1[6-9]|2[0-9]|3[01])\."`. Replace any public IP with `<your-vps-ip>`. Note: git history still carries old leaks — only BFG rewrite scrubs them (risky for forks).
+- **Git workflow: commit-local, batch-push** — the operator prefers accumulating commits locally and pushing in a batch (ideally with a version bump) rather than pushing every fix immediately. Fast pushes during/after big refactors (package split, file renames) cause structural conflicts with open external PRs (PR #2 was based on pre-split layout and couldn't merge). When an external PR is open, hold big structural pushes or coordinate with the contributor. Default cadence: commit → wait for operator's "push"/"gas" → push.
+- **kimi-k3 not on CodeBuddy upstream** — as of 2026-07-19, `kimi-k3` returns `{"code":11102,"msg":"model [kimi-k3] service info not found"}` from www.codebuddy.ai/v2. `kimi-k2.5` works. Don't hardcode `cb/kimi-k3` into the model list; use the custom-models API (`POST /api/models/custom`) to register it at runtime if/when upstream enables it.
 
 ## Environment
 
 - **Port:** 20130
 - **Redis:** 127.0.0.1:6379 (hot state)
 - **ClickHouse:** 127.0.0.1:9001 (history, native protocol)
-- **Pool:** ~505 Grok accounts, ~1047 CB keys, 2 gateway keys
+- **Pool:** ~505 Grok accounts, ~1047 CB keys, 2 gateway keys, proxy pool (variable)
 - **systemd:** `foxrouters.service`
 - **Binary:** `/root/nexus-workspace/foxrouters/foxrouters` (30MB static)
