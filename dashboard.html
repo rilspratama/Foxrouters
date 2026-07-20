@@ -1689,6 +1689,11 @@ function router() {
   var pageEl = document.getElementById(route.page);
   if (pageEl) pageEl.classList.add('active');
 
+  // Scroll to top on page change
+  window.scrollTo(0, 0);
+  var content = document.getElementById('content');
+  if (content) content.scrollTop = 0;
+
   // Nav items
   document.querySelectorAll('.nav-item').forEach(function(n) {
     n.classList.toggle('active', n.getAttribute('data-route') === hash);
