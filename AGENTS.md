@@ -7,7 +7,7 @@ Unified OpenAI-compatible API gateway for **Grok + CodeBuddy**. Routes by model 
 Multi-account/key round-robin, auto-refresh (singleflight + pre-warm), circuit breaker,
 API key auth, per-key RPM/quota, Redis hot-state, **ClickHouse** full-body history, web dashboard.
 
-**Version:** v1.4.8 (`-X main.Version` build flag)
+**Version:** v1.5.0 (`-X main.Version` build flag)
 **Port:** 20130 · **systemd:** `foxrouters.service`  
 **Path:** `/root/nexus-workspace/foxrouters/`
 
@@ -28,7 +28,7 @@ Client → AuthMiddleware (Bearer) → RateLimitMiddleware
 
 | Layer | Engine | Purpose |
 |-------|--------|---------|
-| Hot | **Redis** | Tokens, CB credits, disabled flags, gateway keys, rate state |
+| Hot | **Redis** | Tokens, CB credits, disabled flags, gateway keys, rate state, **proxy pool** |
 | Cold | **ClickHouse** (`127.0.0.1:9000`) | `request_logs` full request/response JSON, refresh/events, 90d TTL |
 | Legacy | PostgreSQL | **Not used** by gateway for history (may remain on disk) |
 
@@ -40,6 +40,7 @@ Client → AuthMiddleware (Bearer) → RateLimitMiddleware
 5. History write async only; credentials never in CH  
 6. Full body unlimited in CH; log `id` JSON **string** for browsers  
 7. No live gateway key inject into `/dashboard` HTML  
+8. Proxy pool: `getClient(default, upstream)` — returns proxied client if pool has enabled proxies matching upstream scope, else direct. Transport cache per proxy ID. Auto-disable after 5 fails.
 
 ### Token refresh
 - Pre-warm every 30s, 30min window, 10 concurrent  
@@ -63,13 +64,16 @@ Client → AuthMiddleware (Bearer) → RateLimitMiddleware
 | `db.go` | Redis + ClickHouse |
 | `handlers.go` | health, accounts, history, keys, dashboard static |
 | `auth.go` / `ratelimit.go` / `health.go` | Auth, RPM, circuit |
-| `dashboard.html` | SPA — 4 nav routes, Models page has 3 tabs (Models/Custom/Combos) |
+| `dashboard.html` | SPA — 5 nav routes (Dashboard/Accounts/Keys/Models/Proxies), Models page has 3 tabs (Models/Custom/Combos) |
 | `internal/auth/session_store.go` | Session token → API key map (P3-3, 256-bit random tokens) |
 | `internal/proxy/validate.go` | `validateName()` regex for id/alias/combo (P3-5) |
 | `internal/proxy/combo.go` | ComboRegistry — fallback + round_robin strategies |
+| `internal/proxy/pool.go` | ProxyPool — HTTP/SOCKS5 proxy pool, round-robin, per-upstream scoping, transport cache, auto-disable |
 | `internal/handlers/combos.go` | Combos CRUD endpoints |
 | `internal/handlers/custom.go` | Custom models + aliases CRUD endpoints |
-| `CHANGELOG.md` | Version history (v1.4.0 → v1.4.8) |
+| `internal/handlers/proxies.go` | Proxy pool CRUD + test + toggle endpoints |
+| `proxy_pool_test.go` | Proxy pool tests (CRUD, validation, masking, round-robin, scoping) |
+| `CHANGELOG.md` | Version history (v1.4.0 → v1.5.0) |
 | `.gateway.env` | Secrets (chmod 600, gitignored) |
 
 ## Env (essentials)
@@ -103,6 +107,7 @@ curl -s http://127.0.0.1:20130/health
 | `GET /history/detail/:id` | Full request/response JSON |
 | `GET/POST /accounts` … | Grok import/delete/refresh |
 | `GET/POST /api/keys` … | Gateway key CRUD |
+| `GET/POST /api/proxies` … | Proxy pool CRUD + test + toggle |
 | `GET /dashboard` | Public HTML; key via `?key=` / localStorage only |
 
 ## Dashboard UX prefs
