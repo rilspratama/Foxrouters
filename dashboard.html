@@ -1463,14 +1463,35 @@ function hasUsableDefaultKey() {
 async function fetchJSON(url) {
   var r = await fetch(url, { credentials: 'same-origin' });
   if (r.status === 401) {
+    // D8: stop polling before navigating.
+    window._stopped = true;
     window.location.href = '/login';
-    throw new Error('Session expired — redirecting to login');
+    // D7: throw a distinguishable sentinel so callers can swallow it.
+    throw new Error('__redirect__');
   }
   if (!r.ok) {
     throw new Error('HTTP ' + r.status + ' on ' + url);
   }
   return r.json();
 }
+
+// D7: suppress the `__redirect__` sentinel so 15+ .catch(alert(e.message)) sites
+// don't briefly flash "Error: __redirect__" while the page unloads.
+window.addEventListener('unhandledrejection', function(ev) {
+  if (ev.reason && ev.reason.message === '__redirect__') ev.preventDefault();
+});
+window.addEventListener('error', function(ev) {
+  if (ev.error && ev.error.message === '__redirect__') ev.preventDefault();
+});
+// Wrap window.alert once so any lingering `alert('... ' + e.message)` calls
+// during page teardown silently drop the sentinel string.
+(function(){
+  var _origAlert = window.alert.bind(window);
+  window.alert = function(msg) {
+    if (typeof msg === 'string' && msg.indexOf('__redirect__') !== -1) return;
+    return _origAlert(msg);
+  };
+})();
 
 // fetchJSON with method/body support for CRUD operations
 async function apiFetch(url, opts) {
@@ -1481,8 +1502,13 @@ async function apiFetch(url, opts) {
   if (opts.body) { fetchOpts.body = opts.body; }
   var r = await fetch(url, fetchOpts);
   if (r.status === 401) {
+    // D8: stop background polling BEFORE navigating so any in-flight interval
+    // ticks after this point short-circuit instead of piling up 401s.
+    window._stopped = true;
     window.location.href = '/login';
-    return;
+    // D7: throw a distinguishable sentinel — returning undefined caused
+    // TypeError when callers destructured the (missing) result.
+    throw new Error('__redirect__');
   }
   if (!r.ok && r.status !== 200) {
     var errBody = await r.text().catch(function() { return ''; });
@@ -1558,7 +1584,7 @@ function escHtml(s) {
 // on document so dynamically-rendered buttons auto-bind.
 // ══════════════════════════════════════════════════════════
 document.addEventListener('click', function(e) {
-  var btn = e.target.closest('button[data-key], button[data-email], button[data-id], button[data-alias], button[data-name]');
+  var btn = e.target.closest('button[data-key], button[data-email], button[data-id], button[data-alias], button[data-name], button[data-model]');
   if (!btn) return;
   var v;
   if (btn.classList.contains('delete-cb-btn')) {
@@ -1582,6 +1608,12 @@ document.addEventListener('click', function(e) {
   } else if (btn.classList.contains('delete-combo-btn')) {
     v = btn.getAttribute('data-name');
     if (v) deleteCombo(v);
+  } else if (btn.classList.contains('quick-test-btn')) {
+    // D1/S3: XSS-safe replacement for inline onclick="quickTestModel(...)".
+    // Custom-model ids can contain user input — passing them through an
+    // attribute + textContent lookup avoids the JS-string escape hole.
+    v = btn.getAttribute('data-model');
+    if (v) quickTestModel(v, btn);
   }
 });
 
@@ -1610,6 +1642,7 @@ document.addEventListener('click', function(e) {
    REFRESH (health + accounts + cb-stats + models)
    ══════════════════════════════════════════════════════════ */
 async function refresh() {
+  if (window._stopped) return; // D8: skip after session expired
   try {
     var results = await Promise.all([
       fetchJSON('/health'),
@@ -1892,6 +1925,7 @@ async function runTest() {
 var historyLogs = [];
 
 async function loadHistory() {
+  if (window._stopped) return; // D8: skip after session expired
   try {
     var results = await Promise.all([
       fetchJSON('/history?hours=24'),
@@ -2425,7 +2459,7 @@ async function loadModels() {
           '<td style="padding:10px;text-align:right;font-family:var(--mono);color:var(--text-secondary)">' + (tokOut > 0 ? formatNum(tokOut) : '—') + '</td>' +
           '<td style="padding:10px;text-align:right;font-family:var(--mono);color:var(--text-tertiary)">' + avgLat + '</td>' +
           '<td style="padding:10px;text-align:right;font-family:var(--mono);' + errStyle + '">' + (errs > 0 ? errs : '—') + '</td>' +
-          '<td style="padding:10px;text-align:center"><button class="btn-ghost" onclick="quickTestModel(\'' + escHtml(id) + '\')" style="padding:3px 10px;font-size:12px">Test</button></td>' +
+          '<td style="padding:10px;text-align:center"><button class="btn-ghost quick-test-btn" data-model="' + escHtml(id) + '" style="padding:3px 10px;font-size:12px">Test</button></td>' +
         '</tr>';
       });
 
@@ -2450,8 +2484,11 @@ async function loadModels() {
   }
 }
 
-async function quickTestModel(model) {
-  var btn = event.target;
+async function quickTestModel(model, btnEl) {
+  // D1: btnEl is passed by the delegated click handler; fall back to event.target
+  // for any legacy inline caller (kept for safety, no known callers remain).
+  var btn = btnEl || (typeof event !== 'undefined' && event ? event.target : null);
+  if (!btn) return;
   var origText = btn.textContent;
   btn.textContent = 'Testing...';
   btn.disabled = true;
@@ -2459,7 +2496,10 @@ async function quickTestModel(model) {
   try {
     var r = await fetch('/v1/chat/completions', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + authKey },
+      // D3: in cookie-auth mode authKey is '' — sending "Bearer " (empty) makes
+      // the gateway reject with 401. Mirror runTest(): only add the header when
+      // we actually have a key (cookie session provides auth otherwise).
+      headers: { 'Content-Type': 'application/json', ...(authKey ? { 'Authorization': 'Bearer ' + authKey } : {}) },
       body: JSON.stringify({ model: model, messages: [{role:'user',content:'Say OK'}], stream: false })
     });
     var data = await r.json();

@@ -225,7 +225,7 @@ func NewManager(store *db.Store) *Manager {
 			}
 			slog.Info("AUTO-BOOTSTRAP: generated admin key (first boot)",
 				"module", "auth",
-				"key", bootstrapKey,
+				"key_masked", MaskKey(bootstrapKey),
 				"file", bootstrapFile,
 				"login_url", "http://localhost:"+port+"/login")
 		}

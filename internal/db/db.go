@@ -49,6 +49,23 @@ const (
 	LOG_FLUSH_INTERVAL = 2 * time.Second
 )
 
+// maskRedisKey masks the credential body of a Redis key so full API keys never
+// leak into slog output. Given e.g. "cb:key:ck_abcd1234...wxyz", returns
+// "cb:key:ck_abcd1...wxyz". Preserves the prefix so operators can still tell
+// which pool the failure came from.
+func maskRedisKey(rk string) string {
+	// find the last ':' — everything after it is the credential body
+	i := strings.LastIndex(rk, ":")
+	if i < 0 || i == len(rk)-1 {
+		return rk
+	}
+	prefix, body := rk[:i+1], rk[i+1:]
+	if len(body) > 12 {
+		return prefix + body[:8] + "..." + body[len(body)-4:]
+	}
+	return prefix + "***"
+}
+
 // envOr returns os.Getenv(key) if set, otherwise def.
 func envOr(key, def string) string {
 	if v := os.Getenv(key); v != "" {
@@ -353,7 +370,7 @@ func (s *Store) DeleteCBKey(key string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 	defer cancel()
 	if err := s.rdb.Del(ctx, RK_CB_KEY+key).Err(); err != nil {
-		slog.Warn("DEL cb key failed", "module", "db-redis", "key", key, "error", err)
+		slog.Warn("DEL cb key failed", "module", "db-redis", "key", maskRedisKey(RK_CB_KEY+key), "error", err)
 	}
 }
 
@@ -365,7 +382,7 @@ func (s *Store) DeleteGatewayKey(key string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 	defer cancel()
 	if err := s.rdb.Del(ctx, RK_GATEWAY_KEY+key).Err(); err != nil {
-		slog.Warn("DEL gateway key failed", "module", "db-redis", "key", key, "error", err)
+		slog.Warn("DEL gateway key failed", "module", "db-redis", "key", maskRedisKey(RK_GATEWAY_KEY+key), "error", err)
 	}
 }
 
@@ -396,7 +413,7 @@ func (s *Store) SaveGrokAccount(dto GrokAccountDTO) {
 	}
 	key := RK_GROK_ACCOUNT + dto.Email
 	if err := s.rdb.HSet(ctx, key, data).Err(); err != nil {
-		slog.Warn("HSet failed", "module", "db-redis", "key", key, "error", err)
+		slog.Warn("HSet failed", "module", "db-redis", "key", maskRedisKey(key), "error", err)
 	}
 }
 
@@ -446,7 +463,7 @@ func (s *Store) SaveCBKey(dto CBKeyDTO) {
 	}
 	rk := RK_CB_KEY + dto.Key
 	if err := s.rdb.HSet(ctx, rk, data).Err(); err != nil {
-		slog.Warn("HSet failed", "module", "db-redis", "key", rk, "error", err)
+		slog.Warn("HSet failed", "module", "db-redis", "key", maskRedisKey(rk), "error", err)
 	}
 }
 
@@ -497,7 +514,7 @@ func (s *Store) SaveGatewayKey(dto GatewayKeyDTO) {
 	}
 	rk := RK_GATEWAY_KEY + dto.Key
 	if err := s.rdb.HSet(ctx, rk, data).Err(); err != nil {
-		slog.Warn("HSet failed", "module", "db-redis", "key", rk, "error", err)
+		slog.Warn("HSet failed", "module", "db-redis", "key", maskRedisKey(rk), "error", err)
 	}
 }
 
@@ -536,7 +553,7 @@ func (s *Store) IncrementGatewayKeyTokens(key string, amount int64) {
 	defer cancel()
 	rk := RK_GATEWAY_KEY + key
 	if err := s.rdb.HIncrBy(ctx, rk, "tokens_used", amount).Err(); err != nil {
-		slog.Warn("HINCRBY tokens_used failed", "module", "db-redis", "key", rk, "error", err)
+		slog.Warn("HINCRBY tokens_used failed", "module", "db-redis", "key", maskRedisKey(rk), "error", err)
 	}
 }
 
@@ -549,7 +566,7 @@ func (s *Store) IncrementGatewayKeyRequests(key string) {
 	defer cancel()
 	rk := RK_GATEWAY_KEY + key
 	if err := s.rdb.HIncrBy(ctx, rk, "requests", 1).Err(); err != nil {
-		slog.Warn("HINCRBY requests failed", "module", "db-redis", "key", rk, "error", err)
+		slog.Warn("HINCRBY requests failed", "module", "db-redis", "key", maskRedisKey(rk), "error", err)
 	}
 }
 

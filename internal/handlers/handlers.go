@@ -721,6 +721,15 @@ func HandleLogin(am *auth.Manager, sessions *auth.SessionStore) gin.HandlerFunc 
 			return
 		}
 
+		// D2: only admin keys can log into the dashboard. Inference-role keys can
+		// call /v1/* with a Bearer token, but the dashboard endpoints are
+		// admin-only — letting them in produces a redirect loop (dashboard XHR
+		// gets 401 → JS redirects to /login → login succeeds → loop).
+		if info := am.Get(req.Key); info == nil || info.Role != auth.RoleAdmin {
+			c.Data(200, "text/html; charset=utf-8", []byte(loginPageHTMLWithError("This key does not have dashboard access (admin role required)")))
+			return
+		}
+
 		// P3-3: issue a random session token bound to the key (not the key itself).
 		token, err := sessions.Create(req.Key)
 		if err != nil {
