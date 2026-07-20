@@ -188,7 +188,8 @@ ok "FoxRouters started (port ${GATEWAY_PORT})"
 info "Waiting for gateway to bootstrap (up to 30s)..."
 BOOTSTRAP_KEY=""
 for i in $(seq 1 30); do
-    BOOTSTRAP_KEY=$(docker logs foxrouters 2>&1 | grep -oP 'gw-[a-f0-9]{64}' | head -1 || true)
+    # Gateway key format: gw-<43 chars> (alphanumeric + _ + -)
+    BOOTSTRAP_KEY=$(docker logs foxrouters 2>&1 | grep -oP 'gw-[A-Za-z0-9_-]{43}' | head -1 || true)
     if [[ -n "${BOOTSTRAP_KEY}" ]]; then
         break
     fi
@@ -197,22 +198,29 @@ for i in $(seq 1 30); do
 done
 
 if [[ -z "${BOOTSTRAP_KEY}" ]]; then
-    # Check if Redis already had keys (re-deploy scenario)
-    EXISTING_KEYS=$(docker exec foxrouters-redis redis-cli -a "${REDIS_PASSWORD}" --scan --pattern 'gateway:key:*' 2>/dev/null | wc -l)
-    if [[ "${EXISTING_KEYS}" -gt 0 ]]; then
-        yellow "Gateway didn't log a bootstrap key, but Redis has ${EXISTING_KEYS} gateway keys already."
-        yellow "This is a re-deploy — use your existing gateway key."
-        yellow "If you lost it, reset: docker volume rm ${VOL_REDIS} && ./install.sh"
-    else
-        err "Gateway did not bootstrap a key within 30s."
-        err "Check logs: docker logs foxrouters"
-        exit 1
+    # Re-deploy scenario: Redis already has gateway keys from previous install.
+    # Fetch the full (unmasked) key directly from Redis.
+    info "No bootstrap key in logs — checking Redis for existing keys..."
+    EXISTING_KEY=$(docker exec foxrouters-redis redis-cli -a "${REDIS_PASSWORD}" --scan --pattern 'gw:key:*' 2>/dev/null | head -1 || true)
+    if [[ -n "${EXISTING_KEY}" ]]; then
+        # Extract full key from Redis HASH field "key" (not key_masked)
+        BOOTSTRAP_KEY=$(docker exec foxrouters-redis redis-cli -a "${REDIS_PASSWORD}" hget "${EXISTING_KEY}" key 2>/dev/null | tr -d '\r\n' || true)
+        if [[ -n "${BOOTSTRAP_KEY}" ]]; then
+            yellow "Re-deploy detected — using existing gateway key from Redis."
+        fi
     fi
-else
-    echo "${BOOTSTRAP_KEY}" > "${KEY_FILE}"
-    chmod 600 "${KEY_FILE}"
-    ok "Gateway key captured → ${KEY_FILE}"
 fi
+
+if [[ -z "${BOOTSTRAP_KEY}" ]]; then
+    err "Gateway did not bootstrap a key within 30s."
+    err "Check logs: docker logs foxrouters"
+    err "If Redis has stale data, reset: docker volume rm ${VOL_REDIS} && ./install.sh"
+    exit 1
+fi
+
+echo "${BOOTSTRAP_KEY}" > "${KEY_FILE}"
+chmod 600 "${KEY_FILE}"
+ok "Gateway key captured → ${KEY_FILE}"
 
 # ── Step 10: Health check ───────────────────────────────────────────────────
 info "Health check..."
