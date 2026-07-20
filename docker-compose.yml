@@ -1,8 +1,7 @@
 # FoxRouters — full stack (Redis + ClickHouse + gateway)
 # Usage:
 #   cp .env.example .env    # then edit .env with real values
-#   ./start.sh              # one-command deploy (captures bootstrap key)
-#   ./start.sh --status     # check status
+#   docker compose up -d --build   # one-command deploy
 #
 # The gateway waits for Redis + ClickHouse to be healthy before starting.
 
@@ -14,8 +13,9 @@ services:
       - "6379:6379"
     volumes:
       - redis-data:/data
+    command: ["redis-server", "--requirepass", "${REDIS_PASSWORD}", "--appendonly", "no"]
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
       interval: 10s
       timeout: 3s
       retries: 5
@@ -30,7 +30,7 @@ services:
       - "9000:9000"   # Native TCP (gateway connects here)
     environment:
       CLICKHOUSE_USER: default
-      CLICKHOUSE_PASSWORD: ""
+      CLICKHOUSE_PASSWORD: "${CLICKHOUSE_PASSWORD}"
       CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "1"
     volumes:
       - clickhouse-data:/var/lib/clickhouse
@@ -47,7 +47,10 @@ services:
     restart: unless-stopped
 
   foxrouters:
-    build: .
+    build:
+      context: .
+      args:
+        VERSION: v1.5.0
     container_name: foxrouters
     ports:
       - "20130:20130"
@@ -62,9 +65,9 @@ services:
       # Override host-oriented values from .env with container DNS names.
       REDIS_ADDR: redis:6379
       CLICKHOUSE_ADDR: clickhouse:9000
-      CLICKHOUSE_DB: foxrouters
+      CLICKHOUSE_DB: gateway
       CLICKHOUSE_USER: default
-      CLICKHOUSE_PASSWORD: ""
+      CLICKHOUSE_PASSWORD: "${CLICKHOUSE_PASSWORD}"
       PORT: "20130"
     restart: unless-stopped
 
