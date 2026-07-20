@@ -176,10 +176,13 @@ func (a *GrokAccount) refreshLocked() error {
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("Accept", "application/json")
-	resp, err := tokenRefreshClient.Do(req)
+	client, proxyID := getClient(tokenRefreshClient)
+	resp, err := client.Do(req)
 	if err != nil {
+		markProxyResult(proxyID, err, 0)
 		return err
 	}
+	markProxyResult(proxyID, nil, resp.StatusCode)
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if resp.StatusCode != 200 {
@@ -652,7 +655,7 @@ func ProxyGrok(c *gin.Context, body []byte, am *GrokAccountManager, clientStream
 		accept = "text/event-stream"
 	}
 
-	client := upstreamClient
+	client, proxyID := getClient(upstreamClient)
 	total := am.Len()
 
 	var lastResp *http.Response
@@ -677,9 +680,11 @@ func ProxyGrok(c *gin.Context, body []byte, am *GrokAccountManager, clientStream
 		req.Header = headers
 		resp, err := client.Do(req)
 		if err != nil {
+			markProxyResult(proxyID, err, 0)
 			slog.Warn("network attempt failed", "module", "grok", "attempt", attempt+1, "total", total, "email", acc.Email, "error", err)
 			continue
 		}
+		markProxyResult(proxyID, nil, resp.StatusCode)
 
 		if resp.StatusCode == 401 {
 			resp.Body.Close()
@@ -705,8 +710,10 @@ func ProxyGrok(c *gin.Context, body []byte, am *GrokAccountManager, clientStream
 			req.Header = grokHeaders(acc.GetAccessToken(), accept, model)
 			resp, err = client.Do(req)
 			if err != nil {
+				markProxyResult(proxyID, err, 0)
 				continue
 			}
+			markProxyResult(proxyID, nil, resp.StatusCode)
 			// C8: second 401 after a successful refresh means the token
 			// pair is stale in a way refresh can't fix (server-side
 			// revocation, wrong client_id, etc). Disable permanently so

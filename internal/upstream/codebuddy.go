@@ -446,7 +446,7 @@ func ProxyCodeBuddy(c *gin.Context, body []byte, bodyMap map[string]any, km *CBK
 		return
 	}
 
-	client := upstreamClient
+	client, proxyID := getClient(upstreamClient)
 	total := km.Len()
 
 	var lastResp *http.Response
@@ -471,8 +471,10 @@ func ProxyCodeBuddy(c *gin.Context, body []byte, bodyMap map[string]any, km *CBK
 
 		resp, err := client.Do(req)
 		if err != nil {
+			markProxyResult(proxyID, err, 0)
 			continue
 		}
+		markProxyResult(proxyID, nil, resp.StatusCode)
 
 		if resp.StatusCode == 401 || resp.StatusCode == 429 {
 			resp.Body.Close()

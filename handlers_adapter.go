@@ -54,6 +54,14 @@ var (
 	handleGetCombo    = handlers.HandleGetCombo
 	handleAddCombo    = handlers.HandleAddCombo
 	handleDeleteCombo = handlers.HandleDeleteCombo
+
+	// v1.5.0 — proxy pool
+	handleListProxies  = handlers.HandleListProxies
+	handleAddProxy     = handlers.HandleAddProxy
+	handleUpdateProxy  = handlers.HandleUpdateProxy
+	handleDeleteProxy  = handlers.HandleDeleteProxy
+	handleToggleProxy  = handlers.HandleToggleProxy
+	handleTestProxy    = handlers.HandleTestProxy
 )
 
 // Function wrappers for handlers whose signature changed to accept

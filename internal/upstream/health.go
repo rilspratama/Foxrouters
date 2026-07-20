@@ -272,9 +272,15 @@ func (hc *HealthChecker) checkGrok() {
 	req.Header.Set("x-grok-client-identifier", "grok-shell")
 	req.Header.Set("User-Agent", "grok-shell/"+GROK_CLIENT_VERSION)
 
-	client := healthCheckClient
+	client, proxyID := getClient(healthCheckClient)
 	resp, err := client.Do(req)
 	latency := time.Since(start)
+	markProxyResult(proxyID, err, func() int {
+		if err != nil || resp == nil {
+			return 0
+		}
+		return resp.StatusCode
+	}())
 
 	h.mu.Lock()
 	h.lastCheckAt = time.Now()
@@ -359,9 +365,15 @@ func (hc *HealthChecker) checkCB() {
 	req.Header.Set("Authorization", "Bearer "+key.Key)
 	req.Header.Set("Content-Type", "application/json")
 
-	client := healthCheckClient
+	client, proxyID := getClient(healthCheckClient)
 	resp, err := client.Do(req)
 	latency := time.Since(start)
+	markProxyResult(proxyID, err, func() int {
+		if err != nil || resp == nil {
+			return 0
+		}
+		return resp.StatusCode
+	}())
 
 	h.mu.Lock()
 	h.lastCheckAt = time.Now()

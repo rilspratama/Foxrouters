@@ -937,6 +937,10 @@ body {
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
       Models
     </button>
+    <button class="nav-item" data-route="#/proxies" onclick="navigateTo('#/proxies')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+      Proxies
+    </button>
   </nav>
   <div class="sidebar-footer">
     <div class="status-row">
@@ -1414,6 +1418,144 @@ body {
       </div>
     </div>
 
+    <!-- ════════ PAGE 5: PROXIES (v1.5.0) ════════ -->
+    <div class="page" id="page-proxies">
+      <div class="stats-grid" id="proxyStatsGrid">
+        <div class="stat-card">
+          <div class="stat-label">Total Proxies</div>
+          <div class="stat-value" id="proxyTotal">—</div>
+          <div class="stat-sub">http + socks5</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Enabled</div>
+          <div class="stat-value" id="proxyEnabled">—</div>
+          <div class="stat-sub">round-robin pool</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Disabled</div>
+          <div class="stat-value" id="proxyDisabled">—</div>
+          <div class="stat-sub">bypassed</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Active (5m)</div>
+          <div class="stat-value" id="proxyActive">—</div>
+          <div class="stat-sub">recently routed</div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+          <h3>Add Proxy</h3>
+          <div style="margin-left:auto;display:flex;gap:8px">
+            <button class="btn-ghost" onclick="loadProxies()" style="padding:5px 12px;font-size:12px">Refresh</button>
+          </div>
+        </div>
+        <div style="padding:16px">
+          <div style="font-size:12px;color:var(--text-tertiary);margin-bottom:14px;line-height:1.5">
+            Add HTTP or SOCKS5 proxies. When any proxy is enabled, upstream requests (Grok, CodeBuddy, token refresh, health checks) route through the pool via round-robin. A proxy is auto-disabled after 5 consecutive failures.
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 2fr 1fr 1.5fr 1.5fr 2fr auto;gap:8px;margin-bottom:8px;align-items:end">
+            <div>
+              <label style="font-size:11px;color:var(--text-tertiary);display:block;margin-bottom:4px">Protocol</label>
+              <select id="pxProtocol" style="width:100%;padding:6px 10px;background:var(--bg);border:1px solid var(--border-strong);border-radius:var(--radius-sm);color:var(--text-primary);font-size:12px">
+                <option value="http">HTTP</option>
+                <option value="socks5">SOCKS5</option>
+              </select>
+            </div>
+            <div>
+              <label style="font-size:11px;color:var(--text-tertiary);display:block;margin-bottom:4px">Host</label>
+              <input type="text" id="pxHost" placeholder="proxy.example.com" style="width:100%;padding:6px 10px;background:var(--bg);border:1px solid var(--border-strong);border-radius:var(--radius-sm);color:var(--text-primary);font-size:12px;font-family:var(--mono)" />
+            </div>
+            <div>
+              <label style="font-size:11px;color:var(--text-tertiary);display:block;margin-bottom:4px">Port</label>
+              <input type="number" id="pxPort" placeholder="8080" min="1" max="65535" style="width:100%;padding:6px 10px;background:var(--bg);border:1px solid var(--border-strong);border-radius:var(--radius-sm);color:var(--text-primary);font-size:12px;font-family:var(--mono)" />
+            </div>
+            <div>
+              <label style="font-size:11px;color:var(--text-tertiary);display:block;margin-bottom:4px">Username (optional)</label>
+              <input type="text" id="pxUsername" style="width:100%;padding:6px 10px;background:var(--bg);border:1px solid var(--border-strong);border-radius:var(--radius-sm);color:var(--text-primary);font-size:12px" />
+            </div>
+            <div>
+              <label style="font-size:11px;color:var(--text-tertiary);display:block;margin-bottom:4px">Password (optional)</label>
+              <input type="password" id="pxPassword" style="width:100%;padding:6px 10px;background:var(--bg);border:1px solid var(--border-strong);border-radius:var(--radius-sm);color:var(--text-primary);font-size:12px" />
+            </div>
+            <div>
+              <label style="font-size:11px;color:var(--text-tertiary);display:block;margin-bottom:4px">Label (optional)</label>
+              <input type="text" id="pxLabel" placeholder="datacenter-us-east" style="width:100%;padding:6px 10px;background:var(--bg);border:1px solid var(--border-strong);border-radius:var(--radius-sm);color:var(--text-primary);font-size:12px" />
+            </div>
+            <button class="btn-primary" onclick="addProxy()" style="padding:7px 14px;border-radius:var(--radius-sm);background:var(--brand);color:#fff;border:none;font-size:12px;font-weight:500;cursor:pointer">+ Add</button>
+          </div>
+          <div id="pxError" style="display:none;color:var(--red);font-size:12px;padding:6px 10px;background:rgba(255,80,80,0.08);border-radius:var(--radius-sm);margin-top:8px"></div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 12l2 2 4-4"/><path d="M21 12c0 4.97-4.03 9-9 9s-9-4.03-9-9 4.03-9 9-9c1.68 0 3.25.46 4.6 1.26"/></svg>
+          <h3>Proxy Pool</h3>
+          <span class="head-meta" id="proxyPoolMeta"></span>
+        </div>
+        <div class="tbl-scroll" style="max-height:520px">
+          <table class="tbl" id="proxyTable">
+            <thead><tr>
+              <th>Label</th><th>Protocol</th><th>Host:Port</th><th>Auth</th><th>Status</th><th>Fails</th><th>Last Used</th><th>Actions</th>
+            </tr></thead>
+            <tbody id="proxyBody"><tr><td colspan="8" style="text-align:center;padding:24px;color:var(--text-tertiary)">Loading…</td></tr></tbody>
+          </table>
+        </div>
+        <div id="proxyTestResult" style="padding:8px 16px;font-size:12px;color:var(--text-tertiary);border-top:1px solid var(--border-strong);display:none"></div>
+      </div>
+    </div>
+
+    <!-- ════════ EDIT PROXY MODAL ════════ -->
+    <div class="modal-overlay" id="editProxyModal" onclick="if(event.target===this)closeEditProxyModal()">
+      <div class="modal-box" style="max-width:520px">
+        <div class="modal-head">
+          <h3>Edit Proxy</h3>
+          <button class="modal-close" onclick="closeEditProxyModal()">×</button>
+        </div>
+        <div style="padding:16px;display:grid;gap:12px">
+          <input type="hidden" id="epxId" />
+          <div>
+            <label style="font-size:11px;color:var(--text-tertiary);display:block;margin-bottom:4px">Protocol</label>
+            <select id="epxProtocol" style="width:100%;padding:8px 10px;background:var(--bg);border:1px solid var(--border-strong);border-radius:var(--radius-sm);color:var(--text-primary);font-size:13px">
+              <option value="http">HTTP</option>
+              <option value="socks5">SOCKS5</option>
+            </select>
+          </div>
+          <div style="display:grid;grid-template-columns:2fr 1fr;gap:8px">
+            <div>
+              <label style="font-size:11px;color:var(--text-tertiary);display:block;margin-bottom:4px">Host</label>
+              <input type="text" id="epxHost" style="width:100%;padding:8px 10px;background:var(--bg);border:1px solid var(--border-strong);border-radius:var(--radius-sm);color:var(--text-primary);font-size:13px;font-family:var(--mono)" />
+            </div>
+            <div>
+              <label style="font-size:11px;color:var(--text-tertiary);display:block;margin-bottom:4px">Port</label>
+              <input type="number" id="epxPort" min="1" max="65535" style="width:100%;padding:8px 10px;background:var(--bg);border:1px solid var(--border-strong);border-radius:var(--radius-sm);color:var(--text-primary);font-size:13px;font-family:var(--mono)" />
+            </div>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+            <div>
+              <label style="font-size:11px;color:var(--text-tertiary);display:block;margin-bottom:4px">Username</label>
+              <input type="text" id="epxUsername" style="width:100%;padding:8px 10px;background:var(--bg);border:1px solid var(--border-strong);border-radius:var(--radius-sm);color:var(--text-primary);font-size:13px" />
+            </div>
+            <div>
+              <label style="font-size:11px;color:var(--text-tertiary);display:block;margin-bottom:4px">Password (blank = keep)</label>
+              <input type="password" id="epxPassword" placeholder="***" style="width:100%;padding:8px 10px;background:var(--bg);border:1px solid var(--border-strong);border-radius:var(--radius-sm);color:var(--text-primary);font-size:13px" />
+            </div>
+          </div>
+          <div>
+            <label style="font-size:11px;color:var(--text-tertiary);display:block;margin-bottom:4px">Label</label>
+            <input type="text" id="epxLabel" style="width:100%;padding:8px 10px;background:var(--bg);border:1px solid var(--border-strong);border-radius:var(--radius-sm);color:var(--text-primary);font-size:13px" />
+          </div>
+          <div id="epxError" style="display:none;color:var(--red);font-size:12px;padding:6px 10px;background:rgba(255,80,80,0.08);border-radius:var(--radius-sm)"></div>
+          <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:8px">
+            <button class="btn-ghost" onclick="closeEditProxyModal()" style="padding:8px 14px;font-size:12px">Cancel</button>
+            <button class="btn-primary" onclick="saveEditProxy()" style="padding:8px 14px;border-radius:var(--radius-sm);background:var(--brand);color:#fff;border:none;font-size:12px;font-weight:500;cursor:pointer">Save</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
   </div><!-- /content -->
 
   <div class="footer-bar" id="footerUpdate" style="padding:0 28px 16px"></div>
@@ -1524,7 +1666,8 @@ var routes = {
   '#/':         { page: 'page-dashboard', title: 'Dashboard',   meta: 'Live · auto-refresh 5s' },
   '#/accounts': { page: 'page-accounts',  title: 'Accounts & Keys', meta: 'Live · auto-refresh 5s' },
   '#/keys':     { page: 'page-keys',      title: 'Gateway API Keys', meta: 'Redis-backed · CRUD' },
-  '#/models':   { page: 'page-models',    title: 'Models', meta: 'Usage stats · aliases · custom · combos' }
+  '#/models':   { page: 'page-models',    title: 'Models', meta: 'Usage stats · aliases · custom · combos' },
+  '#/proxies':  { page: 'page-proxies',   title: 'Proxies', meta: 'HTTP/SOCKS5 upstream proxy pool · round-robin' }
 };
 
 function navigateTo(hash) {
@@ -1557,6 +1700,9 @@ function router() {
   if (hash === '#/models') {
     loadModels();
   }
+  if (hash === '#/proxies') {
+    loadProxies();
+  }
 }
 
 window.addEventListener('hashchange', router);
@@ -1584,7 +1730,7 @@ function escHtml(s) {
 // on document so dynamically-rendered buttons auto-bind.
 // ══════════════════════════════════════════════════════════
 document.addEventListener('click', function(e) {
-  var btn = e.target.closest('button[data-key], button[data-email], button[data-id], button[data-alias], button[data-name], button[data-model]');
+  var btn = e.target.closest('button[data-key], button[data-email], button[data-id], button[data-alias], button[data-name], button[data-model], button[data-proxy-id]');
   if (!btn) return;
   var v;
   if (btn.classList.contains('delete-cb-btn')) {
@@ -1614,6 +1760,18 @@ document.addEventListener('click', function(e) {
     // attribute + textContent lookup avoids the JS-string escape hole.
     v = btn.getAttribute('data-model');
     if (v) quickTestModel(v, btn);
+  } else if (btn.classList.contains('delete-proxy-btn')) {
+    v = btn.getAttribute('data-proxy-id');
+    if (v) deleteProxy(v);
+  } else if (btn.classList.contains('toggle-proxy-btn')) {
+    v = btn.getAttribute('data-proxy-id');
+    if (v) toggleProxy(v);
+  } else if (btn.classList.contains('test-proxy-btn')) {
+    v = btn.getAttribute('data-proxy-id');
+    if (v) testProxy(v, btn);
+  } else if (btn.classList.contains('edit-proxy-btn')) {
+    v = btn.getAttribute('data-proxy-id');
+    if (v) showEditProxyModal(v);
   }
 });
 
@@ -3249,6 +3407,203 @@ async function deleteCombo(name) {
     loadCombos();
   } catch (e) {
     alert('Delete failed: ' + e.message);
+  }
+}
+
+/* ══════════════════════════════════════════════════════════
+   PROXY POOL (v1.5.0)
+   ══════════════════════════════════════════════════════════ */
+window._allProxies = [];
+
+async function loadProxies() {
+  try {
+    var d = await fetchJSON('/api/proxies');
+    var list = d.proxies || [];
+    var stats = d.stats || {};
+    window._allProxies = list;
+    document.getElementById('proxyTotal').textContent = stats.total || 0;
+    document.getElementById('proxyEnabled').textContent = stats.enabled || 0;
+    document.getElementById('proxyDisabled').textContent = stats.disabled || 0;
+    document.getElementById('proxyActive').textContent = stats.active || 0;
+    var meta = document.getElementById('proxyPoolMeta');
+    if (meta) meta.textContent = stats.enabled + ' active in round-robin';
+    renderProxies();
+  } catch (e) {
+    if (e.message === '__redirect__') return;
+    document.getElementById('proxyBody').innerHTML = '<tr><td colspan="8" style="text-align:center;padding:24px;color:var(--red)">Load failed: ' + escHtml(e.message) + '</td></tr>';
+  }
+}
+
+function renderProxies() {
+  var list = window._allProxies || [];
+  var body = document.getElementById('proxyBody');
+  if (!list.length) {
+    body.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:24px;color:var(--text-tertiary)">No proxies configured. Requests use direct connection.</td></tr>';
+    return;
+  }
+  var rows = '';
+  for (var i = 0; i < list.length; i++) {
+    var p = list[i];
+    var status = p.enabled
+      ? '<span class="ok" style="font-size:11px">● enabled</span>'
+      : '<span style="color:var(--text-tertiary);font-size:11px">● disabled</span>';
+    var auth = p.username ? '<span class="mono" style="font-size:11px">' + escHtml(p.username) + ':***</span>' : '<span style="color:var(--text-tertiary)">—</span>';
+    var lastUsed = '—';
+    if (p.last_used_at) {
+      var ts = new Date(p.last_used_at).getTime();
+      if (ts > 0) {
+        var secs = Math.floor((Date.now() - ts) / 1000);
+        if (secs < 60) lastUsed = secs + 's ago';
+        else if (secs < 3600) lastUsed = Math.floor(secs / 60) + 'm ago';
+        else if (secs < 86400) lastUsed = Math.floor(secs / 3600) + 'h ago';
+        else lastUsed = Math.floor(secs / 86400) + 'd ago';
+      }
+    }
+    var failStyle = p.fail_count >= 3 ? 'color:var(--red);font-weight:600' : (p.fail_count > 0 ? 'color:#e6a23c' : '');
+    rows +=
+      '<tr>' +
+        '<td>' + escHtml(p.label || '(no label)') + '</td>' +
+        '<td class="mono" style="text-transform:uppercase;font-size:11px">' + escHtml(p.protocol) + '</td>' +
+        '<td class="mono">' + escHtml(p.host) + ':' + escHtml(String(p.port)) + '</td>' +
+        '<td>' + auth + '</td>' +
+        '<td>' + status + '</td>' +
+        '<td class="mono" style="' + failStyle + '">' + (p.fail_count || 0) + '</td>' +
+        '<td style="color:var(--text-tertiary);font-size:11px">' + lastUsed + '</td>' +
+        '<td>' +
+          '<button class="btn-ghost test-proxy-btn" data-proxy-id="' + escHtml(p.id) + '" style="padding:3px 8px;font-size:11px;margin-right:4px">Test</button>' +
+          '<button class="btn-ghost toggle-proxy-btn" data-proxy-id="' + escHtml(p.id) + '" style="padding:3px 8px;font-size:11px;margin-right:4px">' + (p.enabled ? 'Disable' : 'Enable') + '</button>' +
+          '<button class="btn-ghost edit-proxy-btn" data-proxy-id="' + escHtml(p.id) + '" style="padding:3px 8px;font-size:11px;margin-right:4px">Edit</button>' +
+          '<button class="btn-ghost delete-proxy-btn" data-proxy-id="' + escHtml(p.id) + '" style="padding:3px 8px;font-size:11px;color:var(--red)">Delete</button>' +
+        '</td>' +
+      '</tr>';
+  }
+  body.innerHTML = rows;
+}
+
+async function addProxy() {
+  var errBox = document.getElementById('pxError');
+  errBox.style.display = 'none';
+  var protocol = document.getElementById('pxProtocol').value;
+  var host = document.getElementById('pxHost').value.trim();
+  var port = parseInt(document.getElementById('pxPort').value, 10);
+  var username = document.getElementById('pxUsername').value.trim();
+  var password = document.getElementById('pxPassword').value;
+  var label = document.getElementById('pxLabel').value.trim();
+  if (!host || !port) {
+    errBox.textContent = 'Host and port are required';
+    errBox.style.display = 'block';
+    return;
+  }
+  try {
+    await apiFetch('/api/proxies', {
+      method: 'POST',
+      headers: {'content-type': 'application/json'},
+      body: JSON.stringify({protocol: protocol, host: host, port: port, username: username, password: password, label: label})
+    });
+    document.getElementById('pxHost').value = '';
+    document.getElementById('pxPort').value = '';
+    document.getElementById('pxUsername').value = '';
+    document.getElementById('pxPassword').value = '';
+    document.getElementById('pxLabel').value = '';
+    loadProxies();
+  } catch (e) {
+    if (e.message === '__redirect__') return;
+    errBox.textContent = 'Add failed: ' + e.message;
+    errBox.style.display = 'block';
+  }
+}
+
+async function deleteProxy(id) {
+  var entry = (window._allProxies || []).find(function(p){return p.id === id;});
+  var label = entry ? (entry.label || (entry.host + ':' + entry.port)) : id;
+  if (!confirm('Delete proxy "' + label + '"?')) return;
+  try {
+    await apiFetch('/api/proxies/' + encodeURIComponent(id), {method: 'DELETE'});
+    loadProxies();
+  } catch (e) {
+    if (e.message === '__redirect__') return;
+    alert('Delete failed: ' + e.message);
+  }
+}
+
+async function toggleProxy(id) {
+  try {
+    await apiFetch('/api/proxies/' + encodeURIComponent(id) + '/toggle', {method: 'POST'});
+    loadProxies();
+  } catch (e) {
+    if (e.message === '__redirect__') return;
+    alert('Toggle failed: ' + e.message);
+  }
+}
+
+async function testProxy(id, btn) {
+  var originalText = btn ? btn.textContent : null;
+  if (btn) { btn.textContent = 'Testing…'; btn.disabled = true; }
+  var box = document.getElementById('proxyTestResult');
+  box.style.display = 'block';
+  box.innerHTML = 'Testing proxy…';
+  try {
+    var r = await apiFetch('/api/proxies/' + encodeURIComponent(id) + '/test', {method: 'POST'});
+    if (r.success) {
+      box.innerHTML = '<span class="ok">✓ OK</span> — egress IP: <span class="mono">' + escHtml(r.ip || '(unknown)') + '</span> · ' + (r.latency_ms || 0) + 'ms';
+    } else {
+      box.innerHTML = '<span class="err">✗ FAILED</span> — ' + escHtml(r.error || 'unknown error') + ' · ' + (r.latency_ms || 0) + 'ms';
+    }
+  } catch (e) {
+    if (e.message === '__redirect__') return;
+    box.innerHTML = '<span class="err">✗ Test request failed</span>: ' + escHtml(e.message);
+  } finally {
+    if (btn && originalText !== null) { btn.textContent = originalText; btn.disabled = false; }
+  }
+}
+
+function showEditProxyModal(id) {
+  var entry = (window._allProxies || []).find(function(p){return p.id === id;});
+  if (!entry) { alert('Proxy not found: ' + id); return; }
+  document.getElementById('epxId').value = entry.id;
+  document.getElementById('epxProtocol').value = entry.protocol;
+  document.getElementById('epxHost').value = entry.host || '';
+  document.getElementById('epxPort').value = entry.port || '';
+  document.getElementById('epxUsername').value = entry.username || '';
+  document.getElementById('epxPassword').value = '';
+  document.getElementById('epxLabel').value = entry.label || '';
+  document.getElementById('epxError').style.display = 'none';
+  document.getElementById('editProxyModal').classList.add('show');
+}
+
+function closeEditProxyModal() {
+  document.getElementById('editProxyModal').classList.remove('show');
+}
+
+async function saveEditProxy() {
+  var id = document.getElementById('epxId').value;
+  var errBox = document.getElementById('epxError');
+  errBox.style.display = 'none';
+  var protocol = document.getElementById('epxProtocol').value;
+  var host = document.getElementById('epxHost').value.trim();
+  var port = parseInt(document.getElementById('epxPort').value, 10);
+  var username = document.getElementById('epxUsername').value.trim();
+  var passwordRaw = document.getElementById('epxPassword').value;
+  var label = document.getElementById('epxLabel').value.trim();
+  // Blank password field = keep current (send "***" sentinel).
+  var password = passwordRaw === '' ? '***' : passwordRaw;
+  if (!host || !port) {
+    errBox.textContent = 'Host and port are required';
+    errBox.style.display = 'block';
+    return;
+  }
+  try {
+    await apiFetch('/api/proxies/' + encodeURIComponent(id), {
+      method: 'PUT',
+      headers: {'content-type': 'application/json'},
+      body: JSON.stringify({protocol: protocol, host: host, port: port, username: username, password: password, label: label})
+    });
+    closeEditProxyModal();
+    loadProxies();
+  } catch (e) {
+    if (e.message === '__redirect__') return;
+    errBox.textContent = 'Save failed: ' + e.message;
+    errBox.style.display = 'block';
   }
 }
 </script>

@@ -136,6 +136,15 @@ func main() {
 		slog.Warn("combo registry Load failed, starting empty", "module", "combo", "error", err)
 	}
 
+	// Proxy pool (v1.5.0). Redis-backed, cached in memory. Wired into
+	// internal/upstream so Grok / CodeBuddy / token-refresh HTTP calls
+	// route through enabled proxies (round-robin).
+	proxyPool := NewProxyPool(db)
+	if err := proxyPool.Load(); err != nil {
+		slog.Warn("proxy pool Load failed, starting empty", "module", "proxy-pool", "error", err)
+	}
+	setUpstreamProxyPool(proxyPool)
+
 	go autoRefreshWorker(grokAM)
 	go reenableWorker(grokAM)
 	go reenableCBWorker(cbKM)
@@ -240,6 +249,15 @@ func main() {
 	r.POST("/api/combos", csrfGuard(), adminAuth, handleAddCombo(comboReg))
 	r.GET("/api/combos/*name", adminAuth, handleGetCombo(comboReg))
 	r.DELETE("/api/combos/*name", csrfGuard(), adminAuth, handleDeleteCombo(comboReg))
+
+	// Proxy pool (v1.5.0) — admin only. Dashboard-managed HTTP/SOCKS5
+	// proxies used by upstream (Grok/CodeBuddy/token-refresh) HTTP calls.
+	r.GET("/api/proxies", adminAuth, handleListProxies(proxyPool))
+	r.POST("/api/proxies", csrfGuard(), adminAuth, handleAddProxy(proxyPool))
+	r.PUT("/api/proxies/:id", csrfGuard(), adminAuth, handleUpdateProxy(proxyPool))
+	r.DELETE("/api/proxies/:id", csrfGuard(), adminAuth, handleDeleteProxy(proxyPool))
+	r.POST("/api/proxies/:id/toggle", csrfGuard(), adminAuth, handleToggleProxy(proxyPool))
+	r.POST("/api/proxies/:id/test", csrfGuard(), adminAuth, handleTestProxy(proxyPool))
 
 	// /v1/*path catch-all — gin's httprouter doesn't allow a static
 	// /v1/messages segment alongside /v1/*path, so we dispatch the

@@ -45,6 +45,11 @@ const (
 	RK_COMBOS         = "combos"         // HASH field=combo_name value=Combo JSON (v1.4.0)
 	RK_COMBO_COUNTER  = "combo:counter:" // STRING prefix, atomic INCR for round-robin
 
+	// Proxy pool (v1.5.0) — dashboard-managed HTTP/SOCKS5 proxies for upstream calls.
+	RK_PROXY         = "fr:proxy:"         // HASH prefix: fr:proxy:<id> (fields: protocol, host, port, …)
+	RK_PROXY_ENABLED = "fr:proxy:enabled"  // SET of enabled proxy IDs (fast round-robin selection)
+	RK_PROXY_RR      = "fr:proxy:rr"       // STRING atomic INCR for round-robin index
+
 	LOG_BUFFER_SIZE    = 10000
 	LOG_FLUSH_INTERVAL = 2 * time.Second
 )
@@ -1265,6 +1270,181 @@ func (s *Store) IncrComboCounter(name string) (int64, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 	defer cancel()
 	return s.rdb.Incr(ctx, RK_COMBO_COUNTER+name).Result()
+}
+
+// ============================================================================
+// REDIS — Proxy pool (v1.5.0)
+// ============================================================================
+
+// ProxyEntryDTO is the persisted shape of one proxy pool entry.
+// Passwords are stored as-is in Redis (single-tenant admin surface); API
+// responses mask them via the pool layer.
+type ProxyEntryDTO struct {
+	ID         string
+	Protocol   string // "http" | "socks5"
+	Host       string
+	Port       int
+	Username   string
+	Password   string
+	Enabled    bool
+	Label      string
+	CreatedAt  time.Time
+	LastUsedAt time.Time
+	FailCount  int
+}
+
+// SaveProxy upserts a proxy entry into Redis. Enabled/disabled membership
+// in the enabled-set is kept in sync so callers only need one call.
+func (s *Store) SaveProxy(dto ProxyEntryDTO) error {
+	if s == nil || s.rdb == nil {
+		return fmt.Errorf("redis not ready")
+	}
+	if dto.ID == "" {
+		return fmt.Errorf("proxy id required")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+	data := map[string]interface{}{
+		"id":           dto.ID,
+		"protocol":     dto.Protocol,
+		"host":         dto.Host,
+		"port":         dto.Port,
+		"username":     dto.Username,
+		"password":     dto.Password,
+		"enabled":      dto.Enabled,
+		"label":        dto.Label,
+		"created_at":   dto.CreatedAt.Unix(),
+		"last_used_at": dto.LastUsedAt.Unix(),
+		"fail_count":   dto.FailCount,
+	}
+	rk := RK_PROXY + dto.ID
+	if err := s.rdb.HSet(ctx, rk, data).Err(); err != nil {
+		return err
+	}
+	if dto.Enabled {
+		if err := s.rdb.SAdd(ctx, RK_PROXY_ENABLED, dto.ID).Err(); err != nil {
+			slog.Warn("SADD proxy enabled failed", "module", "db-redis", "id", dto.ID, "error", err)
+		}
+	} else {
+		if err := s.rdb.SRem(ctx, RK_PROXY_ENABLED, dto.ID).Err(); err != nil {
+			slog.Warn("SREM proxy enabled failed", "module", "db-redis", "id", dto.ID, "error", err)
+		}
+	}
+	return nil
+}
+
+// UpdateProxyLastUsed touches the last_used_at field on a proxy hash.
+// Best-effort — failures are logged but don't propagate.
+func (s *Store) UpdateProxyLastUsed(id string, ts time.Time) {
+	if s == nil || s.rdb == nil || id == "" {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	defer cancel()
+	if err := s.rdb.HSet(ctx, RK_PROXY+id, "last_used_at", ts.Unix()).Err(); err != nil {
+		slog.Debug("HSet proxy last_used_at failed", "module", "db-redis", "id", id, "error", err)
+	}
+}
+
+// UpdateProxyFailCount sets fail_count on a proxy hash.
+func (s *Store) UpdateProxyFailCount(id string, count int) {
+	if s == nil || s.rdb == nil || id == "" {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	defer cancel()
+	if err := s.rdb.HSet(ctx, RK_PROXY+id, "fail_count", count).Err(); err != nil {
+		slog.Debug("HSet proxy fail_count failed", "module", "db-redis", "id", id, "error", err)
+	}
+}
+
+// DeleteProxy removes a proxy hash + its membership in the enabled set.
+func (s *Store) DeleteProxy(id string) error {
+	if s == nil || s.rdb == nil {
+		return fmt.Errorf("redis not ready")
+	}
+	if id == "" {
+		return fmt.Errorf("id required")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+	if err := s.rdb.Del(ctx, RK_PROXY+id).Err(); err != nil {
+		return err
+	}
+	_ = s.rdb.SRem(ctx, RK_PROXY_ENABLED, id).Err()
+	return nil
+}
+
+// LoadProxies scans every fr:proxy:<id> hash and returns the parsed DTOs.
+// The enabled set is authoritative for the Enabled flag — a stale HASH
+// enabled field never overrides membership in RK_PROXY_ENABLED.
+func (s *Store) LoadProxies() ([]ProxyEntryDTO, error) {
+	if s == nil || s.rdb == nil {
+		return nil, nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	// SMEMBERS enabled set once so we can override the stored enabled bit.
+	enabledMembers, _ := s.rdb.SMembers(ctx, RK_PROXY_ENABLED).Result()
+	enabledSet := make(map[string]struct{}, len(enabledMembers))
+	for _, id := range enabledMembers {
+		enabledSet[id] = struct{}{}
+	}
+
+	pattern := RK_PROXY + "*"
+	iter := s.rdb.Scan(ctx, 0, pattern, 100).Iterator()
+	out := []ProxyEntryDTO{}
+	for iter.Next(ctx) {
+		rk := iter.Val()
+		// Skip the enabled-set key — same prefix, but not a HASH.
+		if rk == RK_PROXY_ENABLED || rk == RK_PROXY_RR {
+			continue
+		}
+		id := strings.TrimPrefix(rk, RK_PROXY)
+		vals, err := s.rdb.HGetAll(ctx, rk).Result()
+		if err != nil || len(vals) == 0 {
+			continue
+		}
+		dto := ProxyEntryDTO{
+			ID:       id,
+			Protocol: vals["protocol"],
+			Host:     vals["host"],
+			Username: vals["username"],
+			Password: vals["password"],
+			Label:    vals["label"],
+		}
+		if v, err := strconv.Atoi(vals["port"]); err == nil {
+			dto.Port = v
+		}
+		if v, err := strconv.Atoi(vals["fail_count"]); err == nil {
+			dto.FailCount = v
+		}
+		if v, err := strconv.ParseInt(vals["created_at"], 10, 64); err == nil && v > 0 {
+			dto.CreatedAt = time.Unix(v, 0)
+		}
+		if v, err := strconv.ParseInt(vals["last_used_at"], 10, 64); err == nil && v > 0 {
+			dto.LastUsedAt = time.Unix(v, 0)
+		}
+		_, dto.Enabled = enabledSet[id]
+		out = append(out, dto)
+	}
+	if err := iter.Err(); err != nil {
+		return out, err
+	}
+	return out, nil
+}
+
+// IncrProxyRR atomically increments the shared round-robin counter and
+// returns the new value. Callers modulo the count of enabled proxies to
+// pick an index.
+func (s *Store) IncrProxyRR() (int64, error) {
+	if s == nil || s.rdb == nil {
+		return 0, fmt.Errorf("redis not ready")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	defer cancel()
+	return s.rdb.Incr(ctx, RK_PROXY_RR).Result()
 }
 
 // Close gracefully shuts down DB connections.

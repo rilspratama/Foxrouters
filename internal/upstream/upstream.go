@@ -11,11 +11,123 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"foxrouters/internal/db"
 	"foxrouters/internal/metrics"
 )
+
+// ---------------------------------------------------------------------------
+// Proxy pool integration (v1.5.0).
+// ---------------------------------------------------------------------------
+//
+// ProxyPool is an abstract view of the pool defined in internal/proxy —
+// declared here as an interface so upstream doesn't import proxy (which
+// already imports upstream). Callers wire the concrete pool via
+// SetProxyPool() from package main.
+
+type ProxyEntry struct {
+	ID       string
+	Protocol string // "http" | "socks5"
+	Host     string
+	Port     int
+	Username string
+	Password string
+}
+
+// ProxyPool is the runtime surface consumed by upstream when routing HTTP
+// requests through a dashboard-managed proxy.
+type ProxyPool interface {
+	// Next returns the next enabled proxy via round-robin, or nil with an
+	// error when the pool is empty / all disabled. A nil return is not
+	// fatal — the caller falls back to direct connection.
+	Next() (*ProxyEntry, error)
+	// Transport returns a shared *http.Transport tuned for the given proxy.
+	// The transport is cached inside the pool — callers must NOT close it.
+	Transport(entry *ProxyEntry) (*http.Transport, error)
+	// MarkFailed increments the failure counter for the entry. Auto-disable
+	// is handled inside the pool.
+	MarkFailed(id string)
+	// MarkSuccess resets the failure counter for the entry.
+	MarkSuccess(id string)
+}
+
+var (
+	proxyPoolMu sync.RWMutex
+	proxyPool   ProxyPool
+)
+
+// SetProxyPool wires (or replaces) the runtime proxy pool. Called once at
+// startup from package main. Safe to call again to swap implementations
+// (used by tests).
+func SetProxyPool(pp ProxyPool) {
+	proxyPoolMu.Lock()
+	proxyPool = pp
+	proxyPoolMu.Unlock()
+}
+
+// getProxyPool returns the currently registered proxy pool, or nil if
+// none. Callers gate proxy routing on the nil check.
+func getProxyPool() ProxyPool {
+	proxyPoolMu.RLock()
+	defer proxyPoolMu.RUnlock()
+	return proxyPool
+}
+
+// getClient returns an http.Client to use for an upstream request. When a
+// proxy pool is configured with at least one enabled proxy the client uses
+// that proxy's transport; otherwise the caller's default client is returned
+// unchanged (direct connection).
+//
+// The returned client's Timeout is inherited from defaultClient. A best-
+// effort proxyID is returned alongside so the caller can invoke
+// MarkFailed/MarkSuccess on the pool without re-selecting.
+func getClient(defaultClient *http.Client) (*http.Client, string) {
+	pp := getProxyPool()
+	if pp == nil {
+		return defaultClient, ""
+	}
+	entry, err := pp.Next()
+	if err != nil || entry == nil {
+		return defaultClient, ""
+	}
+	transport, err := pp.Transport(entry)
+	if err != nil {
+		slog.Warn("proxy transport build failed, falling back to direct",
+			"module", "upstream-proxy",
+			"proxy_id", entry.ID, "error", err)
+		pp.MarkFailed(entry.ID)
+		return defaultClient, ""
+	}
+	timeout := 300 * time.Second
+	if defaultClient != nil && defaultClient.Timeout > 0 {
+		timeout = defaultClient.Timeout
+	}
+	return &http.Client{
+		Timeout:   timeout,
+		Transport: transport,
+	}, entry.ID
+}
+
+// markProxyResult applies success/fail bookkeeping to the pool after an
+// upstream call. Safe to call with an empty proxyID (no-op).
+func markProxyResult(proxyID string, err error, statusCode int) {
+	if proxyID == "" {
+		return
+	}
+	pp := getProxyPool()
+	if pp == nil {
+		return
+	}
+	// Any transport-level error or gateway 5xx from the proxy itself counts.
+	// 502/504 are the canonical "proxy could not reach upstream" statuses.
+	if err != nil || statusCode == 502 || statusCode == 503 || statusCode == 504 {
+		pp.MarkFailed(proxyID)
+		return
+	}
+	pp.MarkSuccess(proxyID)
+}
 
 // ---------------------------------------------------------------------------
 // Package-level configuration + HTTP clients (moved from main package).
