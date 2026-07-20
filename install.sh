@@ -122,7 +122,7 @@ docker run -d \
     --name foxrouters-redis \
     --network "${NETWORK}" \
     --network-alias redis \
-    -p "${REDIS_PORT}:6379" \
+    -p "127.0.0.1:${REDIS_PORT}:6379" \
     -v "${VOL_REDIS}:/data" \
     --restart unless-stopped \
     "${IMAGE_REDIS}" \
@@ -136,8 +136,8 @@ docker run -d \
     --name foxrouters-clickhouse \
     --network "${NETWORK}" \
     --network-alias clickhouse \
-    -p "${CH_HTTP_PORT}:8123" \
-    -p "${CH_NATIVE_PORT}:9000" \
+    -p "127.0.0.1:${CH_HTTP_PORT}:8123" \
+    -p "127.0.0.1:${CH_NATIVE_PORT}:9000" \
     -v "${VOL_CH}:/var/lib/clickhouse" \
     --ulimit nofile=262144:262144 \
     --restart unless-stopped \
@@ -172,7 +172,7 @@ docker rm -f foxrouters 2>/dev/null || true
 docker run -d \
     --name foxrouters \
     --network "${NETWORK}" \
-    -p "${GATEWAY_PORT}:20130" \
+    -p "127.0.0.1:${GATEWAY_PORT}:20130" \
     --restart unless-stopped \
     --env-file "${ENV_FILE}" \
     -e REDIS_ADDR=redis:6379 \
