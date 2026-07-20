@@ -1446,7 +1446,8 @@ body {
       <div class="panel">
         <div class="panel-head">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
-          <h3>Add Proxy</h3>
+          <h3>Proxy Pool</h3>
+          <span class="head-meta" id="proxyPoolMeta"></span>
           <div style="margin-left:auto;display:flex;gap:8px">
             <button class="btn-ghost" onclick="loadProxies()" style="padding:5px 12px;font-size:12px">Refresh</button>
           </div>
@@ -1455,7 +1456,7 @@ body {
           <div style="font-size:12px;color:var(--text-tertiary);margin-bottom:14px;line-height:1.5">
             Add HTTP or SOCKS5 proxies. When any proxy is enabled, upstream requests (Grok, CodeBuddy, token refresh, health checks) route through the pool via round-robin. A proxy is auto-disabled after 5 consecutive failures.
           </div>
-          <div style="display:grid;grid-template-columns:1fr 2fr 1fr 1.5fr 1.5fr 2fr auto;gap:8px;margin-bottom:8px;align-items:end">
+          <div style="display:grid;grid-template-columns:100px 2fr 90px 1.5fr 1.5fr 1.5fr auto;gap:8px;margin-bottom:12px;align-items:end">
             <div>
               <label style="font-size:11px;color:var(--text-tertiary);display:block;margin-bottom:4px">Protocol</label>
               <select id="pxProtocol" style="width:100%;padding:6px 10px;background:var(--bg);border:1px solid var(--border-strong);border-radius:var(--radius-sm);color:var(--text-primary);font-size:12px">
@@ -1472,29 +1473,20 @@ body {
               <input type="number" id="pxPort" placeholder="8080" min="1" max="65535" style="width:100%;padding:6px 10px;background:var(--bg);border:1px solid var(--border-strong);border-radius:var(--radius-sm);color:var(--text-primary);font-size:12px;font-family:var(--mono)" />
             </div>
             <div>
-              <label style="font-size:11px;color:var(--text-tertiary);display:block;margin-bottom:4px">Username (optional)</label>
-              <input type="text" id="pxUsername" style="width:100%;padding:6px 10px;background:var(--bg);border:1px solid var(--border-strong);border-radius:var(--radius-sm);color:var(--text-primary);font-size:12px" />
+              <label style="font-size:11px;color:var(--text-tertiary);display:block;margin-bottom:4px">Username</label>
+              <input type="text" id="pxUsername" placeholder="optional" style="width:100%;padding:6px 10px;background:var(--bg);border:1px solid var(--border-strong);border-radius:var(--radius-sm);color:var(--text-primary);font-size:12px" />
             </div>
             <div>
-              <label style="font-size:11px;color:var(--text-tertiary);display:block;margin-bottom:4px">Password (optional)</label>
-              <input type="password" id="pxPassword" style="width:100%;padding:6px 10px;background:var(--bg);border:1px solid var(--border-strong);border-radius:var(--radius-sm);color:var(--text-primary);font-size:12px" />
+              <label style="font-size:11px;color:var(--text-tertiary);display:block;margin-bottom:4px">Password</label>
+              <input type="password" id="pxPassword" placeholder="optional" style="width:100%;padding:6px 10px;background:var(--bg);border:1px solid var(--border-strong);border-radius:var(--radius-sm);color:var(--text-primary);font-size:12px" />
             </div>
             <div>
-              <label style="font-size:11px;color:var(--text-tertiary);display:block;margin-bottom:4px">Label (optional)</label>
-              <input type="text" id="pxLabel" placeholder="datacenter-us-east" style="width:100%;padding:6px 10px;background:var(--bg);border:1px solid var(--border-strong);border-radius:var(--radius-sm);color:var(--text-primary);font-size:12px" />
+              <label style="font-size:11px;color:var(--text-tertiary);display:block;margin-bottom:4px">Label</label>
+              <input type="text" id="pxLabel" placeholder="optional" style="width:100%;padding:6px 10px;background:var(--bg);border:1px solid var(--border-strong);border-radius:var(--radius-sm);color:var(--text-primary);font-size:12px" />
             </div>
             <button class="btn-primary" onclick="addProxy()" style="padding:7px 14px;border-radius:var(--radius-sm);background:var(--brand);color:#fff;border:none;font-size:12px;font-weight:500;cursor:pointer">+ Add</button>
           </div>
-          <div id="pxError" style="display:none;color:var(--red);font-size:12px;padding:6px 10px;background:rgba(255,80,80,0.08);border-radius:var(--radius-sm);margin-top:8px"></div>
-        </div>
-      </div>
-
-      <div class="panel">
-        <div class="panel-head">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 12l2 2 4-4"/><path d="M21 12c0 4.97-4.03 9-9 9s-9-4.03-9-9 4.03-9 9-9c1.68 0 3.25.46 4.6 1.26"/></svg>
-          <h3>Proxy Pool</h3>
-          <span class="head-meta" id="proxyPoolMeta"></span>
-        </div>
+          <div id="pxError" style="display:none;color:var(--red);font-size:12px;padding:6px 10px;background:rgba(255,80,80,0.08);border-radius:var(--radius-sm);margin-bottom:8px"></div>
         <div class="tbl-scroll" style="max-height:520px">
           <table class="tbl" id="proxyTable">
             <thead><tr>
