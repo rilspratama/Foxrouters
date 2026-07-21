@@ -134,6 +134,41 @@ Key refs: `clickhouse-history-migration.md`, `v5.9-performance-optimizations.md`
 `p0-p1-correctness-audit.md`, `dashboard-history-json-tabs-uint64.md`,
 `gzip-sse-streaming-bug.md`, `redis-only-persistence.md`.
 
+## Cloudflare Tunnel (optional public exposure)
+Gateway ports are bound to `127.0.0.1` — for public access without opening
+host firewall ports, use a Cloudflare Tunnel. Two modes, no Go-side changes
+(tunnel is infra-only; the gateway is unaware of it).
+
+| Mode  | URL                            | Persistent? | Needs Cloudflare account |
+|-------|--------------------------------|-------------|--------------------------|
+| quick | random `*.trycloudflare.com`   | no (rotates on restart) | no |
+| named | your `gateway.example.com`     | yes         | yes (zone + `cloudflared login`) |
+
+Container: `foxrouters-tunnel` (image `cloudflare/cloudflared:latest`), joined
+to `foxrouters-net` so it can reach `foxrouters:20130` directly.
+
+**install.sh** prompts for tunnel mode after the gateway is healthy. Non-interactive:
+`TUNNEL_MODE=quick|named|none` (default `none`).
+
+**tunnel.sh** (repo root) manages the tunnel lifecycle:
+```
+./tunnel.sh enable [--quick|--named]   # start
+./tunnel.sh disable                    # stop + rm container
+./tunnel.sh status                     # container state + current URL
+./tunnel.sh url                        # print URL only
+./tunnel.sh restart                    # keeps prior mode (from ${CONFIG_DIR}/mode)
+./tunnel.sh logs [-f]                  # tail cloudflared logs
+```
+
+Named-tunnel config lives at `/etc/foxrouters/cloudflared/`:
+`cert.pem` (from `cloudflared tunnel login`), `<tunnel-id>.json` (from
+`cloudflared tunnel create`), and `config.yml` with ingress rules pointing
+`service: http://foxrouters:20130`. See the header of `tunnel.sh` for the
+full setup recipe.
+
+Compose profile: `docker compose --profile tunnel up -d` brings up the
+cloudflared service in quick mode (equivalent to `./tunnel.sh enable --quick`).
+
 ## Operator notes (Rils)
 - Optimasi latency LLM lanjutan (context trim, model pick, reasoning default) = **client-side** — deferred.  
 - Gateway hot-path + CH full-body considered **done** for current phase.  

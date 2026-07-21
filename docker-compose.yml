@@ -8,7 +8,16 @@
 # ClickHouse mode (LOG_BACKEND=clickhouse) — analytics + full-text queries:
 #   LOG_BACKEND=clickhouse docker compose --profile clickhouse up -d --build
 #
+# Cloudflare Tunnel (quick mode, random *.trycloudflare.com URL):
+#   docker compose --profile tunnel up -d
+#   docker logs foxrouters-tunnel   # grep trycloudflare.com for the URL
+# For a named tunnel with a custom domain, prefer ./tunnel.sh enable --named.
+#
 # The gateway waits for its dependencies to be healthy before starting.
+
+networks:
+  default:
+    name: foxrouters-net
 
 services:
   redis:
@@ -86,6 +95,20 @@ services:
       # Safe to keep mounted even when running ClickHouse mode — the gateway
       # only touches this file when LOG_BACKEND=sqlite.
       - sqlite-data:/var/lib/foxrouters
+    restart: unless-stopped
+
+  # Cloudflare Tunnel — only starts when the `tunnel` profile is activated
+  # (docker compose --profile tunnel up …). Quick mode gives a random
+  # *.trycloudflare.com URL (no domain / no login needed); URL changes on
+  # every restart. For a persistent custom domain use ./tunnel.sh enable
+  # --named after preparing /etc/foxrouters/cloudflared/{cert.pem,config.yml,<id>.json}.
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: foxrouters-tunnel
+    profiles: ["tunnel"]
+    depends_on:
+      - foxrouters
+    command: tunnel --no-autoupdate --url http://foxrouters:20130
     restart: unless-stopped
 
 volumes:
