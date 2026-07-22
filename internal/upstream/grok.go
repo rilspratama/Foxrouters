@@ -632,7 +632,7 @@ func grokHeaders(token, accept, model string) http.Header {
 }
 
 // ProxyGrok forwards a chat/completions (or /v1/*) request to Grok, retrying
-// per-account on 401/403/5xx.
+// per-account on 401/402/403/5xx.
 func ProxyGrok(c *gin.Context, body []byte, am *GrokAccountManager, clientStream bool, hc *HealthChecker, model string) {
 	if !hc.Grok.CanRequest() {
 		hc.Grok.RecordRequest(0, fmt.Errorf("circuit open"))
@@ -733,22 +733,29 @@ func ProxyGrok(c *gin.Context, body []byte, am *GrokAccountManager, clientStream
 			}
 		}
 
-		if resp.StatusCode == 403 {
+		// 402 = payment required (xAI free-tier spending-limit / personal-team-blocked)
+		// 403 = forbidden (ban / temp block). Both must rotate to next account —
+		// otherwise a single exhausted free account short-circuits the whole RR pool.
+		if resp.StatusCode == 402 || resp.StatusCode == 403 {
 			bodyBytes, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 			resp.Body.Close()
 			bodyStr := string(bodyBytes)
 			acc.mu.Lock()
 			acc.disabled = true
-			if strings.Contains(bodyStr, "spending-limit") ||
+			// spending-limit arrives as 402 (code personal-team-blocked:spending-limit)
+			// or historically as 403 — treat both as permanent disable so Next() skips them.
+			if resp.StatusCode == 402 ||
+				strings.Contains(bodyStr, "spending-limit") ||
 				strings.Contains(bodyStr, "spending_limit") ||
+				strings.Contains(bodyStr, "personal-team-blocked") ||
 				strings.Contains(bodyStr, "banned") ||
 				strings.Contains(bodyStr, "suspended") ||
 				strings.Contains(bodyStr, "permanently") {
 				acc.disabledAt = time.Time{}
-				slog.Warn("403 permanent ban", "module", "grok", "email", acc.Email, "body", truncateLog(bodyStr, 200))
+				slog.Warn("upstream permanent disable", "module", "grok", "status", resp.StatusCode, "email", acc.Email, "body", truncateLog(bodyStr, 200))
 			} else {
 				acc.disabledAt = time.Now()
-				slog.Warn("403 cooldown", "module", "grok", "email", acc.Email, "body", truncateLog(bodyStr, 200))
+				slog.Warn("upstream cooldown", "module", "grok", "status", resp.StatusCode, "email", acc.Email, "body", truncateLog(bodyStr, 200))
 			}
 			acc.mu.Unlock()
 			if acc.db != nil {
