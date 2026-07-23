@@ -790,6 +790,33 @@ func (km *CBKeyManager) AddOAuthAccount(email, accessToken, refreshToken string,
 	if email == "" || accessToken == "" || refreshToken == "" {
 		return false, km.Len()
 	}
+
+	// Eager refresh: if the supplied AT is already expired (or within the
+	// 10-minute refresh buffer), try refreshing via RT now so the account
+	// is in a usable state before it enters the pool.  We perform this
+	// BEFORE acquiring km.mu to avoid blocking the hot path; if refresh
+	// succeeds we use the fresh AT/RT, otherwise we fall through and store
+	// the supplied tokens as-is (the 401 path / pre-warm worker can retry
+	// later, and permanent disable handles truly dead RTs).
+	if expiresAt.Before(time.Now().Add(REFRESH_BUFFER)) {
+		probe := &CBKey{
+			Key:          email,
+			CredType:     CBAuthOAuth,
+			AccessToken:  accessToken,
+			RefreshToken: refreshToken,
+			ExpiresAt:    expiresAt,
+			Email:        email,
+		}
+		if refreshedAt, err := tryEagerRefresh(probe); err == nil && !refreshedAt.IsZero() {
+			accessToken = probe.AccessToken
+			refreshToken = probe.RefreshToken
+			expiresAt = refreshedAt
+			slog.Info("oauth eager refresh ok", "module", "cb", "email", email)
+		} else if err != nil {
+			slog.Warn("oauth eager refresh failed, storing as-is", "module", "cb", "email", email, "error", err)
+		}
+	}
+
 	km.mu.Lock()
 	for _, existing := range km.keys {
 		if existing.Key == email || (existing.CredType == CBAuthOAuth && existing.Email == email) {
@@ -827,6 +854,28 @@ func (km *CBKeyManager) AddOAuthAccount(email, accessToken, refreshToken string,
 		saveCBKey(km.db, key.toDTO())
 	}
 	return true, total
+}
+
+// tryEagerRefresh performs a one-shot OAuth token refresh on a probe CBKey
+// (not yet in the pool). On success the probe's token fields are updated in
+// place and the new ExpiresAt is returned. Network round-trip runs WITHOUT
+// the pool mutex held.
+func tryEagerRefresh(probe *CBKey) (time.Time, error) {
+	if probe.GetCredType() != CBAuthOAuth {
+		return time.Time{}, nil
+	}
+	if err := probe.Refresh(); err != nil {
+		return time.Time{}, err
+	}
+	probe.mu.RLock()
+	at := probe.AccessToken
+	rt := probe.RefreshToken
+	exp := probe.ExpiresAt
+	probe.mu.RUnlock()
+	if at == "" || rt == "" {
+		return time.Time{}, fmt.Errorf("eager refresh returned empty token")
+	}
+	return exp, nil
 }
 
 // ReenableCooldowns lifts temp cooldowns past 10 minutes (background only).
