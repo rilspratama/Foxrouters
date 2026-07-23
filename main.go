@@ -166,6 +166,7 @@ func main() {
 	go reenableWorker(grokAM)
 	go reenableCBWorker(cbKM)
 	go cbOAuthRefreshWorker(cbKM)
+	go cbCreditSyncWorker(cbKM)
 	// Snapshot pool sizes into Prometheus gauges every 10s. Cheap RLock walk;
 	// keeps activeKeys/disabledKeys eventually consistent without touching the
 	// hot path. Circuit-state gauges are updated inline from health.go.
@@ -223,13 +224,24 @@ func main() {
 		stats := []gin.H{}
 		for _, k := range keys {
 			s := k.Snapshot()
+			remain := s.CreditsRemain
+			if remain == 0 && s.MeterSyncedAt.IsZero() {
+				remain = s.CreditLimit - s.CreditsUsed
+			}
 			entry := gin.H{
 				"cred_type":      string(s.CredType),
 				"credits_used":   s.CreditsUsed,
-				"credit_limit":   CB_CREDIT_LIMIT,
-				"credits_left":   CB_CREDIT_LIMIT - s.CreditsUsed,
+				"credit_limit":   s.CreditLimit,
+				"credits_remain": remain,
+				"credits_left":   remain,
 				"total_requests": s.TotalReqs,
 				"disabled":       s.Disabled,
+				"package_name":   s.PackageName,
+				"cycle_end":      s.CycleEnd,
+				"meter_status":   s.MeterStatus,
+			}
+			if !s.MeterSyncedAt.IsZero() {
+				entry["meter_synced_at"] = s.MeterSyncedAt.Format(time.RFC3339)
 			}
 			if s.CredType == CBAuthOAuth {
 				entry["email"] = s.Email
@@ -254,6 +266,7 @@ func main() {
 	r.POST("/cb/import", csrfGuard(), adminAuth, handleImportCBKey(cbKM))
 	r.POST("/cb/import/bulk", csrfGuard(), adminAuth, handleImportCBKeyBulk(cbKM))
 	r.POST("/cb/oauth/import", csrfGuard(), adminAuth, handleImportCBOAuth(cbKM))
+	r.POST("/cb/credits/sync", csrfGuard(), adminAuth, handleSyncCBCredits(cbKM))
 	r.DELETE("/accounts/:email", csrfGuard(), adminAuth, handleDeleteAccount(grokAM))
 	r.DELETE("/cb/keys/:key", csrfGuard(), adminAuth, handleDeleteCBKey(cbKM))
 	r.POST("/cleanup/disabled", csrfGuard(), adminAuth, handleCleanupDisabled(grokAM, cbKM))

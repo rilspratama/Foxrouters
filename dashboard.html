@@ -1093,6 +1093,7 @@ body {
             <button class="btn-ghost" id="cbAddBtn" onclick="showAddCBModal()" style="padding:5px 12px;font-size:12px">+ Add Key</button>
             <button class="btn-ghost" id="cbOAuthBtn" onclick="showAddCBOAuthModal()" style="padding:5px 12px;font-size:12px">+ Add OAuth</button>
             <button class="btn-ghost" id="cbBulkBtn" onclick="showBulkCBModal()" style="padding:5px 12px;font-size:12px">Bulk Import</button>
+            <button class="btn-ghost" id="cbSyncCreditsBtn" onclick="syncCBCredits()" style="padding:5px 12px;font-size:12px">Sync credits</button>
             <button class="btn-ghost" id="cbCleanupBtn" onclick="cleanupDisabled('cb')" style="padding:5px 12px;font-size:12px;color:var(--danger)">Cleanup Disabled</button>
             <button class="btn-ghost" id="grokAddBtn" onclick="showAddGrokModal()" style="padding:5px 12px;font-size:12px;display:none">+ Add Account</button>
             <button class="btn-ghost" id="grokBulkBtn" onclick="showBulkGrokModal()" style="padding:5px 12px;font-size:12px;display:none">Bulk Import</button>
@@ -2149,7 +2150,12 @@ function renderCBPage() {
   for (var j = start; j < end; j++) {
     var k = all[j];
     var isOAuth = k.cred_type === 'oauth';
-    var pct = k.credit_limit > 0 ? (k.credits_used / k.credit_limit) * 100 : 0;
+    var limit = Number(k.credit_limit || 240);
+    var used = Number(k.credits_used || 0);
+    var remain = (k.credits_remain != null && k.credits_remain !== '')
+      ? Number(k.credits_remain)
+      : (limit - used);
+    var pct = limit > 0 ? (used / limit) * 100 : 0;
     var color = pct > 90 ? 'pbar-red' : pct > 70 ? 'pbar-orange' : 'pbar-green';
     var status = k.disabled ? '<span class="err">disabled</span>' : '<span class="ok">active</span>';
     var typeBadge = isOAuth
@@ -2165,8 +2171,8 @@ function renderCBPage() {
     cbRows += '<tr>' +
       '<td>' + typeBadge + '</td>' +
       '<td class="mono">' + identity + '</td>' +
-      '<td class="mono">' + Number(k.credits_used || 0).toFixed(1) + '/' + k.credit_limit + '</td>' +
-      '<td><div class="pbar"><div class="pbar-fill ' + color + '" style="width:' + pct + '%"></div></div>' + Number((k.credit_limit || 0) - (k.credits_used || 0)).toFixed(1) + ' left</td>' +
+      '<td class="mono">' + used.toFixed(1) + '/' + limit + '</td>' +
+      '<td><div class="pbar"><div class="pbar-fill ' + color + '" style="width:' + pct + '%"></div></div>' + remain.toFixed(1) + ' left</td>' +
       '<td class="mono">' + (k.total_requests || 0) + '</td>' +
       '<td class="muted" style="font-size:11px">' + exp + '</td>' +
       '<td>' + status + '</td>' +
@@ -2223,6 +2229,8 @@ function showTab(e, tab) {
   var oauthBtn = document.getElementById('cbOAuthBtn');
   if (oauthBtn) oauthBtn.style.display = tab === 'cb' ? '' : 'none';
   document.getElementById('cbBulkBtn').style.display = tab === 'cb' ? '' : 'none';
+  var syncBtn = document.getElementById('cbSyncCreditsBtn');
+  if (syncBtn) syncBtn.style.display = tab === 'cb' ? '' : 'none';
   document.getElementById('cbCleanupBtn').style.display = tab === 'cb' ? '' : 'none';
   document.getElementById('grokAddBtn').style.display = tab === 'grok' ? '' : 'none';
   document.getElementById('grokBulkBtn').style.display = tab === 'grok' ? '' : 'none';
@@ -2471,13 +2479,35 @@ function loadCBStats() {
     el.innerHTML = '';
     data.codebuddy_keys.forEach(function(k) {
       var tr = document.createElement('tr');
+      var limit = k.credit_limit != null ? k.credit_limit : 240;
+      var remain = (k.credits_remain != null) ? k.credits_remain : (limit - k.credits_used);
       tr.innerHTML = '<td class="mono">' + escHtml(k.key) + '</td>' +
-        '<td>' + escHtml(String(k.credits_used)) + '/' + escHtml(String(k.credit_limit)) + '</td>' +
+        '<td>' + escHtml(String(k.credits_used)) + '/' + escHtml(String(limit)) +
+        ' <span class="muted">(' + Number(remain).toFixed(1) + ' left)</span></td>' +
         '<td>' + escHtml(String(k.total_requests)) + '</td>' +
         '<td>' + (k.disabled ? '<span style="color:var(--danger)">disabled</span>' : '<span style="color:var(--success)">active</span>') + '</td>';
       el.appendChild(tr);
     });
   }).catch(function(e) { console.warn('[loadCBStats]', e); });
+}
+
+// syncCBCredits: POST /cb/credits/sync then refresh the accounts table.
+async function syncCBCredits() {
+  var btn = document.getElementById('cbSyncCreditsBtn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Syncing…'; }
+  try {
+    var res = await apiFetch('/cb/credits/sync', { method: 'POST', body: '{}' });
+    var synced = (res && res.synced) || 0;
+    var failed = (res && res.failed) || 0;
+    if (failed > 0) {
+      alert('Credit sync: ' + synced + ' ok, ' + failed + ' failed');
+    }
+    refresh();
+  } catch (e) {
+    alert('Credit sync error: ' + e.message);
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = 'Sync credits'; }
+  }
 }
 
 function loadGatewayKeys() {

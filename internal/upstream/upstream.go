@@ -165,9 +165,19 @@ const (
 	MAX_CONCURRENT_REFRESH = 10
 	REENABLE_TICK          = 1 * time.Minute
 
-	// CB_CREDIT_LIMIT: disable key when credits used reaches this threshold.
+	// CB_CREDIT_LIMIT: fallback default when meter never synced.
 	// Pro Trial = 250 credits. We disable at 240 to leave a small buffer.
+	// Per-key limit from the meter API (CapacitySizePrecise) overrides this.
 	CB_CREDIT_LIMIT = 240.0
+
+	// CB_CREDIT_METER_URL is the verified CodeBuddy billing meter endpoint.
+	// Works for BOTH OAuth access tokens and API keys (ck_*). Use /v2/ only —
+	// the web path /billing/meter/get-user-resource returns 401 for API keys.
+	CB_CREDIT_METER_URL = "https://www.codebuddy.ai/v2/billing/meter/get-user-resource"
+
+	// CB credit sync worker cadence + concurrency.
+	CB_CREDIT_SYNC_TICK        = 5 * time.Minute
+	CB_CREDIT_SYNC_CONCURRENCY = 5
 
 	// MAX_REQUEST_BODY caps incoming request bodies — kept here (upstream is
 	// the primary consumer via chat/completions handler).

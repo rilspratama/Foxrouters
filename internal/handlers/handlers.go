@@ -151,13 +151,26 @@ func HandleAccounts(grokAM *upstream.GrokAccountManager, cbKM *upstream.CBKeyMan
 		cbResult := make([]gin.H, 0)
 		for _, k := range cbKeys {
 			s := k.Snapshot()
+			remain := s.CreditsRemain
+			if remain == 0 && s.MeterSyncedAt.IsZero() {
+				// Never synced — derive from fallback limit
+				remain = s.CreditLimit - s.CreditsUsed
+			}
 			entry := gin.H{
-				"provider":       "codebuddy",
-				"cred_type":      string(s.CredType),
-				"disabled":       s.Disabled,
-				"credits_used":   s.CreditsUsed,
-				"credits_left":   upstream.CB_CREDIT_LIMIT - s.CreditsUsed,
-				"total_requests": s.TotalReqs,
+				"provider":         "codebuddy",
+				"cred_type":        string(s.CredType),
+				"disabled":         s.Disabled,
+				"credits_used":     s.CreditsUsed,
+				"credit_limit":     s.CreditLimit,
+				"credits_remain":   remain,
+				"credits_left":     remain,
+				"total_requests":   s.TotalReqs,
+				"package_name":     s.PackageName,
+				"cycle_end":        s.CycleEnd,
+				"meter_status":     s.MeterStatus,
+			}
+			if !s.MeterSyncedAt.IsZero() {
+				entry["meter_synced_at"] = s.MeterSyncedAt.Format(time.RFC3339)
 			}
 			if s.CredType == upstream.CBAuthOAuth {
 				entry["email"] = s.Email
@@ -814,6 +827,83 @@ func HandleLogout(sessions *auth.SessionStore) gin.HandlerFunc {
 // ============================================================================
 // CB KEY MANAGEMENT (delete + cleanup)
 // ============================================================================
+
+// HandleSyncCBCredits triggers a live meter sync for one or all CodeBuddy keys.
+// Body optional: { "email": "..." } or { "key": "..." } to sync one; empty = all.
+// Returns {synced, failed, results:[{key, used, remain, limit, status, error?}]}.
+func HandleSyncCBCredits(cbKM *upstream.CBKeyManager) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var req struct {
+			Email string `json:"email"`
+			Key   string `json:"key"`
+		}
+		_ = c.ShouldBindJSON(&req) // empty body is fine
+
+		target := strings.TrimSpace(req.Key)
+		if target == "" {
+			target = strings.TrimSpace(req.Email)
+		}
+
+		type result struct {
+			Key    string  `json:"key"`
+			Used   float64 `json:"used"`
+			Remain float64 `json:"remain"`
+			Limit  float64 `json:"limit"`
+			Status int     `json:"status"`
+			Error  string  `json:"error,omitempty"`
+		}
+
+		var keys []*upstream.CBKey
+		if target != "" {
+			full := cbKM.ResolveKey(target)
+			if full == "" {
+				c.JSON(404, gin.H{"error": "key not found"})
+				return
+			}
+			for _, k := range cbKM.GetAll() {
+				if k.Key == full {
+					keys = append(keys, k)
+					break
+				}
+			}
+			if len(keys) == 0 {
+				c.JSON(404, gin.H{"error": "key not found"})
+				return
+			}
+		} else {
+			keys = cbKM.GetAll()
+		}
+
+		results := make([]result, 0, len(keys))
+		synced, failed := 0, 0
+		for _, k := range keys {
+			display := k.DisplayID()
+			r := result{Key: display}
+			if err := k.SyncCredits(); err != nil {
+				failed++
+				r.Error = err.Error()
+				s := k.Snapshot()
+				r.Used = s.CreditsUsed
+				r.Remain = s.CreditsRemain
+				r.Limit = s.CreditLimit
+				r.Status = s.MeterStatus
+			} else {
+				synced++
+				s := k.Snapshot()
+				r.Used = s.CreditsUsed
+				r.Remain = s.CreditsRemain
+				r.Limit = s.CreditLimit
+				r.Status = s.MeterStatus
+			}
+			results = append(results, r)
+		}
+		c.JSON(200, gin.H{
+			"synced":  synced,
+			"failed":  failed,
+			"results": results,
+		})
+	}
+}
 
 // HandleDeleteCBKey deletes a CodeBuddy key by its key string (full or masked).
 func HandleDeleteCBKey(cbKM *upstream.CBKeyManager) gin.HandlerFunc {

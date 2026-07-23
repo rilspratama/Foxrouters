@@ -168,18 +168,25 @@ type GatewayKeyDTO struct {
 
 // CBKeyDTO is the persisted shape of a CodeBuddy pool key.
 // CredType is "api_key" (default) or "oauth". OAuth fields are only
-// meaningful when CredType == "oauth".
+// meaningful when CredType == "oauth". Meter fields (credit_limit, remain,
+// package, cycle, status) are populated by the realtime credit sync worker.
 type CBKeyDTO struct {
-	Key          string
-	CredType     string // "api_key" | "oauth"
-	AccessToken  string
-	RefreshToken string
-	ExpiresAt    time.Time
-	Email        string
-	CreditsUsed  float64
-	TotalReqs    int64
-	Disabled     bool
-	DisabledAt   time.Time
+	Key           string
+	CredType      string // "api_key" | "oauth"
+	AccessToken   string
+	RefreshToken  string
+	ExpiresAt     time.Time
+	Email         string
+	CreditsUsed   float64
+	TotalReqs     int64
+	Disabled      bool
+	DisabledAt    time.Time
+	CreditLimit   float64   // from CapacitySizePrecise; 0 = use CB_CREDIT_LIMIT fallback
+	CreditsRemain float64   // from CapacityRemainPrecise
+	PackageName   string
+	CycleEnd      string    // raw CycleEndTime
+	MeterStatus   int       // Status field (0=active, 3=exhausted)
+	MeterSyncedAt time.Time // last successful meter sync
 }
 
 // NewStore initializes Redis + the selected LogStore backend, ensures schema,
@@ -358,12 +365,18 @@ func (s *Store) SaveCBKey(dto CBKeyDTO) {
 		credType = "api_key"
 	}
 	data := map[string]interface{}{
-		"cred_type":      credType,
-		"credits_used":   dto.CreditsUsed,
-		"total_requests": dto.TotalReqs,
-		"disabled":       dto.Disabled,
-		"disabled_at":    dto.DisabledAt.Unix(),
-		"updated_at":     time.Now().Unix(),
+		"cred_type":        credType,
+		"credits_used":     dto.CreditsUsed,
+		"total_requests":   dto.TotalReqs,
+		"disabled":         dto.Disabled,
+		"disabled_at":      dto.DisabledAt.Unix(),
+		"updated_at":       time.Now().Unix(),
+		"credit_limit":     dto.CreditLimit,
+		"credits_remain":   dto.CreditsRemain,
+		"package_name":     dto.PackageName,
+		"cycle_end":        dto.CycleEnd,
+		"meter_status":     dto.MeterStatus,
+		"meter_synced_at":  dto.MeterSyncedAt.Unix(),
 	}
 	// Only persist OAuth secrets when this entry is an OAuth account —
 	// avoids writing empty access/refresh tokens over API-key hashes.

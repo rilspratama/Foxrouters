@@ -47,8 +47,17 @@ type CBKey struct {
 	disabledAt   time.Time
 	creditsUsed  float64
 	totalReqs    int64
-	db           *db.Store
-	refreshSF    singleflight.Group // OAuth only — collapses concurrent Refresh()
+	// Meter fields — populated by SyncCredits from /v2/billing/meter/get-user-resource.
+	// creditLimit == 0 means "never synced"; CreditLimit() falls back to CB_CREDIT_LIMIT.
+	creditLimit   float64
+	creditsRemain float64
+	packageName   string
+	cycleEnd      string
+	meterStatus   int
+	meterSyncedAt time.Time
+	db            *db.Store
+	refreshSF     singleflight.Group // OAuth only — collapses concurrent Refresh()
+	syncSF        singleflight.Group // collapses concurrent SyncCredits()
 }
 
 // NewCBKeyForTest returns a CBKey for whitebox tests.
@@ -97,6 +106,17 @@ func (k *CBKey) Stats() (float64, int64, bool) {
 	return k.creditsUsed, k.totalReqs, k.disabled
 }
 
+// CreditLimit returns the per-key credit limit from the meter API when synced,
+// otherwise the package-level CB_CREDIT_LIMIT fallback.
+func (k *CBKey) CreditLimit() float64 {
+	k.mu.RLock()
+	defer k.mu.RUnlock()
+	if k.creditLimit > 0 {
+		return k.creditLimit
+	}
+	return CB_CREDIT_LIMIT
+}
+
 // IsDisabled returns the disabled flag (mutex-safe).
 func (k *CBKey) IsDisabled() bool {
 	k.mu.RLock()
@@ -116,14 +136,20 @@ func (k *CBKey) GetCredType() CBCredType {
 
 // CBKeySnapshot is a mutex-safe copy of CBKey state for handlers/metrics.
 type CBKeySnapshot struct {
-	Key         string
-	CredType    CBCredType
-	Email       string
-	ExpiresAt   time.Time
-	CreditsUsed float64
-	TotalReqs   int64
-	Disabled    bool
-	DisabledAt  time.Time
+	Key           string
+	CredType      CBCredType
+	Email         string
+	ExpiresAt     time.Time
+	CreditsUsed   float64
+	CreditLimit   float64
+	CreditsRemain float64
+	PackageName   string
+	CycleEnd      string
+	MeterStatus   int
+	MeterSyncedAt time.Time
+	TotalReqs     int64
+	Disabled      bool
+	DisabledAt    time.Time
 }
 
 // Snapshot returns a mutex-safe copy of the key's current state.
@@ -134,15 +160,25 @@ func (k *CBKey) Snapshot() CBKeySnapshot {
 	if ct == "" {
 		ct = CBAuthAPIKey
 	}
+	limit := k.creditLimit
+	if limit <= 0 {
+		limit = CB_CREDIT_LIMIT
+	}
 	return CBKeySnapshot{
-		Key:         k.Key,
-		CredType:    ct,
-		Email:       k.Email,
-		ExpiresAt:   k.ExpiresAt,
-		CreditsUsed: k.creditsUsed,
-		TotalReqs:   k.totalReqs,
-		Disabled:    k.disabled,
-		DisabledAt:  k.disabledAt,
+		Key:           k.Key,
+		CredType:      ct,
+		Email:         k.Email,
+		ExpiresAt:     k.ExpiresAt,
+		CreditsUsed:   k.creditsUsed,
+		CreditLimit:   limit,
+		CreditsRemain: k.creditsRemain,
+		PackageName:   k.packageName,
+		CycleEnd:      k.cycleEnd,
+		MeterStatus:   k.meterStatus,
+		MeterSyncedAt: k.meterSyncedAt,
+		TotalReqs:     k.totalReqs,
+		Disabled:      k.disabled,
+		DisabledAt:    k.disabledAt,
 	}
 }
 
@@ -206,16 +242,22 @@ func (k *CBKey) toDTO() db.CBKeyDTO {
 		credType = string(CBAuthAPIKey)
 	}
 	return db.CBKeyDTO{
-		Key:          k.Key,
-		CredType:     credType,
-		AccessToken:  k.AccessToken,
-		RefreshToken: k.RefreshToken,
-		ExpiresAt:    k.ExpiresAt,
-		Email:        k.Email,
-		CreditsUsed:  k.creditsUsed,
-		TotalReqs:    k.totalReqs,
-		Disabled:     k.disabled,
-		DisabledAt:   k.disabledAt,
+		Key:           k.Key,
+		CredType:      credType,
+		AccessToken:   k.AccessToken,
+		RefreshToken:  k.RefreshToken,
+		ExpiresAt:     k.ExpiresAt,
+		Email:         k.Email,
+		CreditsUsed:   k.creditsUsed,
+		TotalReqs:     k.totalReqs,
+		Disabled:      k.disabled,
+		DisabledAt:    k.disabledAt,
+		CreditLimit:   k.creditLimit,
+		CreditsRemain: k.creditsRemain,
+		PackageName:   k.packageName,
+		CycleEnd:      k.cycleEnd,
+		MeterStatus:   k.meterStatus,
+		MeterSyncedAt: k.meterSyncedAt,
 	}
 }
 
@@ -334,23 +376,189 @@ func (k *CBKey) refreshLocked() error {
 }
 
 // AddCredits accumulates credits and auto-disables when the limit is hit.
+// Uses the per-key CreditLimit() (meter CapacitySizePrecise when synced,
+// otherwise CB_CREDIT_LIMIT fallback). SSE-parsed credits still work as an
+// interim signal until the next meter sync.
 func (k *CBKey) AddCredits(c float64) {
 	k.mu.Lock()
 	k.creditsUsed += c
 	k.totalReqs++
-	if k.creditsUsed >= CB_CREDIT_LIMIT {
+	// Prefer meter remain when available: if remain was set and used climbs
+	// above limit, disable. creditLimit==0 → fallback constant.
+	limit := k.creditLimit
+	if limit <= 0 {
+		limit = CB_CREDIT_LIMIT
+	}
+	// If meter remain is known, also update local remain estimate.
+	if k.meterSyncedAt.After(time.Time{}) && k.creditLimit > 0 {
+		k.creditsRemain = k.creditLimit - k.creditsUsed
+		if k.creditsRemain < 0 {
+			k.creditsRemain = 0
+		}
+	}
+	if k.creditsUsed >= limit {
 		k.disabled = true
 		k.disabledAt = time.Time{} // permanent until reset
 		slog.Warn("key disabled (credits used)",
 			"module", "cb",
 			"key", k.displayIDLocked(),
 			"credits_used", k.creditsUsed,
-			"credit_limit", CB_CREDIT_LIMIT)
+			"credit_limit", limit)
 	}
 	k.mu.Unlock()
 	if k.db != nil {
 		saveCBKey(k.db, k.toDTO())
 	}
+}
+
+// SyncCredits fetches live credit usage from the CodeBuddy meter API and
+// updates local state. Works for both API keys (ck_*) and OAuth access tokens
+// via Authorization: Bearer. Concurrent calls for the same key are collapsed
+// via singleflight. Never holds mu during the network round-trip.
+//
+// On Status==3 (exhausted) or CapacityRemainPrecise<=0 the key is permanently
+// disabled. Permanent disables are never auto-reenabled even if the meter later
+// reports remain>0 (operator must re-import / re-enable manually).
+func (k *CBKey) SyncCredits() error {
+	_, err, _ := k.syncSF.Do(k.Key, func() (any, error) {
+		return nil, k.syncCreditsLocked()
+	})
+	return err
+}
+
+func (k *CBKey) syncCreditsLocked() error {
+	// OAuth: ensure access token is fresh before the meter call.
+	if k.GetCredType() == CBAuthOAuth {
+		if err := k.EnsureValid(); err != nil {
+			return fmt.Errorf("cb credit sync ensure valid: %w", err)
+		}
+	}
+
+	auth := k.AuthHeader()
+	display := k.DisplayID()
+
+	req, err := http.NewRequest("POST", CB_CREDIT_METER_URL, bytes.NewReader([]byte("{}")))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", auth)
+
+	client, proxyID := getClient(tokenRefreshClient, "codebuddy")
+	resp, err := client.Do(req)
+	if err != nil {
+		markProxyResult(proxyID, err, 0)
+		return fmt.Errorf("cb credit sync: %w", err)
+	}
+	markProxyResult(proxyID, nil, resp.StatusCode)
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if resp.StatusCode != 200 {
+		return fmt.Errorf("cb credit sync [%d]: %s", resp.StatusCode, truncateLog(string(body), 200))
+	}
+
+	account, err := parseCBMeterAccount(body)
+	if err != nil {
+		return err
+	}
+
+	// Parse precise fields first, fall back to int fields.
+	size := parseFloatOr(account.CapacitySizePrecise, float64(account.CapacitySize))
+	used := parseFloatOr(account.CapacityUsedPrecise, float64(account.CapacityUsed))
+	remain := parseFloatOr(account.CapacityRemainPrecise, float64(account.CapacityRemain))
+
+	k.mu.Lock()
+	k.creditsUsed = used
+	if size > 0 {
+		k.creditLimit = size
+	}
+	k.creditsRemain = remain
+	k.packageName = account.PackageName
+	k.cycleEnd = account.CycleEndTime
+	k.meterStatus = account.Status
+	k.meterSyncedAt = time.Now()
+
+	// Exhausted: permanent disable. Do NOT auto-reenable permanent disables
+	// even if meter later reports remain>0 (safe).
+	if account.Status == 3 || remain <= 0 {
+		if !k.disabled || !k.disabledAt.IsZero() {
+			// Either not disabled, or only on cooldown — make permanent.
+			k.disabled = true
+			k.disabledAt = time.Time{}
+			slog.Warn("key disabled (meter exhausted)",
+				"module", "cb-meter",
+				"key", k.displayIDLocked(),
+				"remain", remain,
+				"status", account.Status,
+				"package", account.PackageName)
+		}
+	}
+	k.mu.Unlock()
+
+	if k.db != nil {
+		saveCBKey(k.db, k.toDTO())
+	}
+	slog.Debug("credit sync ok",
+		"module", "cb-meter",
+		"key", display,
+		"used", used,
+		"remain", remain,
+		"limit", size,
+		"status", account.Status)
+	return nil
+}
+
+// cbMeterAccount is the first Accounts[] entry from the meter API.
+type cbMeterAccount struct {
+	PackageName           string `json:"PackageName"`
+	CapacitySize          int    `json:"CapacitySize"`
+	CapacityUsed          int    `json:"CapacityUsed"`
+	CapacityRemain        int    `json:"CapacityRemain"`
+	CapacitySizePrecise   string `json:"CapacitySizePrecise"`
+	CapacityUsedPrecise   string `json:"CapacityUsedPrecise"`
+	CapacityRemainPrecise string `json:"CapacityRemainPrecise"`
+	CycleStartTime        string `json:"CycleStartTime"`
+	CycleEndTime          string `json:"CycleEndTime"`
+	Status                int    `json:"Status"`
+}
+
+// parseCBMeterAccount extracts Accounts[0] from the nested meter response.
+// Shape: {"code":0,"data":{"Response":{"Data":{"Accounts":[...]}}}}
+func parseCBMeterAccount(body []byte) (cbMeterAccount, error) {
+	var envelope struct {
+		Code int `json:"code"`
+		Data struct {
+			Response struct {
+				Data struct {
+					Accounts []cbMeterAccount `json:"Accounts"`
+				} `json:"Data"`
+			} `json:"Response"`
+		} `json:"data"`
+		Msg string `json:"msg"`
+	}
+	if err := json.Unmarshal(body, &envelope); err != nil {
+		return cbMeterAccount{}, fmt.Errorf("cb credit sync parse: %w", err)
+	}
+	if envelope.Code != 0 {
+		return cbMeterAccount{}, fmt.Errorf("cb credit sync code=%d msg=%s", envelope.Code, envelope.Msg)
+	}
+	if len(envelope.Data.Response.Data.Accounts) == 0 {
+		return cbMeterAccount{}, fmt.Errorf("cb credit sync: empty Accounts")
+	}
+	return envelope.Data.Response.Data.Accounts[0], nil
+}
+
+// parseFloatOr parses s as float64; on failure returns fallback.
+func parseFloatOr(s string, fallback float64) float64 {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return fallback
+	}
+	v, err := strconv.ParseFloat(s, 64)
+	if err != nil {
+		return fallback
+	}
+	return v
 }
 
 type CBKeyManager struct {
@@ -419,6 +627,29 @@ func (km *CBKeyManager) LoadFromRedis() error {
 					}
 				} else {
 					key.disabledAt = time.Time{}
+				}
+			}
+			// Meter fields (optional — missing = never synced, fallback CB_CREDIT_LIMIT)
+			if v := state["credit_limit"]; v != "" {
+				if f, err := strconv.ParseFloat(v, 64); err == nil && f > 0 {
+					key.creditLimit = f
+				}
+			}
+			if v := state["credits_remain"]; v != "" {
+				if f, err := strconv.ParseFloat(v, 64); err == nil {
+					key.creditsRemain = f
+				}
+			}
+			key.packageName = state["package_name"]
+			key.cycleEnd = state["cycle_end"]
+			if v := state["meter_status"]; v != "" {
+				if n, err := strconv.Atoi(v); err == nil {
+					key.meterStatus = n
+				}
+			}
+			if v := state["meter_synced_at"]; v != "" {
+				if n, err := strconv.ParseInt(v, 10, 64); err == nil && n > 0 {
+					key.meterSyncedAt = time.Unix(n, 0)
 				}
 			}
 			km.keys = append(km.keys, key)
@@ -669,6 +900,57 @@ func CBOAuthRefreshWorker(km *CBKeyManager) {
 		}
 		wg.Wait()
 	}
+}
+
+// CBCreditSyncWorker periodically syncs credit usage from the CodeBuddy meter
+// API for all non-permanently-disabled keys. Runs once immediately at start
+// (with small stagger), then every CB_CREDIT_SYNC_TICK with concurrency
+// CB_CREDIT_SYNC_CONCURRENCY.
+func CBCreditSyncWorker(km *CBKeyManager) {
+	// Immediate first pass with small stagger so we don't stampede on boot.
+	syncAllCBCredits(km, true)
+
+	ticker := time.NewTicker(CB_CREDIT_SYNC_TICK)
+	defer ticker.Stop()
+	for range ticker.C {
+		syncAllCBCredits(km, false)
+	}
+}
+
+// syncAllCBCredits walks the pool and SyncCredits() each non-permanent-disabled
+// key. stagger=true adds a small per-key delay on the first boot pass.
+func syncAllCBCredits(km *CBKeyManager, stagger bool) {
+	keys := km.GetAll()
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, CB_CREDIT_SYNC_CONCURRENCY)
+	idx := 0
+	for _, k := range keys {
+		k.mu.RLock()
+		perm := k.disabled && k.disabledAt.IsZero()
+		display := k.displayIDLocked()
+		k.mu.RUnlock()
+		if perm {
+			continue
+		}
+		wg.Add(1)
+		sem <- struct{}{}
+		delay := time.Duration(0)
+		if stagger {
+			delay = time.Duration(idx%CB_CREDIT_SYNC_CONCURRENCY) * 200 * time.Millisecond
+		}
+		idx++
+		go func(key *CBKey, display string, delay time.Duration) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			if delay > 0 {
+				time.Sleep(delay)
+			}
+			if err := key.SyncCredits(); err != nil {
+				slog.Warn("credit sync error", "module", "cb-meter", "key", display, "error", err)
+			}
+		}(k, display, delay)
+	}
+	wg.Wait()
 }
 
 // ===========================================================================

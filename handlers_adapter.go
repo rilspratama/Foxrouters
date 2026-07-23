@@ -26,6 +26,7 @@ var (
 	handleImportAccount    = handlers.HandleImportAccount
 	handleImportCBKeyBulk  = handlers.HandleImportCBKeyBulk
 	handleImportAccountBulk = handlers.HandleImportAccountBulk
+	handleSyncCBCredits    = handlers.HandleSyncCBCredits
 	handleDeleteAccount    = handlers.HandleDeleteAccount
 	handleDeleteCBKey      = handlers.HandleDeleteCBKey
 	handleCleanupDisabled  = handlers.HandleCleanupDisabled
