@@ -1092,6 +1092,7 @@ body {
           <div style="margin-left:auto;display:flex;gap:6px">
             <button class="btn-ghost" id="cbAddBtn" onclick="showAddCBModal()" style="padding:5px 12px;font-size:12px">+ Add Key</button>
             <button class="btn-ghost" id="cbOAuthBtn" onclick="showAddCBOAuthModal()" style="padding:5px 12px;font-size:12px">+ Add OAuth</button>
+            <button class="btn-ghost" id="cbOAuthBulkBtn" onclick="showBulkCBOAuthModal()" style="padding:5px 12px;font-size:12px">Bulk OAuth</button>
             <button class="btn-ghost" id="cbBulkBtn" onclick="showBulkCBModal()" style="padding:5px 12px;font-size:12px">Bulk Import</button>
             <button class="btn-ghost" id="cbSyncCreditsBtn" onclick="syncCBCredits()" style="padding:5px 12px;font-size:12px">Sync credits</button>
             <button class="btn-ghost" id="cbCleanupBtn" onclick="cleanupDisabled('cb')" style="padding:5px 12px;font-size:12px;color:var(--danger)">Cleanup Disabled</button>
@@ -2228,6 +2229,8 @@ function showTab(e, tab) {
   document.getElementById('cbAddBtn').style.display = tab === 'cb' ? '' : 'none';
   var oauthBtn = document.getElementById('cbOAuthBtn');
   if (oauthBtn) oauthBtn.style.display = tab === 'cb' ? '' : 'none';
+  var oauthBulkBtn = document.getElementById('cbOAuthBulkBtn');
+  if (oauthBulkBtn) oauthBulkBtn.style.display = tab === 'cb' ? '' : 'none';
   document.getElementById('cbBulkBtn').style.display = tab === 'cb' ? '' : 'none';
   var syncBtn = document.getElementById('cbSyncCreditsBtn');
   if (syncBtn) syncBtn.style.display = tab === 'cb' ? '' : 'none';
@@ -3226,6 +3229,34 @@ setInterval(refresh, 5000);       // health/accounts every 5s
   </div>
 </div>
 
+<!-- Bulk CB OAuth Import Modal -->
+<div class="modal-overlay" id="bulkCBOAuthModal" onclick="if(event.target===this)closeBulkCBOAuthModal()" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:1000;align-items:center;justify-content:center">
+  <div style="background:var(--bg-secondary);border:1px solid var(--border);border-radius:var(--radius);width:90%;max-width:640px;padding:24px;max-height:90vh;overflow-y:auto">
+    <h3 style="margin:0 0 8px;font-size:16px">Bulk Import CodeBuddy OAuth</h3>
+    <div style="margin-bottom:8px;font-size:12px;color:var(--text-tertiary)">Paste JSON array. Existing emails are updated (tokens refreshed).</div>
+    <div style="margin-bottom:16px">
+      <textarea id="bulkCBOAuthInput" rows="12" placeholder='[
+  {
+    "email": "user1@example.com",
+    "access_token": "eyJ...",
+    "refresh_token": "eyJ...",
+    "expires_in": 31535929
+  },
+  {
+    "email": "user2@example.com",
+    "access_token": "eyJ...",
+    "refresh_token": "eyJ..."
+  }
+]' style="width:100%;padding:8px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg-primary);color:var(--text);font-family:var(--mono);font-size:12px;resize:vertical"></textarea>
+    </div>
+    <div id="bulkCBOAuthResult" style="margin-bottom:12px;display:none;padding:10px;border-radius:var(--radius-sm);font-size:13px"></div>
+    <div style="display:flex;gap:8px;justify-content:flex-end">
+      <button class="btn-ghost" onclick="closeBulkCBOAuthModal()" style="padding:8px 16px;font-size:13px">Cancel</button>
+      <button class="btn-primary" id="bulkCBOAuthSave" onclick="submitBulkCBOAuth()" style="padding:8px 16px;border-radius:var(--radius-sm);background:var(--brand);color:#fff;border:none;font-size:13px;font-weight:500;cursor:pointer">Import</button>
+    </div>
+  </div>
+</div>
+
 <!-- Bulk CB Import Modal -->
 <div class="modal-overlay" id="bulkCBModal" onclick="if(event.target===this)closeBulkCBModal()" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:1000;align-items:center;justify-content:center">
   <div style="background:var(--bg-secondary);border:1px solid var(--border);border-radius:var(--radius);width:90%;max-width:560px;padding:24px">
@@ -3366,6 +3397,71 @@ function submitAddCBOAuth() {
     })
     .catch(function(e) {
       var res = document.getElementById('cbOAuthResult');
+      res.style.display = 'block';
+      res.style.background = 'rgba(239,68,68,0.1)';
+      res.style.color = 'var(--red)';
+      res.textContent = '✗ Error: ' + e.message;
+      saveBtn.textContent = 'Import';
+      saveBtn.disabled = false;
+    });
+}
+
+// === Bulk CB OAuth ===
+function showBulkCBOAuthModal() {
+  document.getElementById('bulkCBOAuthInput').value = '';
+  var res = document.getElementById('bulkCBOAuthResult');
+  if (res) res.style.display = 'none';
+  var save = document.getElementById('bulkCBOAuthSave');
+  if (save) { save.textContent = 'Import'; save.disabled = false; save.onclick = submitBulkCBOAuth; }
+  document.getElementById('bulkCBOAuthModal').style.display = 'flex';
+  document.getElementById('bulkCBOAuthInput').focus();
+}
+function closeBulkCBOAuthModal() { document.getElementById('bulkCBOAuthModal').style.display = 'none'; }
+
+function submitBulkCBOAuth() {
+  var raw = document.getElementById('bulkCBOAuthInput').value.trim();
+  if (!raw) { alert('Paste a JSON array of OAuth accounts'); return; }
+  var accounts;
+  try {
+    accounts = JSON.parse(raw);
+  } catch (e) {
+    alert('Invalid JSON: ' + e.message);
+    return;
+  }
+  if (!Array.isArray(accounts) || accounts.length === 0) {
+    alert('JSON must be a non-empty array');
+    return;
+  }
+  if (!confirm('Import ' + accounts.length + ' OAuth accounts? Existing emails will be updated.')) return;
+  var saveBtn = document.getElementById('bulkCBOAuthSave');
+  saveBtn.textContent = 'Importing...';
+  saveBtn.disabled = true;
+  apiFetch('/cb/oauth/import/bulk', { method: 'POST', body: JSON.stringify({ accounts: accounts }) })
+    .then(function(d) {
+      var res = document.getElementById('bulkCBOAuthResult');
+      res.style.display = 'block';
+      var ok = (d.added || 0) + (d.updated || 0);
+      res.style.background = ok > 0 ? 'rgba(34,197,94,0.1)' : 'rgba(234,179,8,0.1)';
+      res.style.color = ok > 0 ? 'var(--green)' : 'var(--yellow)';
+      res.innerHTML = '✓ Added: <b>' + (d.added || 0) + '</b> · Updated: <b>' + (d.updated || 0) +
+        '</b> · Failed: ' + (d.failed || 0) + ' · Total pool: ' + (d.total || '?');
+      if (d.errors && d.errors.length) {
+        res.innerHTML += '<div style="margin-top:6px;font-size:11px;opacity:0.85">' +
+          d.errors.slice(0, 5).map(function(e) {
+            return '• [' + e.index + '] ' + escHtml(e.email || '') + ' ' + escHtml(e.error || '');
+          }).join('<br>') + (d.errors.length > 5 ? '<br>…' : '') + '</div>';
+      }
+      saveBtn.textContent = 'Done';
+      saveBtn.disabled = false;
+      saveBtn.onclick = function() {
+        closeBulkCBOAuthModal();
+        loadCBStats();
+        if (typeof refresh === 'function') refresh();
+      };
+      if (typeof refresh === 'function') refresh();
+    })
+    .catch(function(e) {
+      var res = document.getElementById('bulkCBOAuthResult');
       res.style.display = 'block';
       res.style.background = 'rgba(239,68,68,0.1)';
       res.style.color = 'var(--red)';

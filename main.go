@@ -266,6 +266,7 @@ func main() {
 	r.POST("/cb/import", csrfGuard(), adminAuth, handleImportCBKey(cbKM))
 	r.POST("/cb/import/bulk", csrfGuard(), adminAuth, handleImportCBKeyBulk(cbKM))
 	r.POST("/cb/oauth/import", csrfGuard(), adminAuth, handleImportCBOAuth(cbKM))
+	r.POST("/cb/oauth/import/bulk", csrfGuard(), adminAuth, handleImportCBOAuthBulk(cbKM))
 	r.POST("/cb/credits/sync", csrfGuard(), adminAuth, handleSyncCBCredits(cbKM))
 	r.DELETE("/accounts/:email", csrfGuard(), adminAuth, handleDeleteAccount(grokAM))
 	r.DELETE("/cb/keys/:key", csrfGuard(), adminAuth, handleDeleteCBKey(cbKM))

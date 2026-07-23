@@ -23,6 +23,7 @@ var (
 	handleRefresh          = handlers.HandleRefresh
 	handleImportCBKey      = handlers.HandleImportCBKey
 	handleImportCBOAuth    = handlers.HandleImportCBOAuth
+	handleImportCBOAuthBulk = handlers.HandleImportCBOAuthBulk
 	handleImportAccount    = handlers.HandleImportAccount
 	handleImportCBKeyBulk  = handlers.HandleImportCBKeyBulk
 	handleImportAccountBulk = handlers.HandleImportAccountBulk

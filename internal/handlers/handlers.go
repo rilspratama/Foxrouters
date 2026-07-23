@@ -6,6 +6,7 @@
 package handlers
 
 import (
+	"encoding/json"
 	"log/slog"
 	"net/http"
 	"os"
@@ -268,16 +269,7 @@ func HandleImportCBOAuth(cbKM *upstream.CBKeyManager) gin.HandlerFunc {
 			c.JSON(400, gin.H{"error": "email, access_token, refresh_token are required"})
 			return
 		}
-		var expiresAt time.Time
-		if req.ExpiresIn > 0 {
-			expiresAt = time.Now().Add(time.Duration(req.ExpiresIn) * time.Second)
-		} else {
-			expiresAt = upstream.ParseJWTExp(at)
-			if expiresAt.IsZero() {
-				// Fallback: documented CB OAuth TTL is ~365 days
-				expiresAt = time.Now().Add(365 * 24 * time.Hour)
-			}
-		}
+		expiresAt := resolveCBOAuthExpiry(at, req.ExpiresIn)
 		added, total := cbKM.AddOAuthAccount(email, at, rt, expiresAt)
 		if added {
 			slog.Info("imported oauth account", "module", "cb", "email", email, "total", total)
@@ -290,6 +282,80 @@ func HandleImportCBOAuth(cbKM *upstream.CBKeyManager) gin.HandlerFunc {
 			"email":      email,
 			"expires_at": expiresAt.Format(time.RFC3339),
 			"status":     map[bool]string{true: "imported", false: "updated"}[added],
+		})
+	}
+}
+
+// resolveCBOAuthExpiry picks ExpiresAt from expires_in seconds, JWT exp, or 365d fallback.
+func resolveCBOAuthExpiry(accessToken string, expiresIn int64) time.Time {
+	if expiresIn > 0 {
+		return time.Now().Add(time.Duration(expiresIn) * time.Second)
+	}
+	if exp := upstream.ParseJWTExp(accessToken); !exp.IsZero() {
+		return exp
+	}
+	return time.Now().Add(365 * 24 * time.Hour)
+}
+
+// HandleImportCBOAuthBulk imports multiple CodeBuddy OAuth accounts.
+// Body: {"accounts":[{"email":"...","access_token":"...","refresh_token":"...","expires_in":N},...]}
+// or {"raw":"<json array string>"}.
+// Idempotent — existing emails are updated (counted as updated, not failed).
+func HandleImportCBOAuthBulk(cbKM *upstream.CBKeyManager) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var req struct {
+			Accounts []struct {
+				Email        string `json:"email"`
+				AccessToken  string `json:"access_token"`
+				RefreshToken string `json:"refresh_token"`
+				ExpiresIn    int64  `json:"expires_in"`
+			} `json:"accounts"`
+			Raw string `json:"raw"`
+		}
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(400, gin.H{"error": "invalid JSON body"})
+			return
+		}
+		accounts := req.Accounts
+		if len(accounts) == 0 && strings.TrimSpace(req.Raw) != "" {
+			if err := json.Unmarshal([]byte(req.Raw), &accounts); err != nil {
+				c.JSON(400, gin.H{"error": "raw must be a JSON array of oauth accounts", "detail": err.Error()})
+				return
+			}
+		}
+		if len(accounts) == 0 {
+			c.JSON(400, gin.H{"error": "accounts array or raw JSON array is required"})
+			return
+		}
+
+		added, updated, failed := 0, 0, 0
+		var errors []gin.H
+		var total int
+		for i, a := range accounts {
+			email := strings.TrimSpace(a.Email)
+			at := strings.TrimSpace(a.AccessToken)
+			rt := strings.TrimSpace(a.RefreshToken)
+			if email == "" || at == "" || rt == "" {
+				failed++
+				errors = append(errors, gin.H{"index": i, "email": email, "error": "email, access_token, refresh_token required"})
+				continue
+			}
+			expiresAt := resolveCBOAuthExpiry(at, a.ExpiresIn)
+			wasNew, t := cbKM.AddOAuthAccount(email, at, rt, expiresAt)
+			total = t
+			if wasNew {
+				added++
+			} else {
+				updated++
+			}
+		}
+		slog.Info("bulk oauth import", "module", "cb", "added", added, "updated", updated, "failed", failed, "total", total)
+		c.JSON(200, gin.H{
+			"added":   added,
+			"updated": updated,
+			"failed":  failed,
+			"total":   total,
+			"errors":  errors,
 		})
 	}
 }
