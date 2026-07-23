@@ -1091,6 +1091,7 @@ body {
           <button class="subtab" onclick="showTab(event,'grok')">Grok Accounts</button>
           <div style="margin-left:auto;display:flex;gap:6px">
             <button class="btn-ghost" id="cbAddBtn" onclick="showAddCBModal()" style="padding:5px 12px;font-size:12px">+ Add Key</button>
+            <button class="btn-ghost" id="cbOAuthBtn" onclick="showAddCBOAuthModal()" style="padding:5px 12px;font-size:12px">+ Add OAuth</button>
             <button class="btn-ghost" id="cbBulkBtn" onclick="showBulkCBModal()" style="padding:5px 12px;font-size:12px">Bulk Import</button>
             <button class="btn-ghost" id="cbCleanupBtn" onclick="cleanupDisabled('cb')" style="padding:5px 12px;font-size:12px;color:var(--danger)">Cleanup Disabled</button>
             <button class="btn-ghost" id="grokAddBtn" onclick="showAddGrokModal()" style="padding:5px 12px;font-size:12px;display:none">+ Add Account</button>
@@ -1102,7 +1103,7 @@ body {
         <div id="cbPanel" class="tbl-scroll" style="max-height:500px">
           <table class="tbl">
             <thead><tr>
-              <th>Key</th><th>Credits</th><th>Usage</th><th>Requests</th><th>Status</th><th>Actions</th>
+              <th>Type</th><th>Key / Email</th><th>Credits</th><th>Usage</th><th>Requests</th><th>Expires</th><th>Status</th><th>Actions</th>
             </tr></thead>
             <tbody id="cbBody"></tbody>
           </table>
@@ -2147,19 +2148,32 @@ function renderCBPage() {
   var cbRows = '';
   for (var j = start; j < end; j++) {
     var k = all[j];
-    var pct = (k.credits_used / k.credit_limit) * 100;
+    var isOAuth = k.cred_type === 'oauth';
+    var pct = k.credit_limit > 0 ? (k.credits_used / k.credit_limit) * 100 : 0;
     var color = pct > 90 ? 'pbar-red' : pct > 70 ? 'pbar-orange' : 'pbar-green';
     var status = k.disabled ? '<span class="err">disabled</span>' : '<span class="ok">active</span>';
+    var typeBadge = isOAuth
+      ? '<span style="padding:2px 8px;border-radius:10px;font-size:10px;background:rgba(168,85,247,0.12);color:#c084fc">OAuth</span>'
+      : '<span style="padding:2px 8px;border-radius:10px;font-size:10px;background:rgba(99,102,241,0.12);color:#818cf8">API Key</span>';
+    var identity = isOAuth
+      ? escHtml(k.email || k.key)
+      : escHtml(k.key);
+    var exp = '—';
+    if (isOAuth && k.expires_at && k.expires_at !== '0001-01-01T00:00:00Z') {
+      exp = new Date(k.expires_at).toLocaleString('en-GB', {year:'numeric',month:'short',day:'2-digit',hour:'2-digit',minute:'2-digit',timeZone:'UTC'}) + ' UTC';
+    }
     cbRows += '<tr>' +
-      '<td class="mono">' + escHtml(k.key) + '</td>' +
-      '<td class="mono">' + k.credits_used.toFixed(1) + '/' + k.credit_limit + '</td>' +
-      '<td><div class="pbar"><div class="pbar-fill ' + color + '" style="width:' + pct + '%"></div></div>' + (k.credit_limit - k.credits_used).toFixed(1) + ' left</td>' +
-      '<td class="mono">' + k.total_requests + '</td>' +
+      '<td>' + typeBadge + '</td>' +
+      '<td class="mono">' + identity + '</td>' +
+      '<td class="mono">' + Number(k.credits_used || 0).toFixed(1) + '/' + k.credit_limit + '</td>' +
+      '<td><div class="pbar"><div class="pbar-fill ' + color + '" style="width:' + pct + '%"></div></div>' + Number((k.credit_limit || 0) - (k.credits_used || 0)).toFixed(1) + ' left</td>' +
+      '<td class="mono">' + (k.total_requests || 0) + '</td>' +
+      '<td class="muted" style="font-size:11px">' + exp + '</td>' +
       '<td>' + status + '</td>' +
       '<td><button class="btn-ghost delete-cb-btn" data-key="' + escHtml(k.key) + '" style="padding:3px 8px;font-size:12px;color:var(--red)">Delete</button></td>' +
     '</tr>';
   }
-  document.getElementById('cbBody').innerHTML = cbRows || '<tr><td colspan="6" class="history-empty">No CodeBuddy keys loaded</td></tr>';
+  document.getElementById('cbBody').innerHTML = cbRows || '<tr><td colspan="8" class="history-empty">No CodeBuddy keys loaded</td></tr>';
 
   // Pager
   var pager = document.getElementById('cbPager');
@@ -2206,6 +2220,8 @@ function showTab(e, tab) {
   document.getElementById('grokPanel').style.display = tab === 'grok' ? '' : 'none';
   // Toggle add/bulk/cleanup buttons to match active tab
   document.getElementById('cbAddBtn').style.display = tab === 'cb' ? '' : 'none';
+  var oauthBtn = document.getElementById('cbOAuthBtn');
+  if (oauthBtn) oauthBtn.style.display = tab === 'cb' ? '' : 'none';
   document.getElementById('cbBulkBtn').style.display = tab === 'cb' ? '' : 'none';
   document.getElementById('cbCleanupBtn').style.display = tab === 'cb' ? '' : 'none';
   document.getElementById('grokAddBtn').style.display = tab === 'grok' ? '' : 'none';
@@ -3149,6 +3165,37 @@ setInterval(refresh, 5000);       // health/accounts every 5s
   </div>
 </div>
 
+<!-- Add CB OAuth Modal -->
+<div class="modal-overlay" id="addCBOAuthModal" onclick="if(event.target===this)closeAddCBOAuthModal()" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:1000;align-items:center;justify-content:center">
+  <div style="background:var(--bg-secondary);border:1px solid var(--border);border-radius:var(--radius);width:90%;max-width:560px;padding:24px;max-height:90vh;overflow-y:auto">
+    <h3 style="margin:0 0 8px;font-size:16px">Add CodeBuddy OAuth</h3>
+    <div style="margin-bottom:16px;font-size:12px;color:var(--text-tertiary)">Import access + refresh token (CLI device/login flow). Same chat endpoint as API keys; auth uses Bearer access token.</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
+      <div>
+        <label style="font-size:12px;color:var(--text-tertiary);display:block;margin-bottom:6px">Email *</label>
+        <input type="text" id="cbOAuthEmail" placeholder="user@example.com" style="width:100%;padding:8px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg-primary);color:var(--text);font-size:13px" />
+      </div>
+      <div>
+        <label style="font-size:12px;color:var(--text-tertiary);display:block;margin-bottom:6px">Expires In (seconds)</label>
+        <input type="number" id="cbOAuthExpiresIn" placeholder="31535929 (~365d)" style="width:100%;padding:8px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg-primary);color:var(--text);font-size:13px" />
+      </div>
+    </div>
+    <div style="margin-bottom:12px">
+      <label style="font-size:12px;color:var(--text-tertiary);display:block;margin-bottom:6px">Access Token *</label>
+      <textarea id="cbOAuthAccessToken" rows="3" placeholder="eyJ..." style="width:100%;padding:8px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg-primary);color:var(--text);font-family:var(--mono);font-size:12px;resize:vertical"></textarea>
+    </div>
+    <div style="margin-bottom:16px">
+      <label style="font-size:12px;color:var(--text-tertiary);display:block;margin-bottom:6px">Refresh Token *</label>
+      <textarea id="cbOAuthRefreshToken" rows="3" placeholder="eyJ..." style="width:100%;padding:8px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg-primary);color:var(--text);font-family:var(--mono);font-size:12px;resize:vertical"></textarea>
+    </div>
+    <div id="cbOAuthResult" style="margin-bottom:12px;display:none;padding:10px;border-radius:var(--radius-sm);font-size:13px"></div>
+    <div style="display:flex;gap:8px;justify-content:flex-end">
+      <button class="btn-ghost" onclick="closeAddCBOAuthModal()" style="padding:8px 16px;font-size:13px">Cancel</button>
+      <button class="btn-primary" id="cbOAuthSave" onclick="submitAddCBOAuth()" style="padding:8px 16px;border-radius:var(--radius-sm);background:var(--brand);color:#fff;border:none;font-size:13px;font-weight:500;cursor:pointer">Import</button>
+    </div>
+  </div>
+</div>
+
 <!-- Bulk CB Import Modal -->
 <div class="modal-overlay" id="bulkCBModal" onclick="if(event.target===this)closeBulkCBModal()" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:1000;align-items:center;justify-content:center">
   <div style="background:var(--bg-secondary);border:1px solid var(--border);border-radius:var(--radius);width:90%;max-width:560px;padding:24px">
@@ -3244,8 +3291,58 @@ function submitAddCB() {
       alert(d.added ? 'Key added successfully (' + d.total + ' total)' : 'Key already exists (' + d.total + ' total)');
       closeAddCBModal();
       loadCBStats();
+      if (typeof refresh === 'function') refresh();
     })
     .catch(function(e) { alert('Error: ' + e.message); });
+}
+
+// === Add CB OAuth ===
+function showAddCBOAuthModal() {
+  ['cbOAuthEmail','cbOAuthExpiresIn','cbOAuthAccessToken','cbOAuthRefreshToken'].forEach(function(id) {
+    var el = document.getElementById(id);
+    if (el) el.value = '';
+  });
+  var res = document.getElementById('cbOAuthResult');
+  if (res) res.style.display = 'none';
+  document.getElementById('addCBOAuthModal').style.display = 'flex';
+  document.getElementById('cbOAuthEmail').focus();
+}
+function closeAddCBOAuthModal() { document.getElementById('addCBOAuthModal').style.display = 'none'; }
+
+function submitAddCBOAuth() {
+  var email = document.getElementById('cbOAuthEmail').value.trim();
+  var at = document.getElementById('cbOAuthAccessToken').value.trim();
+  var rt = document.getElementById('cbOAuthRefreshToken').value.trim();
+  var expRaw = document.getElementById('cbOAuthExpiresIn').value.trim();
+  if (!email || !at || !rt) { alert('email, access_token, and refresh_token are required'); return; }
+  var body = { email: email, access_token: at, refresh_token: rt };
+  if (expRaw) body.expires_in = parseInt(expRaw, 10);
+  var saveBtn = document.getElementById('cbOAuthSave');
+  saveBtn.textContent = 'Importing...';
+  saveBtn.disabled = true;
+  apiFetch('/cb/oauth/import', { method: 'POST', body: JSON.stringify(body) })
+    .then(function(d) {
+      var res = document.getElementById('cbOAuthResult');
+      res.style.display = 'block';
+      res.style.background = d.added ? 'rgba(34,197,94,0.1)' : 'rgba(234,179,8,0.1)';
+      res.style.color = d.added ? 'var(--green)' : 'var(--yellow)';
+      res.innerHTML = (d.added ? '✓ Imported ' : '↻ Updated ') + '<b>' + escHtml(d.email || email) + '</b>' +
+        (d.expires_at ? ' · expires ' + escHtml(d.expires_at) : '') +
+        ' · total ' + d.total;
+      saveBtn.textContent = 'Done';
+      saveBtn.disabled = false;
+      saveBtn.onclick = function() { closeAddCBOAuthModal(); loadCBStats(); if (typeof refresh === 'function') refresh(); };
+      if (typeof refresh === 'function') refresh();
+    })
+    .catch(function(e) {
+      var res = document.getElementById('cbOAuthResult');
+      res.style.display = 'block';
+      res.style.background = 'rgba(239,68,68,0.1)';
+      res.style.color = 'var(--red)';
+      res.textContent = '✗ Error: ' + e.message;
+      saveBtn.textContent = 'Import';
+      saveBtn.disabled = false;
+    });
 }
 
 function showBulkCBModal() {
