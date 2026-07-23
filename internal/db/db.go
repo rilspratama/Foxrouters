@@ -167,8 +167,15 @@ type GatewayKeyDTO struct {
 }
 
 // CBKeyDTO is the persisted shape of a CodeBuddy pool key.
+// CredType is "api_key" (default) or "oauth". OAuth fields are only
+// meaningful when CredType == "oauth".
 type CBKeyDTO struct {
 	Key          string
+	CredType     string // "api_key" | "oauth"
+	AccessToken  string
+	RefreshToken string
+	ExpiresAt    time.Time
+	Email        string
 	CreditsUsed  float64
 	TotalReqs    int64
 	Disabled     bool
@@ -346,12 +353,25 @@ func (s *Store) SaveCBKey(dto CBKeyDTO) {
 	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 	defer cancel()
 
+	credType := dto.CredType
+	if credType == "" {
+		credType = "api_key"
+	}
 	data := map[string]interface{}{
+		"cred_type":      credType,
 		"credits_used":   dto.CreditsUsed,
 		"total_requests": dto.TotalReqs,
 		"disabled":       dto.Disabled,
 		"disabled_at":    dto.DisabledAt.Unix(),
 		"updated_at":     time.Now().Unix(),
+	}
+	// Only persist OAuth secrets when this entry is an OAuth account —
+	// avoids writing empty access/refresh tokens over API-key hashes.
+	if credType == "oauth" {
+		data["access_token"] = dto.AccessToken
+		data["refresh_token"] = dto.RefreshToken
+		data["expires_at"] = dto.ExpiresAt.Unix()
+		data["email"] = dto.Email
 	}
 	rk := RK_CB_KEY + dto.Key
 	if err := s.rdb.HSet(ctx, rk, data).Err(); err != nil {

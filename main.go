@@ -165,6 +165,7 @@ func main() {
 	go autoRefreshWorker(grokAM)
 	go reenableWorker(grokAM)
 	go reenableCBWorker(cbKM)
+	go cbOAuthRefreshWorker(cbKM)
 	// Snapshot pool sizes into Prometheus gauges every 10s. Cheap RLock walk;
 	// keeps activeKeys/disabledKeys eventually consistent without touching the
 	// hot path. Circuit-state gauges are updated inline from health.go.
@@ -221,19 +222,29 @@ func main() {
 		keys := cbKM.GetAll()
 		stats := []gin.H{}
 		for _, k := range keys {
-			credits, reqs, disabled := k.Stats()
-			keyDisplay := k.Key
-			if len(keyDisplay) > 12 {
-				keyDisplay = keyDisplay[:8] + "..." + keyDisplay[len(keyDisplay)-4:]
-			}
-			stats = append(stats, gin.H{
-				"key":            keyDisplay,
-				"credits_used":   credits,
+			s := k.Snapshot()
+			entry := gin.H{
+				"cred_type":      string(s.CredType),
+				"credits_used":   s.CreditsUsed,
 				"credit_limit":   CB_CREDIT_LIMIT,
-				"credits_left":   CB_CREDIT_LIMIT - credits,
-				"total_requests": reqs,
-				"disabled":       disabled,
-			})
+				"credits_left":   CB_CREDIT_LIMIT - s.CreditsUsed,
+				"total_requests": s.TotalReqs,
+				"disabled":       s.Disabled,
+			}
+			if s.CredType == CBAuthOAuth {
+				entry["email"] = s.Email
+				entry["key"] = s.Email
+				if !s.ExpiresAt.IsZero() {
+					entry["expires_at"] = s.ExpiresAt.Format(time.RFC3339)
+				}
+			} else {
+				keyDisplay := s.Key
+				if len(keyDisplay) > 12 {
+					keyDisplay = keyDisplay[:8] + "..." + keyDisplay[len(keyDisplay)-4:]
+				}
+				entry["key"] = keyDisplay
+			}
+			stats = append(stats, entry)
 		}
 		c.JSON(200, gin.H{"codebuddy_keys": stats})
 	})
@@ -242,6 +253,7 @@ func main() {
 	r.POST("/accounts/import/bulk", csrfGuard(), adminAuth, handleImportAccountBulk(grokAM))
 	r.POST("/cb/import", csrfGuard(), adminAuth, handleImportCBKey(cbKM))
 	r.POST("/cb/import/bulk", csrfGuard(), adminAuth, handleImportCBKeyBulk(cbKM))
+	r.POST("/cb/oauth/import", csrfGuard(), adminAuth, handleImportCBOAuth(cbKM))
 	r.DELETE("/accounts/:email", csrfGuard(), adminAuth, handleDeleteAccount(grokAM))
 	r.DELETE("/cb/keys/:key", csrfGuard(), adminAuth, handleDeleteCBKey(cbKM))
 	r.POST("/cleanup/disabled", csrfGuard(), adminAuth, handleCleanupDisabled(grokAM, cbKM))

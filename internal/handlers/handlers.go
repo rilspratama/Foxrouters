@@ -150,15 +150,25 @@ func HandleAccounts(grokAM *upstream.GrokAccountManager, cbKM *upstream.CBKeyMan
 		cbKeys := cbKM.GetAll()
 		cbResult := make([]gin.H, 0)
 		for _, k := range cbKeys {
-			credits, reqs, disabled := k.Stats()
-			cbResult = append(cbResult, gin.H{
+			s := k.Snapshot()
+			entry := gin.H{
 				"provider":       "codebuddy",
-				"key":            k.Key[:8] + "..." + k.Key[len(k.Key)-4:],
-				"disabled":       disabled,
-				"credits_used":   credits,
-				"credits_left":   upstream.CB_CREDIT_LIMIT - credits,
-				"total_requests": reqs,
-			})
+				"cred_type":      string(s.CredType),
+				"disabled":       s.Disabled,
+				"credits_used":   s.CreditsUsed,
+				"credits_left":   upstream.CB_CREDIT_LIMIT - s.CreditsUsed,
+				"total_requests": s.TotalReqs,
+			}
+			if s.CredType == upstream.CBAuthOAuth {
+				entry["email"] = s.Email
+				entry["key"] = s.Email
+				if !s.ExpiresAt.IsZero() {
+					entry["expires_at"] = s.ExpiresAt.Format(time.RFC3339)
+				}
+			} else {
+				entry["key"] = s.Key[:8] + "..." + s.Key[len(s.Key)-4:]
+			}
+			cbResult = append(cbResult, entry)
 		}
 		c.JSON(200, gin.H{
 			"grok": grokResult, "codebuddy": cbResult,
@@ -219,6 +229,54 @@ func HandleImportCBKey(cbKM *upstream.CBKeyManager) gin.HandlerFunc {
 			"total":  total,
 			"key":    display,
 			"status": map[bool]string{true: "imported", false: "already_exists"}[added],
+		})
+	}
+}
+
+// HandleImportCBOAuth hot-imports a CodeBuddy OAuth account.
+// Body: {"email":"...","access_token":"...","refresh_token":"...","expires_in":31535929}
+// If expires_in is missing, the JWT exp claim is decoded from access_token.
+func HandleImportCBOAuth(cbKM *upstream.CBKeyManager) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var req struct {
+			Email        string `json:"email"`
+			AccessToken  string `json:"access_token"`
+			RefreshToken string `json:"refresh_token"`
+			ExpiresIn    int64  `json:"expires_in"`
+		}
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(400, gin.H{"error": "invalid JSON body"})
+			return
+		}
+		email := strings.TrimSpace(req.Email)
+		at := strings.TrimSpace(req.AccessToken)
+		rt := strings.TrimSpace(req.RefreshToken)
+		if email == "" || at == "" || rt == "" {
+			c.JSON(400, gin.H{"error": "email, access_token, refresh_token are required"})
+			return
+		}
+		var expiresAt time.Time
+		if req.ExpiresIn > 0 {
+			expiresAt = time.Now().Add(time.Duration(req.ExpiresIn) * time.Second)
+		} else {
+			expiresAt = upstream.ParseJWTExp(at)
+			if expiresAt.IsZero() {
+				// Fallback: documented CB OAuth TTL is ~365 days
+				expiresAt = time.Now().Add(365 * 24 * time.Hour)
+			}
+		}
+		added, total := cbKM.AddOAuthAccount(email, at, rt, expiresAt)
+		if added {
+			slog.Info("imported oauth account", "module", "cb", "email", email, "total", total)
+		} else {
+			slog.Info("updated oauth account", "module", "cb", "email", email, "total", total)
+		}
+		c.JSON(200, gin.H{
+			"added":      added,
+			"total":      total,
+			"email":      email,
+			"expires_at": expiresAt.Format(time.RFC3339),
+			"status":     map[bool]string{true: "imported", false: "updated"}[added],
 		})
 	}
 }

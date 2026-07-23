@@ -35,6 +35,10 @@ const (
 	// Grok/CB endpoint constants (referenced by tests + docs)
 	XAI_UPSTREAM_URL = upstream.XAI_UPSTREAM_URL
 	CB_UPSTREAM_URL  = upstream.CB_UPSTREAM_URL
+
+	// CodeBuddy credential types
+	CBAuthAPIKey = upstream.CBAuthAPIKey
+	CBAuthOAuth  = upstream.CBAuthOAuth
 )
 
 // Function/worker re-exports
@@ -42,9 +46,10 @@ var (
 	NewGrokAccountManager = upstream.NewGrokAccountManager
 	NewCBKeyManager       = upstream.NewCBKeyManager
 
-	autoRefreshWorker = upstream.AutoRefreshWorker
-	reenableWorker    = upstream.ReenableWorker
-	reenableCBWorker  = upstream.ReenableCBWorker
+	autoRefreshWorker   = upstream.AutoRefreshWorker
+	reenableWorker      = upstream.ReenableWorker
+	reenableCBWorker    = upstream.ReenableCBWorker
+	cbOAuthRefreshWorker = upstream.CBOAuthRefreshWorker
 
 	isGrokModel     = upstream.IsGrokModel
 	expandGrokAlias = upstream.ExpandGrokAlias

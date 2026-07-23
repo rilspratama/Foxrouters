@@ -143,7 +143,10 @@ const (
 	XAI_TOKEN_URL    = "https://auth.x.ai/oauth2/token"
 	XAI_UPSTREAM_URL = "https://cli-chat-proxy.grok.com/v1"
 	CB_UPSTREAM_URL  = "https://www.codebuddy.ai/v2/chat/completions"
-	REFRESH_BUFFER   = 10 * time.Minute
+	// CB_OAUTH_REFRESH_URL is the verified CodeBuddy OAuth refresh endpoint
+	// (plugin path — /v2/auth/token/refresh returns 404).
+	CB_OAUTH_REFRESH_URL = "https://www.codebuddy.ai/v2/plugin/auth/token/refresh"
+	REFRESH_BUFFER       = 10 * time.Minute
 
 	GROK_CLIENT_VERSION    = "0.2.93"
 	GROK_CLIENT_IDENTIFIER = "grok-shell"
@@ -247,18 +250,14 @@ func saveGrokAccount(s *db.Store, dto db.GrokAccountDTO) {
 	s.SaveGrokAccount(dto)
 }
 
-// saveCBKey persists CB pool state via a db.CBKeyDTO.
-func saveCBKey(s *db.Store, key string, creditsUsed float64, totalReqs int64, disabled bool, disabledAt time.Time) {
+// saveCBKey persists a CB pool snapshot to Redis. Callers MUST build the DTO
+// under the key's lock (via CBKey.toDTO) so we never read fields concurrently
+// with a writer — same pattern as saveGrokAccount.
+func saveCBKey(s *db.Store, dto db.CBKeyDTO) {
 	if s == nil {
 		return
 	}
-	s.SaveCBKey(db.CBKeyDTO{
-		Key:         key,
-		CreditsUsed: creditsUsed,
-		TotalReqs:   totalReqs,
-		Disabled:    disabled,
-		DisabledAt:  disabledAt,
-	})
+	s.SaveCBKey(dto)
 }
 
 // silence unused warnings in leaf builds
