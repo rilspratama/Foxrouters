@@ -17,7 +17,7 @@ Unified OpenAI-compatible API gateway. Routes by model prefix: `grok-*` → Grok
 | **Auth (API)** | `Authorization: Bearer <GATEWAY_KEY>` |
 | **Auth (Dashboard)** | Cookie-based — visit `/login`, enter key, HttpOnly cookie set (v5.11.6). No more `?key=` URL param or localStorage. |
 | **Gateway key file** | `/root/nexus-workspace/foxrouters/gateway-key.txt` (first line = admin key). On fresh deploy with empty Redis, gateway auto-generates a bootstrap admin key and writes it to `bootstrap-key.txt` (v5.11.6). |
-| **Version** | v1.5.0 |
+| **Version** | v1.6.1-oauth (local; check live: `curl -s http://127.0.0.1:20130/health`) |
 | **Dashboard** | `/dashboard` (redirects to `/login` if no session cookie) |
 | **Deploy script** | `./start.sh` — one-command deploy (docker compose up + capture bootstrap key from logs + save to `bootstrap-key.txt`). Commands: `--reset`, `--status`, `--logs`, `--key`, `--stop`. |
 
@@ -193,21 +193,28 @@ curl -X POST http://127.0.0.1:20130/accounts/import/bulk \
 # Response: {"added":2,"updated":0,"failed":0,"total":507}
 ```
 
-### 4. CodeBuddy Key Management (admin only)
+### 4. CodeBuddy Credentials (admin only) — API key + OAuth dual pool (v1.6.1)
+
+Same chat path for both: `www.codebuddy.ai/v2/chat/completions`. Mixed RR.
 
 | Method | Endpoint | Purpose |
 |--------|----------|---------|
-| POST | `/cb/import` | Add single CB key |
-| POST | `/cb/import/bulk` | Add multiple CB keys |
+| POST | `/cb/import` | Add API key (`ck_*`) |
+| POST | `/cb/import/bulk` | Bulk API keys only |
+| POST | `/cb/oauth/import` | OAuth single (email + AT + RT + expires_in?) — eager refresh if AT near-expiry |
+| POST | `/cb/oauth/import/bulk` | OAuth bulk (`accounts[]`) — idempotent by email |
+| POST | `/cb/credits/sync` | Realtime meter sync (`{}` all or `{email\|key}`) |
+| DELETE | `/cb/keys/:key` | Delete by key or email (OAuth) |
+| GET | `/cb-stats` | Credits + `cred_type` / remain / package / meter_* |
 
-**Add single key:**
+**Add single API key:**
 ```bash
 curl -X POST http://127.0.0.1:20130/cb/import \
   -H "Authorization: Bearer $KEY" \
   -d '{"api_key":"ck_..."}'
 ```
 
-**Bulk import keys (supports raw paste or array):**
+**Bulk import API keys (supports raw paste or array):**
 ```bash
 # Array format
 curl -X POST http://127.0.0.1:20130/cb/import/bulk \
@@ -220,6 +227,31 @@ curl -X POST http://127.0.0.1:20130/cb/import/bulk \
   -d '{"raw":"ck_abc\nck_def,ck_ghi"}'
 # Response: {"added":3,"skipped":0,"total":1050}
 ```
+
+**OAuth single (eager refresh on import if AT near-expiry):**
+```bash
+curl -s http://127.0.0.1:20130/cb/oauth/import \
+  -H "Authorization: Bearer $KEY" -H 'Content-Type: application/json' \
+  -d '{"email":"user@example.com","access_token":"eyJ...","refresh_token":"eyJ...","expires_in":31535929}'
+```
+
+**OAuth bulk (idempotent by email):**
+```bash
+curl -s http://127.0.0.1:20130/cb/oauth/import/bulk \
+  -H "Authorization: Bearer $KEY" -H 'Content-Type: application/json' \
+  -d '{"accounts":[
+    {"email":"u1@example.com","access_token":"eyJ...","refresh_token":"eyJ...","expires_in":31535929},
+    {"email":"u2@example.com","access_token":"eyJ...","refresh_token":"eyJ..."}
+  ]}'
+```
+
+**Sync credits** (meter API `/v2/billing/meter/get-user-resource`, worker every 5m):
+```bash
+curl -X POST http://127.0.0.1:20130/cb/credits/sync \
+  -H "Authorization: Bearer $KEY" -H 'Content-Type: application/json' -d '{}'
+```
+
+Dashboard CB tab: Type badge, Expires, `+ Add Key`, `+ Add OAuth`, `Bulk OAuth`, `Bulk Import`, `Sync credits`, `Cleanup Disabled`.
 
 ### 5. History & Monitoring (admin only)
 
@@ -461,8 +493,8 @@ Client → AuthMiddleware (Bearer) → RateLimitMiddleware
 ## Environment
 
 - **Port:** 20130
+- **Deploy:** Docker Compose (`docker compose up -d --build foxrouters`) — not systemd
 - **Redis:** 127.0.0.1:6379 (hot state)
-- **ClickHouse:** 127.0.0.1:9001 (history, native protocol)
-- **Pool:** ~505 Grok accounts, ~1047 CB keys, 2 gateway keys, proxy pool (variable)
-- **systemd:** `foxrouters.service`
-- **Binary:** `/root/nexus-workspace/foxrouters/foxrouters` (30MB static)
+- **ClickHouse:** 127.0.0.1:9001 (history, native protocol; optional — SQLite default)
+- **Pool:** ~505 Grok accounts, ~1047 CB keys (api_key + oauth dual pool), 2 gateway keys, proxy pool (variable)
+- **Binary / image:** local Docker build or GHCR `ghcr.io/rilspratama/foxrouters`

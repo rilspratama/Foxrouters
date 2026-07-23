@@ -2,7 +2,7 @@
 
 [![Go Version](https://img.shields.io/badge/go-1.25.12%2B-00ADD8?logo=go)](https://go.dev/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](#license)
-[![Version](https://img.shields.io/badge/version-v1.5.0-blue)](./CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-v1.6.1-blue)](./CHANGELOG.md)
 [![Security](https://img.shields.io/badge/security-audited%203x-brightgreen)](./CHANGELOG.md)
 [![Tests](https://img.shields.io/badge/tests-62%2F62%20PASS%20(%2Brace)-success)](./)
 
@@ -53,6 +53,15 @@ every request/response to ClickHouse — all behind a single Bearer token.
   checks) route through enabled proxies. **Per-upstream scoping** — assign a proxy
   to Grok only, CodeBuddy only, or both. Auto-disable after 5 consecutive failures.
   Proxy test endpoint with latency + exit IP.
+- **CodeBuddy OAuth dual pool** (v1.6.1) — `api_key` (`ck_*`) and OAuth JWT credentials
+  share one CB pool with mixed round-robin. Same chat endpoint
+  (`/v2/chat/completions`). OAuth uses Bearer access token only; refresh via
+  `/v2/plugin/auth/token/refresh`. Eager refresh on import when AT is near-expiry.
+- **Realtime credit meter** (v1.6.1) — `POST /v2/billing/meter/get-user-resource`
+  for API key **and** OAuth. Background worker every 5m + `POST /cb/credits/sync`.
+  Permanent disable on meter `Status==3`. Fallback `CB_CREDIT_LIMIT=240` if never synced.
+- **Bulk OAuth import** (v1.6.1) — `POST /cb/oauth/import/bulk` with `accounts[]`;
+  idempotent by email. Dashboard: Bulk OAuth modal, Type badge, Expires, Sync credits.
 - **API-key auth** with role-based access — `inference` (default, least privilege)
   can only reach `/v1/*`; `admin` reaches everything.
 - **Per-key model whitelist** with glob patterns (`grok-*`, `cb/*`, exact match).
@@ -217,12 +226,51 @@ curl -X POST http://127.0.0.1:20130/accounts/import \
      -H "Content-Type: application/json" \
      --data @path/to/grok-account.json
 
-# Import a CodeBuddy key
+# Import a CodeBuddy API key
 curl -X POST http://127.0.0.1:20130/cb/import \
      -H "Authorization: Bearer $ADMIN_KEY" \
      -H "Content-Type: application/json" \
-     -d '{"key":"YOUR_CB_KEY_HERE"}'
+     -d '{"api_key":"ck_YOUR_CB_KEY_HERE"}'
+
+# Import a CodeBuddy OAuth credential (dual pool — same chat path as API keys)
+curl -X POST http://127.0.0.1:20130/cb/oauth/import \
+     -H "Authorization: Bearer $ADMIN_KEY" \
+     -H "Content-Type: application/json" \
+     -d '{
+       "email": "user@example.com",
+       "access_token": "eyJ...",
+       "refresh_token": "eyJ...",
+       "expires_in": 31535929
+     }'
+# If AT is expired/near-expiry and RT is valid, gateway eagerly refreshes before pool entry.
+
+# Bulk OAuth import (idempotent by email)
+curl -X POST http://127.0.0.1:20130/cb/oauth/import/bulk \
+     -H "Authorization: Bearer $ADMIN_KEY" \
+     -H "Content-Type: application/json" \
+     -d '{"accounts":[
+       {"email":"u1@example.com","access_token":"eyJ...","refresh_token":"eyJ...","expires_in":31535929},
+       {"email":"u2@example.com","access_token":"eyJ...","refresh_token":"eyJ..."}
+     ]}'
+
+# Sync credit meters (all keys, or one by email/key)
+curl -X POST http://127.0.0.1:20130/cb/credits/sync \
+     -H "Authorization: Bearer $ADMIN_KEY" \
+     -H "Content-Type: application/json" \
+     -d '{}'
+# one: -d '{"email":"user@example.com"}'  or  -d '{"key":"ck_..."}'
 ```
+
+### CodeBuddy credentials (v1.6.1)
+
+| Mode | Pool field | Upstream auth | Refresh |
+|------|------------|---------------|---------|
+| API key | `cred_type=api_key` | Bearer `ck_*` or `X-API-Key` | none |
+| OAuth | `cred_type=oauth` | `Authorization: Bearer <AT>` only | `POST /v2/plugin/auth/token/refresh` |
+
+Both modes share `www.codebuddy.ai/v2/chat/completions` and mixed RR. Credits come from
+`POST /v2/billing/meter/get-user-resource` (worker every 5m + manual `/cb/credits/sync`).
+Dashboard CB tab: Type badge, Expires, `+ Add OAuth`, **Bulk OAuth**, **Sync credits**.
 
 ---
 
@@ -274,10 +322,14 @@ Roles: **inference** may call `/v1/*` only; **admin** may call everything.
 | `GET`  | `/dashboard` | **public HTML** | Serves the SPA. Auth still required for its XHR calls. |
 | `GET`  | `/accounts` | admin | List Grok accounts + CB keys with status. |
 | `POST` | `/accounts/import` | admin | Import a Grok account credential JSON. |
-| `POST` | `/cb/import` | admin | Import a CodeBuddy key. |
-| `DELETE` | `/cb/keys/:key` | admin | Delete a CodeBuddy key. |
+| `POST` | `/cb/import` | admin | Import a CodeBuddy API key (`ck_*`). |
+| `POST` | `/cb/import/bulk` | admin | Bulk import CodeBuddy API keys. |
+| `POST` | `/cb/oauth/import` | admin | Import CodeBuddy OAuth (email + AT + RT + expires_in?). Eager refresh if AT near-expiry. |
+| `POST` | `/cb/oauth/import/bulk` | admin | Bulk OAuth import (`accounts[]`). Idempotent by email. |
+| `POST` | `/cb/credits/sync` | admin | Realtime meter sync — `{}` all, or `{email\|key}` one. |
+| `DELETE` | `/cb/keys/:key` | admin | Delete a CodeBuddy key (or email for OAuth). |
 | `POST` | `/cleanup/disabled` | admin | Bulk-remove permanently disabled keys/accounts (`?type=all\|grok\|cb`). |
-| `GET`  | `/cb-stats` | admin | CodeBuddy per-key credit / usage stats. |
+| `GET`  | `/cb-stats` | admin | CodeBuddy per-key credit / usage stats (`cred_type`, remain, package, meter_*). |
 | `GET`  | `/metrics` | **public** | Prometheus metrics (request count, duration, pool sizes, circuit state). |
 | `POST` | `/v1/messages` | inference+ | **Anthropic Messages API** (Claude Code compatible). Accepts `x-api-key` or `Authorization: Bearer`. |
 | `GET`  | `/api/keys` | admin | List gateway API keys. |
@@ -453,7 +505,7 @@ Routing is driven purely by the `model` field of the incoming request:
 | Model prefix | Upstream | Notes |
 |---|---|---|
 | `grok-*` | `https://cli-chat-proxy.grok.com` | Multi-account pool, refresh + 401 retry. |
-| `cb/*` | `https://www.codebuddy.ai/v2` | Multi-key pool, credit tracking, 14018 disable. |
+| `cb/*` | `https://www.codebuddy.ai/v2` | Dual pool (`api_key` + `oauth`), mixed RR, meter credit sync, 14018/Status==3 disable. |
 
 ### Grok alias expansion
 
@@ -475,14 +527,16 @@ If the client already sets `reasoning_effort` explicitly, the client value wins.
 ## Dashboard
 
 Served at `GET /dashboard` (public HTML; XHRs still require a gateway key via
-session cookie or `?key=`). The SPA has four nav routes:
+session cookie from `/login`). The SPA has five+ nav routes:
 
 | Route | Page |
 |---|---|
 | `#/` | **Dashboard** — health, request counts, token totals, recent history preview. |
-| `#/accounts` | **Accounts & Keys** — Grok accounts + CodeBuddy keys with pagination and enable/disable/refresh. |
+| `#/accounts` | **Accounts & Keys** — Grok accounts + CodeBuddy keys. CB tab: Type badge (OAuth purple / API Key blue), Expires, meter remain; buttons: `+ Add Key`, `+ Add OAuth`, `Bulk OAuth`, `Bulk Import`, `Sync credits`, `Cleanup Disabled`. |
 | `#/keys` | **Gateway API Keys** — key CRUD, role picker, allowed-models selector, RPM/burst/quota inputs. |
 | `#/models` | **Models** — 3 tabs: **Models** (usage stats) \| **Custom** (custom models + aliases) \| **Combos** (group models under virtual alias). |
+| `#/proxies` | **Proxies** — HTTP/SOCKS5 pool with upstream scoping. |
+| `#/tunnel` | **Tunnel** — Cloudflare Tunnel enable/disable + config. |
 
 Live gateway keys are **never** rendered into the HTML server-side. Delete buttons
 use `data-*` attributes + event delegation (XSS-safe, no inline `onclick`).
@@ -501,7 +555,7 @@ RateLimitMiddleware      ── RPM / burst / token quota (Redis)
   ▼
 proxyRequest             ── inspect "model", expand aliases
   ├── grok-*  → proxyGrok         (O(k) RR, refresh, 401 retry, 403 ban)
-  └── cb/*    → proxyCodeBuddy    (RR, credit tracking, stream transform)
+  └── cb/*    → proxyCodeBuddy    (dual pool api_key+oauth, meter credits, stream transform)
   ▼
 async LogRequest → ClickHouse (full request + response, ZSTD, TTL 90d)
 ```
@@ -533,10 +587,11 @@ export PATH=$PATH:/usr/local/go/bin
 go test -count=1 -race ./...
 go vet ./...
 
-# Build
-go build -o foxrouters .
+# Deploy (Docker Compose — preferred)
+docker compose up -d --build foxrouters
 
-# Run
+# Or local binary
+go build -o foxrouters .
 ./foxrouters
 
 # Smoke
@@ -550,13 +605,14 @@ curl -s http://127.0.0.1:20130/health
 | `main.go` | Version, HTTP clients, workers, routes, graceful shutdown. |
 | `proxy.go` | Model routing, alias expansion, `RequestLog` build. |
 | `grok_account.go` | Grok pool, refresh loop, `proxyGrok`, re-enable worker. |
-| `codebuddy.go` | CB pool, stream transform, `proxyCodeBuddy`, re-enable worker. |
+| `codebuddy.go` / `internal/upstream/codebuddy.go` | CB dual pool (api_key + oauth), OAuth refresh, meter SyncCredits, credit worker. |
+| `internal/upstream/codebuddy_credit_sync_test.go` | Meter sync unit tests. |
 | `auth.go` | Bearer auth, role check, allowed-models glob match. |
 | `ratelimit.go` | RPM / burst / token-quota middleware. |
 | `health.go` | Health endpoint + active health checks. |
 | `handlers.go` | Account, key, history, dashboard handlers. |
-| `db.go` | Redis + ClickHouse clients and schema. |
-| `dashboard.html` | Embedded SPA (`go:embed`). |
+| `db.go` | Redis + LogStore clients and schema. |
+| `dashboard.html` | Embedded SPA (`go:embed`) — Type badge, OAuth/Bulk OAuth, Sync credits. |
 
 **Patch order (please follow):** `test → build → restart → smoke`.
 

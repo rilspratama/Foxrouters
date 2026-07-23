@@ -7,8 +7,8 @@ Unified OpenAI-compatible API gateway for **Grok + CodeBuddy**. Routes by model 
 Multi-account/key round-robin, auto-refresh (singleflight + pre-warm), circuit breaker,
 API key auth, per-key RPM/quota, Redis hot-state, **ClickHouse** full-body history, web dashboard.
 
-**Version:** v1.6.0 (`-X main.Version` build flag)
-**Port:** 20130 · **systemd:** `foxrouters.service`  
+**Version:** v1.6.1-oauth (local, ahead of GHCR v1.6.0; `-X main.Version` build flag)
+**Port:** 20130 · **Deploy:** Docker Compose (`docker compose up -d --build foxrouters`)  
 **Path:** `/root/nexus-workspace/foxrouters/`
 
 ## Architecture / Flow
@@ -50,9 +50,16 @@ Log backend choices (`LOG_BACKEND` env, default `sqlite`):
 8. Proxy pool: `getClient(default, upstream)` — returns proxied client if pool has enabled proxies matching upstream scope, else direct. Transport cache per proxy ID. Auto-disable after 5 fails.
 
 ### Token refresh
-- Pre-warm every 30s, 30min window, 10 concurrent  
+- **Grok:** Pre-warm every 30s, 30min window, 10 concurrent  
 - `Next()` Pass1 valid token; Pass2 least-expired + async refresh  
 - 401 rebuild request body + retry  
+- **CB OAuth:** Pre-warm worker (30s tick, 30m window) + `EnsureValid` before chat + 401 refresh-retry. Singleflight + lock-split. Refresh via `POST /v2/plugin/auth/token/refresh` (`X-Refresh-Token`). Eager refresh on import when AT is expired/near-expiry and RT is valid.
+
+### CB dual pool (`api_key` + `oauth`)
+- Same chat endpoint: `www.codebuddy.ai/v2/chat/completions`
+- Mixed round-robin over one `CBKey` pool (`cred_type`: `api_key` | `oauth`)
+- Upstream auth: API key = Bearer or `X-API-Key`; OAuth = `Authorization: Bearer <AT>` only
+- **Credit sync:** worker every 5m + `POST /cb/credits/sync`. Meter API `POST /v2/billing/meter/get-user-resource` (works for both modes). Persist limit/remain/package/cycle/status. Permanent disable on `Status==3`. Fallback `CB_CREDIT_LIMIT=240` if never synced.
 
 ### Grok aliases
 `grok-4.5-{high,medium,low,xhigh,auto,none}` → `grok-4.5` + `reasoning_effort` (client wins if set).
@@ -83,7 +90,10 @@ Log backend choices (`LOG_BACKEND` env, default `sqlite`):
 | `internal/handlers/custom.go` | Custom models + aliases CRUD endpoints |
 | `internal/handlers/proxies.go` | Proxy pool CRUD + test + toggle endpoints |
 | `proxy_pool_test.go` | Proxy pool tests (CRUD, validation, masking, round-robin, scoping) |
-| `CHANGELOG.md` | Version history (v1.4.0 → v1.5.0) |
+| `internal/upstream/codebuddy.go` | CB dual pool (api_key + oauth), OAuth refresh, meter SyncCredits, credit worker |
+| `internal/upstream/codebuddy_oauth_test.go` | OAuth import / EnsureValid / refresh tests |
+| `internal/upstream/codebuddy_credit_sync_test.go` | Meter sync tests (API key + OAuth, Status==3 disable) |
+| `CHANGELOG.md` | Version history (v1.4.0 → v1.6.1) |
 | `.gateway.env` | Secrets (chmod 600, gitignored) |
 
 ## Env (essentials)
@@ -103,8 +113,7 @@ COOKIE_SECURE=0  # dev HTTP; omit for prod (defaults to HTTPS-only)
 cd /root/nexus-workspace/foxrouters
 export PATH=$PATH:/usr/local/go/bin
 go test -count=1 -race ./... && go vet ./...   # REQUIRED first
-go build -o foxrouters .
-systemctl restart foxrouters.service
+docker compose up -d --build foxrouters        # rebuild + restart gateway
 curl -s http://127.0.0.1:20130/health
 ```
 
@@ -114,19 +123,28 @@ curl -s http://127.0.0.1:20130/health
 | `POST /v1/chat/completions` | Main proxy |
 | `GET /v1/models` | Includes Grok aliases |
 | `GET /health` | Public |
-| `GET /history?hours=24` | CH stats |
+| `GET /history?hours=24` | Log stats |
 | `GET /history/recent?limit=50` | Previews; `id` is **string** |
 | `GET /history/detail/:id` | Full request/response JSON |
 | `GET/POST /accounts` … | Grok import/delete/refresh |
+| `POST /cb/import` | CB API key (`ck_*`) single |
+| `POST /cb/import/bulk` | CB API keys bulk |
+| `POST /cb/oauth/import` | CB OAuth single (email+AT+RT+expires_in?) — eager refresh if AT near-expiry |
+| `POST /cb/oauth/import/bulk` | CB OAuth bulk (`accounts[]` JSON array) — idempotent by email |
+| `POST /cb/credits/sync` | Realtime meter sync (all `{}` or one by `email`/`key`) |
+| `GET /cb-stats` | CB credits + `cred_type` / remain / package / meter_* |
 | `GET/POST /api/keys` … | Gateway key CRUD |
 | `GET/POST /api/proxies` … | Proxy pool CRUD + test + toggle |
-| `GET /dashboard` | Public HTML; key via `?key=` / localStorage only |
+| `GET /dashboard` | Public HTML; cookie session via `/login` |
 
 ## Dashboard UX prefs
 - I/O text: modal only, never table columns  
 - Total tokens: top stats card  
 - History full JSON: tabs Request/Response (lazy detail)  
 - Grok table: client-side pagination  
+- **CB tab buttons (6):** `+ Add Key`, `+ Add OAuth`, `Bulk OAuth`, `Bulk Import`, `Sync credits`, `Cleanup Disabled`  
+- **CB table:** Type badge (OAuth purple / API Key blue), Expires column, meter remain  
+
 
 ## Skill / deeper docs
 Hermes skill: `foxrouters-development`  

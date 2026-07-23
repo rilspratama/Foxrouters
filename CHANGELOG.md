@@ -1,10 +1,31 @@
 # FoxRouters Changelog (this VPS)
 
-**Service:** `foxrouters.service` · port **20130** · binary `foxrouters`  
+**Service:** Docker Compose (`foxrouters` container) · port **20130** · image local / GHCR  
 **Repo:** `/root/nexus-workspace/foxrouters/`  
-**Live version:** `const Version` in `main.go` (currently **v1.6.0**)
+**Live version:** `const Version` in `main.go` (currently **v1.6.1-oauth** local; GHCR may still be v1.6.0)
 
 Policy: **test (`go test -race`) before build/restart**. Secrets only via `.gateway.env` (gitignored).
+
+---
+
+## v1.6.1 — CodeBuddy OAuth + Realtime Credits (2026-07-23)
+
+### Added
+
+| Feature | Description |
+|---------|-------------|
+| **CB OAuth dual pool** | `api_key` (ck_*) + OAuth JWT in same CBKey pool, mixed round-robin. OAuth: Bearer AT only, refresh via /v2/plugin/auth/token/refresh. |
+| **CB OAuth import** | `POST /cb/oauth/import` (single) + `POST /cb/oauth/import/bulk` (JSON array). Idempotent by email. |
+| **Eager refresh on import** | If supplied AT is expired/near-expiry, Refresh() via RT before pool entry. Fresh AT enters pool. |
+| **Realtime credit meter** | `POST /v2/billing/meter/get-user-resource` (works for API key + OAuth). Worker every 5m + `POST /cb/credits/sync`. Persist limit/remain/package/cycle/status. Permanent disable on Status==3. |
+| **Dashboard OAuth UI** | Type badge (OAuth purple / API Key blue), Expires column, + Add OAuth modal, Bulk OAuth modal, Sync credits button. |
+| **CB OAuth auto-refresh** | Pre-warm worker (30s tick, 30m window) + EnsureValid before chat + 401 refresh-retry. Singleflight + lock-split. |
+
+### Fixed
+
+| Fix | Description |
+|-----|-------------|
+| **CB credit accuracy** | Meter API is source of truth (was SSE usage.credit interim only). Fallback CB_CREDIT_LIMIT=240 if never synced. |
 
 ---
 
