@@ -7,7 +7,7 @@ Unified OpenAI-compatible API gateway for **Grok + CodeBuddy**. Routes by model 
 Multi-account/key round-robin, auto-refresh (singleflight + pre-warm), circuit breaker,
 API key auth, per-key RPM/quota, Redis hot-state, **ClickHouse** full-body history, web dashboard.
 
-**Version:** v1.6.1-oauth (local, ahead of GHCR v1.6.0; `-X main.Version` build flag)
+**Version:** v1.6.1 (local, ahead of GHCR v1.6.0; `-X main.Version` build flag)
 **Port:** 20130 · **Deploy:** Docker Compose (`docker compose up -d --build foxrouters`)  
 **Path:** `/root/nexus-workspace/foxrouters/`
 

@@ -31,7 +31,7 @@ Gateway auto-refresh: pre-warm 30s/30m + EnsureValid + 401 retry. TTL often ~365
 Realtime meter: `POST www.codebuddy.ai/v2/billing/meter/get-user-resource` works for **API key and OAuth**. Worker every 5m + `POST /cb/credits/sync`. Permanent disable on `Status==3`. Fallback `CB_CREDIT_LIMIT=240` if never synced. See `references/codebuddy-credit-meter.md`.
 
 ## Ops
-- Local often ahead of GHCR (e.g. v1.6.1-oauth)
+- Local often ahead of GHCR (e.g. v1.6.1)
 - Compose ports must be `127.0.0.1:PORT:PORT`
 - Keep `xai-*.json` / `cpa_auths/` in `.dockerignore`
 - Deploy: `go test -race ./... && go vet ./...` then `docker compose up -d --build foxrouters`

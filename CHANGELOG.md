@@ -2,7 +2,7 @@
 
 **Service:** Docker Compose (`foxrouters` container) · port **20130** · image local / GHCR  
 **Repo:** `/root/nexus-workspace/foxrouters/`  
-**Live version:** `const Version` in `main.go` (currently **v1.6.1-oauth** local; GHCR may still be v1.6.0)
+**Live version:** `const Version` in `main.go` (currently **v1.6.1** local; GHCR may still be v1.6.0)
 
 Policy: **test (`go test -race`) before build/restart**. Secrets only via `.gateway.env` (gitignored).
 
