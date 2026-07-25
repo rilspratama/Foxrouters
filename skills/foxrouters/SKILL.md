@@ -203,6 +203,10 @@ Same chat path for both: `www.codebuddy.ai/v2/chat/completions`. Mixed RR.
 | POST | `/cb/import/bulk` | Bulk API keys only |
 | POST | `/cb/oauth/import` | OAuth single (email + AT + RT + expires_in?) — eager refresh if AT near-expiry |
 | POST | `/cb/oauth/import/bulk` | OAuth bulk (`accounts[]`) — idempotent by email |
+| POST | `/cb/oauth/device/start` | OAuth login URL — `{state, auth_url}` (platform default CLI) |
+| GET | `/cb/oauth/device/poll` | Poll after browser login — `pending` \| `ready` \| `error` |
+| POST | `/cb/keys/test` | Probe one CB credential upstream (`{key}` or `{email}`) — model `gpt-5.5` |
+| POST | `/accounts/test` | Probe one Grok account upstream (`{email}`) — model `grok-4.5` |
 | POST | `/cb/credits/sync` | Realtime meter sync (`{}` all or `{email\|key}`) |
 | DELETE | `/cb/keys/:key` | Delete by key or email (OAuth) |
 | GET | `/cb-stats` | Credits + `cred_type` / remain / package / meter_* |
@@ -245,13 +249,37 @@ curl -s http://127.0.0.1:20130/cb/oauth/import/bulk \
   ]}'
 ```
 
+**OAuth Login URL (device flow — no tokens to paste):**
+```bash
+# 1) Start → open auth_url in browser (GitHub/Google)
+curl -s -X POST http://127.0.0.1:20130/cb/oauth/device/start \
+  -H "Authorization: Bearer $KEY" -H 'Content-Type: application/json' -d '{}'
+# 2) Poll until ready (dashboard auto-polls every 3s)
+curl -s "http://127.0.0.1:20130/cb/oauth/device/poll?state=$STATE" \
+  -H "Authorization: Bearer $KEY"
+# 3) On ready → POST /cb/oauth/import with tokens (dashboard does this automatically)
+```
+
+**Test credentials (direct upstream probe, not pool RR):**
+```bash
+curl -s -X POST http://127.0.0.1:20130/cb/keys/test \
+  -H "Authorization: Bearer $KEY" -H 'Content-Type: application/json' \
+  -d '{"email":"user@example.com"}'   # or {"key":"ck_..."}
+# → {ok, status, latency_ms, model, content?, credit?, cred_type}
+
+curl -s -X POST http://127.0.0.1:20130/accounts/test \
+  -H "Authorization: Bearer $KEY" -H 'Content-Type: application/json' \
+  -d '{"email":"acct@x.ai"}'
+# → {ok, status, latency_ms, model, content?, token_status?}
+```
+
 **Sync credits** (meter API `/v2/billing/meter/get-user-resource`, worker every 5m):
 ```bash
 curl -X POST http://127.0.0.1:20130/cb/credits/sync \
   -H "Authorization: Bearer $KEY" -H 'Content-Type: application/json' -d '{}'
 ```
 
-Dashboard CB tab: Type badge, Expires, `+ Add Key`, `+ Add OAuth`, `Bulk OAuth`, `Bulk Import`, `Sync credits`, `Cleanup Disabled`.
+Dashboard CB tab: Type badge, Expires, `+ Add Key`, `+ Add OAuth` (**Manual | Login URL**), `Bulk OAuth`, `Bulk Import`, `Sync credits`, `Cleanup Disabled`. Per-row **Test** + Delete (Grok + CB).
 
 ### 5. History & Monitoring (admin only)
 

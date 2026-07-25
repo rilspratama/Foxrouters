@@ -62,6 +62,10 @@ every request/response to ClickHouse — all behind a single Bearer token.
   Permanent disable on meter `Status==3`. Fallback `CB_CREDIT_LIMIT=240` if never synced.
 - **Bulk OAuth import** (v1.6.1) — `POST /cb/oauth/import/bulk` with `accounts[]`;
   idempotent by email. Dashboard: Bulk OAuth modal, Type badge, Expires, Sync credits.
+- **OAuth Login URL** (post-v1.6.1) — device/login flow: generate CodeBuddy auth URL,
+  open in browser, auto-poll tokens, import into pool. Dashboard Add OAuth: Manual | Login URL.
+- **Credential Test** (post-v1.6.1) — per-row Test for Grok + CodeBuddy (API key & OAuth).
+  Probes upstream directly (`POST /accounts/test`, `POST /cb/keys/test`).
 - **API-key auth** with role-based access — `inference` (default, least privilege)
   can only reach `/v1/*`; `admin` reaches everything.
 - **Per-key model whitelist** with glob patterns (`grok-*`, `cb/*`, exact match).
@@ -259,9 +263,25 @@ curl -X POST http://127.0.0.1:20130/cb/credits/sync \
      -H "Content-Type: application/json" \
      -d '{}'
 # one: -d '{"email":"user@example.com"}'  or  -d '{"key":"ck_..."}'
+
+# OAuth login URL (device flow — no tokens to paste)
+curl -s -X POST http://127.0.0.1:20130/cb/oauth/device/start \
+     -H "Authorization: Bearer $ADMIN_KEY" -H "Content-Type: application/json" -d '{}'
+# → {state, auth_url} — open auth_url in browser, then poll:
+curl -s "http://127.0.0.1:20130/cb/oauth/device/poll?state=$STATE" \
+     -H "Authorization: Bearer $ADMIN_KEY"
+# ready → import tokens via /cb/oauth/import
+
+# Test a credential (direct upstream probe)
+curl -s -X POST http://127.0.0.1:20130/cb/keys/test \
+     -H "Authorization: Bearer $ADMIN_KEY" -H "Content-Type: application/json" \
+     -d '{"email":"user@example.com"}'
+curl -s -X POST http://127.0.0.1:20130/accounts/test \
+     -H "Authorization: Bearer $ADMIN_KEY" -H "Content-Type: application/json" \
+     -d '{"email":"acct@x.ai"}'
 ```
 
-### CodeBuddy credentials (v1.6.1)
+### CodeBuddy credentials (v1.6.1+)
 
 | Mode | Pool field | Upstream auth | Refresh |
 |------|------------|---------------|---------|
@@ -270,7 +290,7 @@ curl -X POST http://127.0.0.1:20130/cb/credits/sync \
 
 Both modes share `www.codebuddy.ai/v2/chat/completions` and mixed RR. Credits come from
 `POST /v2/billing/meter/get-user-resource` (worker every 5m + manual `/cb/credits/sync`).
-Dashboard CB tab: Type badge, Expires, `+ Add OAuth`, **Bulk OAuth**, **Sync credits**.
+Dashboard: Type badge, Expires, Add OAuth Manual|Login URL, Bulk OAuth, Sync credits, per-row Test.
 
 ---
 
@@ -326,7 +346,11 @@ Roles: **inference** may call `/v1/*` only; **admin** may call everything.
 | `POST` | `/cb/import/bulk` | admin | Bulk import CodeBuddy API keys. |
 | `POST` | `/cb/oauth/import` | admin | Import CodeBuddy OAuth (email + AT + RT + expires_in?). Eager refresh if AT near-expiry. |
 | `POST` | `/cb/oauth/import/bulk` | admin | Bulk OAuth import (`accounts[]`). Idempotent by email. |
-| `POST` | `/cb/credits/sync` | admin | Realtime meter sync — `{}` all, or `{email\|key}` one. |
+| `POST` | `/cb/oauth/device/start` | admin | OAuth login URL flow — returns `{state, auth_url}` (platform default `CLI`). |
+| `GET`  | `/cb/oauth/device/poll` | admin | Poll after browser login — `pending` \| `ready` (tokens + email?) \| `error`. |
+| `POST` | `/cb/keys/test` | admin | Probe one CB credential upstream (`{key}` or `{email}`). Model `gpt-5.5`. |
+| `POST` | `/accounts/test` | admin | Probe one Grok account upstream (`{email}`). Model `grok-4.5`. |
+| `POST` | `/cb/credits/sync` | admin | Realtime meter sync — `{}` all, or `{email|key}` one. |
 | `DELETE` | `/cb/keys/:key` | admin | Delete a CodeBuddy key (or email for OAuth). |
 | `POST` | `/cleanup/disabled` | admin | Bulk-remove permanently disabled keys/accounts (`?type=all\|grok\|cb`). |
 | `GET`  | `/cb-stats` | admin | CodeBuddy per-key credit / usage stats (`cred_type`, remain, package, meter_*). |
@@ -532,7 +556,7 @@ session cookie from `/login`). The SPA has five+ nav routes:
 | Route | Page |
 |---|---|
 | `#/` | **Dashboard** — health, request counts, token totals, recent history preview. |
-| `#/accounts` | **Accounts & Keys** — Grok accounts + CodeBuddy keys. CB tab: Type badge (OAuth purple / API Key blue), Expires, meter remain; buttons: `+ Add Key`, `+ Add OAuth`, `Bulk OAuth`, `Bulk Import`, `Sync credits`, `Cleanup Disabled`. |
+| `#/accounts` | **Accounts & Keys** — Grok + CodeBuddy. CB: Type badge, Expires, meter remain; buttons `+ Add Key`, `+ Add OAuth` (Manual\|Login URL), `Bulk OAuth`, `Bulk Import`, `Sync credits`, `Cleanup Disabled`. Per-row **Test** + Delete (Grok & CB). |
 | `#/keys` | **Gateway API Keys** — key CRUD, role picker, allowed-models selector, RPM/burst/quota inputs. |
 | `#/models` | **Models** — 3 tabs: **Models** (usage stats) \| **Custom** (custom models + aliases) \| **Combos** (group models under virtual alias). |
 | `#/proxies` | **Proxies** — HTTP/SOCKS5 pool with upstream scoping. |

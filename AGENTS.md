@@ -60,6 +60,8 @@ Log backend choices (`LOG_BACKEND` env, default `sqlite`):
 - Mixed round-robin over one `CBKey` pool (`cred_type`: `api_key` | `oauth`)
 - Upstream auth: API key = Bearer or `X-API-Key`; OAuth = `Authorization: Bearer <AT>` only
 - **Credit sync:** worker every 5m + `POST /cb/credits/sync`. Meter API `POST /v2/billing/meter/get-user-resource` (works for both modes). Persist limit/remain/package/cycle/status. Permanent disable on `Status==3`. Fallback `CB_CREDIT_LIMIT=240` if never synced.
+- **OAuth login URL (device flow):** `POST /cb/oauth/device/start` → `auth_url` + `state` (upstream `POST /v2/plugin/auth/state?platform=CLI`); poll `GET /cb/oauth/device/poll?state=` until ready → client imports via `/cb/oauth/import`. Dashboard Add OAuth modal: **Manual | Login URL**.
+- **Credential probe (Test):** `POST /cb/keys/test` (key or email) and `POST /accounts/test` (Grok email). Hits upstream directly with that credential (CB `gpt-5.5`, Grok `grok-4.5`); not pool RR. Disabled credentials still probed.
 
 ### Grok aliases
 `grok-4.5-{high,medium,low,xhigh,auto,none}` → `grok-4.5` + `reasoning_effort` (client wins if set).
@@ -91,9 +93,12 @@ Log backend choices (`LOG_BACKEND` env, default `sqlite`):
 | `internal/handlers/proxies.go` | Proxy pool CRUD + test + toggle endpoints |
 | `proxy_pool_test.go` | Proxy pool tests (CRUD, validation, masking, round-robin, scoping) |
 | `internal/upstream/codebuddy.go` | CB dual pool (api_key + oauth), OAuth refresh, meter SyncCredits, credit worker |
+| `internal/upstream/codebuddy_device.go` | OAuth device/login URL: StartDeviceAuth, PollDeviceAuth, JWT email helpers |
 | `internal/upstream/codebuddy_oauth_test.go` | OAuth import / EnsureValid / refresh tests |
 | `internal/upstream/codebuddy_credit_sync_test.go` | Meter sync tests (API key + OAuth, Status==3 disable) |
-| `CHANGELOG.md` | Version history (v1.4.0 → v1.6.1) |
+| `internal/upstream/credential_probe.go` | Direct upstream Test for CB key/OAuth + Grok account |
+| `internal/handlers/credential_probe.go` | `POST /cb/keys/test`, `POST /accounts/test` |
+| `CHANGELOG.md` | Version history (v1.4.0 → v1.6.1+) |
 | `.gateway.env` | Secrets (chmod 600, gitignored) |
 
 ## Env (essentials)
@@ -131,6 +136,10 @@ curl -s http://127.0.0.1:20130/health
 | `POST /cb/import/bulk` | CB API keys bulk |
 | `POST /cb/oauth/import` | CB OAuth single (email+AT+RT+expires_in?) — eager refresh if AT near-expiry |
 | `POST /cb/oauth/import/bulk` | CB OAuth bulk (`accounts[]` JSON array) — idempotent by email |
+| `POST /cb/oauth/device/start` | OAuth login URL — `{state, auth_url}` (platform default CLI) |
+| `GET /cb/oauth/device/poll` | Poll after browser login — `pending` \| `ready` (tokens) \| `error` |
+| `POST /cb/keys/test` | Probe one CB credential upstream (`{key}` or `{email}`) |
+| `POST /accounts/test` | Probe one Grok account upstream (`{email}`) |
 | `POST /cb/credits/sync` | Realtime meter sync (all `{}` or one by `email`/`key`) |
 | `GET /cb-stats` | CB credits + `cred_type` / remain / package / meter_* |
 | `GET/POST /api/keys` … | Gateway key CRUD |
@@ -143,7 +152,9 @@ curl -s http://127.0.0.1:20130/health
 - History full JSON: tabs Request/Response (lazy detail)  
 - Grok table: client-side pagination  
 - **CB tab buttons (6):** `+ Add Key`, `+ Add OAuth`, `Bulk OAuth`, `Bulk Import`, `Sync credits`, `Cleanup Disabled`  
-- **CB table:** Type badge (OAuth purple / API Key blue), Expires column, meter remain  
+- **CB table:** Type badge (OAuth purple / API Key blue), Expires column, meter remain, **Test** + Delete per row  
+- **Grok table:** **Test** + Delete per row  
+- **Add OAuth modal:** segmented **Manual | Login URL** (generate auth URL → auto-poll → import)  
 
 
 ## Skill / deeper docs

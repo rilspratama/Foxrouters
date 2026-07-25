@@ -2,9 +2,20 @@
 
 **Service:** Docker Compose (`foxrouters` container) · port **20130** · image local / GHCR  
 **Repo:** `/root/nexus-workspace/foxrouters/`  
-**Live version:** `const Version` in `main.go` (currently **v1.6.1** local; GHCR may still be v1.6.0)
+**Live version:** `const Version` in `main.go` (currently **v1.6.1** + local post-release commits; GHCR tag `v1.6.1` is the dual-pool baseline)
 
 Policy: **test (`go test -race`) before build/restart**. Secrets only via `.gateway.env` (gitignored).
+
+---
+
+## Unreleased (post-v1.6.1, local) — OAuth Login URL + Credential Test (2026-07-25)
+
+### Added
+
+| Feature | Description |
+|---------|-------------|
+| **OAuth Login URL flow** | `POST /cb/oauth/device/start` + `GET /cb/oauth/device/poll`. Upstream `POST /v2/plugin/auth/state?platform=CLI` → browser login → poll tokens → import via existing `/cb/oauth/import`. Dashboard Add OAuth: **Manual \| Login URL** tabs. |
+| **Credential Test buttons** | `POST /cb/keys/test` (`{key}` or `{email}`) and `POST /accounts/test` (`{email}`). Direct upstream probe (CB `gpt-5.5`, Grok `grok-4.5`) — not pool RR. Per-row **Test** on Grok + CodeBuddy tables. Disabled credentials still probeable. |
 
 ---
 
