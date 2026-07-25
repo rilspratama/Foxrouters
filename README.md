@@ -2,7 +2,7 @@
 
 [![Go Version](https://img.shields.io/badge/go-1.25.12%2B-00ADD8?logo=go)](https://go.dev/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](#license)
-[![Version](https://img.shields.io/badge/version-v1.6.1-blue)](./CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-v1.6.2-blue)](./CHANGELOG.md)
 [![Security](https://img.shields.io/badge/security-audited%203x-brightgreen)](./CHANGELOG.md)
 [![Tests](https://img.shields.io/badge/tests-62%2F62%20PASS%20(%2Brace)-success)](./)
 
@@ -62,9 +62,9 @@ every request/response to ClickHouse — all behind a single Bearer token.
   Permanent disable on meter `Status==3`. Fallback `CB_CREDIT_LIMIT=240` if never synced.
 - **Bulk OAuth import** (v1.6.1) — `POST /cb/oauth/import/bulk` with `accounts[]`;
   idempotent by email. Dashboard: Bulk OAuth modal, Type badge, Expires, Sync credits.
-- **OAuth Login URL** (post-v1.6.1) — device/login flow: generate CodeBuddy auth URL,
+- **OAuth Login URL** (v1.6.2) — device/login flow: generate CodeBuddy auth URL,
   open in browser, auto-poll tokens, import into pool. Dashboard Add OAuth: Manual | Login URL.
-- **Credential Test** (post-v1.6.1) — per-row Test for Grok + CodeBuddy (API key & OAuth).
+- **Credential Test** (v1.6.2) — per-row Test for Grok + CodeBuddy (API key & OAuth).
   Probes upstream directly (`POST /accounts/test`, `POST /cb/keys/test`).
 - **API-key auth** with role-based access — `inference` (default, least privilege)
   can only reach `/v1/*`; `admin` reaches everything.

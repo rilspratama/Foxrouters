@@ -7,7 +7,7 @@ Unified OpenAI-compatible API gateway for **Grok + CodeBuddy**. Routes by model 
 Multi-account/key round-robin, auto-refresh (singleflight + pre-warm), circuit breaker,
 API key auth, per-key RPM/quota, Redis hot-state, **ClickHouse** full-body history, web dashboard.
 
-**Version:** v1.6.1 (local, ahead of GHCR v1.6.0; `-X main.Version` build flag)
+**Version:** v1.6.2 (`-X main.Version` build flag)
 **Port:** 20130 · **Deploy:** Docker Compose (`docker compose up -d --build foxrouters`)  
 **Path:** `/root/nexus-workspace/foxrouters/`
 
@@ -98,7 +98,7 @@ Log backend choices (`LOG_BACKEND` env, default `sqlite`):
 | `internal/upstream/codebuddy_credit_sync_test.go` | Meter sync tests (API key + OAuth, Status==3 disable) |
 | `internal/upstream/credential_probe.go` | Direct upstream Test for CB key/OAuth + Grok account |
 | `internal/handlers/credential_probe.go` | `POST /cb/keys/test`, `POST /accounts/test` |
-| `CHANGELOG.md` | Version history (v1.4.0 → v1.6.1+) |
+| `CHANGELOG.md` | Version history (v1.4.0 → v1.6.2) |
 | `.gateway.env` | Secrets (chmod 600, gitignored) |
 
 ## Env (essentials)
