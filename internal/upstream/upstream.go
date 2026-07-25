@@ -143,6 +143,12 @@ const (
 	XAI_TOKEN_URL    = "https://auth.x.ai/oauth2/token"
 	XAI_UPSTREAM_URL = "https://cli-chat-proxy.grok.com/v1"
 	CB_UPSTREAM_URL  = "https://www.codebuddy.ai/v2/chat/completions"
+	// CB_OAUTH_STATE_URL starts the CodeBuddy CLI/device OAuth flow
+	// (POST ?platform=CLI → state + authUrl).
+	CB_OAUTH_STATE_URL = "https://www.codebuddy.ai/v2/plugin/auth/state"
+	// CB_OAUTH_TOKEN_URL is polled after the user completes login in browser
+	// (GET ?state=... → accessToken + refreshToken when ready).
+	CB_OAUTH_TOKEN_URL = "https://www.codebuddy.ai/v2/plugin/auth/token"
 	// CB_OAUTH_REFRESH_URL is the verified CodeBuddy OAuth refresh endpoint
 	// (plugin path — /v2/auth/token/refresh returns 404).
 	CB_OAUTH_REFRESH_URL = "https://www.codebuddy.ai/v2/plugin/auth/token/refresh"

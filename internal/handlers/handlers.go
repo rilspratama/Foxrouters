@@ -297,6 +297,68 @@ func resolveCBOAuthExpiry(accessToken string, expiresIn int64) time.Time {
 	return time.Now().Add(365 * 24 * time.Hour)
 }
 
+// HandleCBOAuthDeviceStart kicks off a CodeBuddy OAuth device/login flow.
+// Body (optional): {"platform":"CLI"}. Returns {state, auth_url}.
+func HandleCBOAuthDeviceStart() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var req struct {
+			Platform string `json:"platform"`
+		}
+		// Body is optional; ignore bind errors for empty bodies.
+		_ = c.ShouldBindJSON(&req)
+		res, err := upstream.StartDeviceAuth(req.Platform)
+		if err != nil {
+			slog.Warn("cb oauth device start failed", "module", "cb-oauth-device", "error", err)
+			c.JSON(502, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(200, gin.H{
+			"state":    res.State,
+			"auth_url": res.AuthURL,
+		})
+	}
+}
+
+// HandleCBOAuthDevicePoll polls CodeBuddy for tokens after the user completes
+// browser login. Query: ?state=...
+// Returns {status:"pending"} | {status:"ready", access_token, refresh_token, expires_in, email?, nickname?}
+// | {status:"error", error}.
+// No server-side session store — each call is a fresh upstream poll. The
+// client is expected to import tokens itself via POST /cb/oauth/import on ready
+// (reuses the existing import + eager refresh path).
+func HandleCBOAuthDevicePoll() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		state := strings.TrimSpace(c.Query("state"))
+		if state == "" {
+			c.JSON(400, gin.H{"error": "state query parameter is required"})
+			return
+		}
+		res, err := upstream.PollDeviceAuth(state)
+		if err != nil {
+			slog.Warn("cb oauth device poll failed", "module", "cb-oauth-device", "state", state, "error", err)
+			c.JSON(502, gin.H{"status": "error", "error": err.Error()})
+			return
+		}
+		switch res.Status {
+		case "ready":
+			email := upstream.ResolveOAuthImportEmail("", res.AccessToken, res.Nickname, res.UID)
+			c.JSON(200, gin.H{
+				"status":        "ready",
+				"access_token":  res.AccessToken,
+				"refresh_token": res.RefreshToken,
+				"expires_in":    res.ExpiresIn,
+				"email":         email,
+				"nickname":      res.Nickname,
+				"uid":           res.UID,
+			})
+		case "error":
+			c.JSON(200, gin.H{"status": "error", "error": res.Error})
+		default:
+			c.JSON(200, gin.H{"status": "pending"})
+		}
+	}
+}
+
 // HandleImportCBOAuthBulk imports multiple CodeBuddy OAuth accounts.
 // Body: {"accounts":[{"email":"...","access_token":"...","refresh_token":"...","expires_in":N},...]}
 // or {"raw":"<json array string>"}.

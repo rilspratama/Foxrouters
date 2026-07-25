@@ -3200,27 +3200,61 @@ setInterval(refresh, 5000);       // health/accounts every 5s
 
 <!-- Add CB OAuth Modal -->
 <div class="modal-overlay" id="addCBOAuthModal" onclick="if(event.target===this)closeAddCBOAuthModal()" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:1000;align-items:center;justify-content:center">
-  <div style="background:var(--bg-secondary);border:1px solid var(--border);border-radius:var(--radius);width:90%;max-width:560px;padding:24px;max-height:90vh;overflow-y:auto">
+  <div style="background:var(--bg-secondary);border:1px solid var(--border);border-radius:var(--radius);width:90%;max-width:600px;padding:24px;max-height:90vh;overflow-y:auto">
     <h3 style="margin:0 0 8px;font-size:16px">Add CodeBuddy OAuth</h3>
     <div style="margin-bottom:16px;font-size:12px;color:var(--text-tertiary)">Import access + refresh token (CLI device/login flow). Same chat endpoint as API keys; auth uses Bearer access token.</div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
-      <div>
-        <label style="font-size:12px;color:var(--text-tertiary);display:block;margin-bottom:6px">Email *</label>
-        <input type="text" id="cbOAuthEmail" placeholder="user@example.com" style="width:100%;padding:8px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg-primary);color:var(--text);font-size:13px" />
+
+    <!-- Segmented control: Manual | Login URL -->
+    <div id="cbOAuthModeSwitch" style="display:flex;gap:0;margin-bottom:16px;border:1px solid var(--border);border-radius:var(--radius-sm);overflow:hidden;width:fit-content">
+      <button type="button" id="cbOAuthModeManual" onclick="cbOAuthSwitchMode('manual')" style="padding:8px 18px;font-size:13px;border:none;background:var(--brand);color:#fff;cursor:pointer">Manual</button>
+      <button type="button" id="cbOAuthModeUrl" onclick="cbOAuthSwitchMode('url')" style="padding:8px 18px;font-size:13px;border:none;background:var(--bg-primary);color:var(--text);cursor:pointer">Login URL</button>
+    </div>
+
+    <!-- MANUAL MODE -->
+    <div id="cbOAuthManualPane">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
+        <div>
+          <label style="font-size:12px;color:var(--text-tertiary);display:block;margin-bottom:6px">Email *</label>
+          <input type="text" id="cbOAuthEmail" placeholder="user@example.com" style="width:100%;padding:8px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg-primary);color:var(--text);font-size:13px" />
+        </div>
+        <div>
+          <label style="font-size:12px;color:var(--text-tertiary);display:block;margin-bottom:6px">Expires In (seconds)</label>
+          <input type="number" id="cbOAuthExpiresIn" placeholder="31535929 (~365d)" style="width:100%;padding:8px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg-primary);color:var(--text);font-size:13px" />
+        </div>
       </div>
-      <div>
-        <label style="font-size:12px;color:var(--text-tertiary);display:block;margin-bottom:6px">Expires In (seconds)</label>
-        <input type="number" id="cbOAuthExpiresIn" placeholder="31535929 (~365d)" style="width:100%;padding:8px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg-primary);color:var(--text);font-size:13px" />
+      <div style="margin-bottom:12px">
+        <label style="font-size:12px;color:var(--text-tertiary);display:block;margin-bottom:6px">Access Token *</label>
+        <textarea id="cbOAuthAccessToken" rows="3" placeholder="eyJ..." style="width:100%;padding:8px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg-primary);color:var(--text);font-family:var(--mono);font-size:12px;resize:vertical"></textarea>
+      </div>
+      <div style="margin-bottom:16px">
+        <label style="font-size:12px;color:var(--text-tertiary);display:block;margin-bottom:6px">Refresh Token *</label>
+        <textarea id="cbOAuthRefreshToken" rows="3" placeholder="eyJ..." style="width:100%;padding:8px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg-primary);color:var(--text);font-family:var(--mono);font-size:12px;resize:vertical"></textarea>
       </div>
     </div>
-    <div style="margin-bottom:12px">
-      <label style="font-size:12px;color:var(--text-tertiary);display:block;margin-bottom:6px">Access Token *</label>
-      <textarea id="cbOAuthAccessToken" rows="3" placeholder="eyJ..." style="width:100%;padding:8px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg-primary);color:var(--text);font-family:var(--mono);font-size:12px;resize:vertical"></textarea>
+
+    <!-- LOGIN URL MODE -->
+    <div id="cbOAuthUrlPane" style="display:none">
+      <div style="margin-bottom:12px">
+        <label style="font-size:12px;color:var(--text-tertiary);display:block;margin-bottom:6px">Email (optional — pre-filled from login if available)</label>
+        <input type="text" id="cbOAuthUrlEmail" placeholder="leave blank to auto-detect from token" style="width:100%;padding:8px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg-primary);color:var(--text);font-size:13px" />
+      </div>
+      <div style="display:flex;gap:8px;margin-bottom:12px;align-items:center">
+        <button type="button" class="btn-primary" id="cbOAuthGenBtn" onclick="cbOAuthGenerateUrl()" style="padding:8px 16px;border-radius:var(--radius-sm);background:var(--brand);color:#fff;border:none;font-size:13px;font-weight:500;cursor:pointer">Generate login URL</button>
+        <button type="button" class="btn-ghost" id="cbOAuthPollBtn" onclick="cbOAuthPollNow()" style="padding:8px 16px;font-size:13px;display:none">Poll now</button>
+        <button type="button" class="btn-ghost" id="cbOAuthCancelPollBtn" onclick="cbOAuthCancelPoll()" style="padding:8px 16px;font-size:13px;display:none">Cancel</button>
+      </div>
+      <div id="cbOAuthUrlBox" style="display:none;margin-bottom:12px">
+        <label style="font-size:12px;color:var(--text-tertiary);display:block;margin-bottom:6px">Login URL — open this in your browser, sign in with GitHub/Google</label>
+        <div style="display:flex;gap:8px;align-items:flex-start">
+          <code id="cbOAuthAuthUrl" style="flex:1;padding:8px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg-primary);color:var(--text);font-family:var(--mono);font-size:11px;word-break:break-all;max-height:80px;overflow:auto"></code>
+          <button type="button" class="btn-ghost" onclick="cbOAuthCopyUrl()" style="padding:8px 12px;font-size:12px;white-space:nowrap">Copy</button>
+          <a id="cbOAuthOpenLink" href="#" target="_blank" rel="noopener noreferrer" class="btn-ghost" style="padding:8px 12px;font-size:12px;white-space:nowrap;text-decoration:none">Open</a>
+        </div>
+        <div style="margin-top:6px;font-size:11px;color:var(--text-tertiary)">state: <span id="cbOAuthState" style="font-family:var(--mono)"></span></div>
+      </div>
+      <div id="cbOAuthPollStatus" style="display:none;margin-bottom:12px;padding:10px;border-radius:var(--radius-sm);font-size:13px;background:rgba(234,179,8,0.1);color:var(--yellow)"></div>
     </div>
-    <div style="margin-bottom:16px">
-      <label style="font-size:12px;color:var(--text-tertiary);display:block;margin-bottom:6px">Refresh Token *</label>
-      <textarea id="cbOAuthRefreshToken" rows="3" placeholder="eyJ..." style="width:100%;padding:8px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg-primary);color:var(--text);font-family:var(--mono);font-size:12px;resize:vertical"></textarea>
-    </div>
+
     <div id="cbOAuthResult" style="margin-bottom:12px;display:none;padding:10px;border-radius:var(--radius-sm);font-size:13px"></div>
     <div style="display:flex;gap:8px;justify-content:flex-end">
       <button class="btn-ghost" onclick="closeAddCBOAuthModal()" style="padding:8px 16px;font-size:13px">Cancel</button>
@@ -3358,19 +3392,215 @@ function submitAddCB() {
 }
 
 // === Add CB OAuth ===
+var cbOAuthMode = 'manual';
+var cbOAuthStateVal = '';
+var cbOAuthPollTimer = null;
+var cbOAuthPollStart = 0;
+var cbOAuthPollMaxMs = 5 * 60 * 1000; // 5 minutes
+var cbOAuthPollIntervalMs = 3000;
+
+function cbOAuthSwitchMode(mode) {
+  cbOAuthMode = mode;
+  var mBtn = document.getElementById('cbOAuthModeManual');
+  var uBtn = document.getElementById('cbOAuthModeUrl');
+  var manualPane = document.getElementById('cbOAuthManualPane');
+  var urlPane = document.getElementById('cbOAuthUrlPane');
+  var saveBtn = document.getElementById('cbOAuthSave');
+  if (mode === 'manual') {
+    mBtn.style.background = 'var(--brand)'; mBtn.style.color = '#fff';
+    uBtn.style.background = 'var(--bg-primary)'; uBtn.style.color = 'var(--text)';
+    manualPane.style.display = '';
+    urlPane.style.display = 'none';
+    if (saveBtn) { saveBtn.style.display = ''; saveBtn.textContent = 'Import'; }
+  } else {
+    uBtn.style.background = 'var(--brand)'; uBtn.style.color = '#fff';
+    mBtn.style.background = 'var(--bg-primary)'; mBtn.style.color = 'var(--text)';
+    manualPane.style.display = 'none';
+    urlPane.style.display = '';
+    if (saveBtn) { saveBtn.style.display = 'none'; }
+    cbOAuthCancelPoll();
+  }
+}
+
 function showAddCBOAuthModal() {
-  ['cbOAuthEmail','cbOAuthExpiresIn','cbOAuthAccessToken','cbOAuthRefreshToken'].forEach(function(id) {
+  ['cbOAuthEmail','cbOAuthExpiresIn','cbOAuthAccessToken','cbOAuthRefreshToken','cbOAuthUrlEmail'].forEach(function(id) {
     var el = document.getElementById(id);
     if (el) el.value = '';
   });
   var res = document.getElementById('cbOAuthResult');
   if (res) res.style.display = 'none';
+  var urlBox = document.getElementById('cbOAuthUrlBox');
+  if (urlBox) urlBox.style.display = 'none';
+  var pollStatus = document.getElementById('cbOAuthPollStatus');
+  if (pollStatus) pollStatus.style.display = 'none';
+  cbOAuthStateVal = '';
+  cbOAuthCancelPoll();
+  cbOAuthSwitchMode('manual');
   document.getElementById('addCBOAuthModal').style.display = 'flex';
   document.getElementById('cbOAuthEmail').focus();
 }
-function closeAddCBOAuthModal() { document.getElementById('addCBOAuthModal').style.display = 'none'; }
+function closeAddCBOAuthModal() {
+  cbOAuthCancelPoll();
+  document.getElementById('addCBOAuthModal').style.display = 'none';
+}
+
+function cbOAuthGenerateUrl() {
+  var genBtn = document.getElementById('cbOAuthGenBtn');
+  genBtn.disabled = true;
+  genBtn.textContent = 'Generating...';
+  var res = document.getElementById('cbOAuthResult');
+  res.style.display = 'none';
+  apiFetch('/cb/oauth/device/start', { method: 'POST', headers: {'content-type':'application/json'}, body: '{}' })
+    .then(function(d) {
+      cbOAuthStateVal = d.state;
+      document.getElementById('cbOAuthAuthUrl').textContent = d.auth_url;
+      document.getElementById('cbOAuthState').textContent = d.state;
+      var openLink = document.getElementById('cbOAuthOpenLink');
+      if (openLink) openLink.href = d.auth_url;
+      document.getElementById('cbOAuthUrlBox').style.display = '';
+      genBtn.disabled = false;
+      genBtn.textContent = 'Regenerate URL';
+      document.getElementById('cbOAuthPollBtn').style.display = '';
+      document.getElementById('cbOAuthCancelPollBtn').style.display = '';
+      // Auto-poll
+      cbOAuthStartPoll();
+    })
+    .catch(function(e) {
+      genBtn.disabled = false;
+      genBtn.textContent = 'Generate login URL';
+      res.style.display = 'block';
+      res.style.background = 'rgba(239,68,68,0.1)';
+      res.style.color = 'var(--red)';
+      res.textContent = '✗ Failed: ' + e.message;
+    });
+}
+
+function cbOAuthCopyUrl() {
+  var url = document.getElementById('cbOAuthAuthUrl').textContent;
+  if (!url) return;
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(url).then(function() {
+      var btn = event.target;
+      var orig = btn.textContent;
+      btn.textContent = 'Copied!';
+      setTimeout(function() { btn.textContent = orig; }, 1500);
+    });
+  } else {
+    // Fallback
+    var ta = document.createElement('textarea');
+    ta.value = url; document.body.appendChild(ta); ta.select();
+    try { document.execCommand('copy'); } catch(e) {}
+    document.body.removeChild(ta);
+  }
+}
+
+function cbOAuthStartPoll() {
+  cbOAuthCancelPoll();
+  cbOAuthPollStart = Date.now();
+  var pollStatus = document.getElementById('cbOAuthPollStatus');
+  pollStatus.style.display = 'block';
+  pollStatus.style.background = 'rgba(234,179,8,0.1)';
+  pollStatus.style.color = 'var(--yellow)';
+  pollStatus.textContent = '⏳ Waiting for login...';
+  cbOAuthPollTick();
+  cbOAuthPollTimer = setInterval(cbOAuthPollTick, cbOAuthPollIntervalMs);
+}
+
+function cbOAuthCancelPoll() {
+  if (cbOAuthPollTimer) { clearInterval(cbOAuthPollTimer); cbOAuthPollTimer = null; }
+  var cancelBtn = document.getElementById('cbOAuthCancelPollBtn');
+  var pollBtn = document.getElementById('cbOAuthPollBtn');
+  if (cancelBtn) cancelBtn.style.display = 'none';
+  if (pollBtn) pollBtn.style.display = 'none';
+  var pollStatus = document.getElementById('cbOAuthPollStatus');
+  if (pollStatus && pollStatus.textContent.indexOf('Waiting') !== -1) {
+    pollStatus.style.display = 'none';
+  }
+}
+
+function cbOAuthPollNow() {
+  if (!cbOAuthStateVal) return;
+  cbOAuthPollTick();
+}
+
+function cbOAuthPollTick() {
+  if (!cbOAuthStateVal) return;
+  if (Date.now() - cbOAuthPollStart > cbOAuthPollMaxMs) {
+    cbOAuthCancelPoll();
+    var pollStatus = document.getElementById('cbOAuthPollStatus');
+    pollStatus.style.display = 'block';
+    pollStatus.style.background = 'rgba(239,68,68,0.1)';
+    pollStatus.style.color = 'var(--red)';
+    pollStatus.textContent = '✗ Timed out after 5 minutes. Click Generate to retry.';
+    return;
+  }
+  apiFetch('/cb/oauth/device/poll?state=' + encodeURIComponent(cbOAuthStateVal))
+    .then(function(d) {
+      if (d.status === 'ready') {
+        cbOAuthCancelPoll();
+        var pollStatus = document.getElementById('cbOAuthPollStatus');
+        pollStatus.style.display = 'block';
+        pollStatus.style.background = 'rgba(34,197,94,0.1)';
+        pollStatus.style.color = 'var(--green)';
+        pollStatus.innerHTML = '✓ Login successful! Importing account...';
+        // Pre-fill email if we have it and user hasn't typed one
+        var emailField = document.getElementById('cbOAuthUrlEmail');
+        if (!emailField.value.trim() && d.email) {
+          emailField.value = d.email;
+        }
+        // Auto-import via existing endpoint
+        var body = {
+          email: emailField.value.trim() || d.email,
+          access_token: d.access_token,
+          refresh_token: d.refresh_token
+        };
+        if (d.expires_in) body.expires_in = d.expires_in;
+        apiFetch('/cb/oauth/import', { method: 'POST', headers: {'content-type':'application/json'}, body: JSON.stringify(body) })
+          .then(function(imp) {
+            var res = document.getElementById('cbOAuthResult');
+            res.style.display = 'block';
+            res.style.background = imp.added ? 'rgba(34,197,94,0.1)' : 'rgba(234,179,8,0.1)';
+            res.style.color = imp.added ? 'var(--green)' : 'var(--yellow)';
+            res.innerHTML = (imp.added ? '✓ Imported ' : '↻ Updated ') + '<b>' + escHtml(imp.email || body.email) + '</b>' +
+              (imp.expires_at ? ' · expires ' + escHtml(imp.expires_at) : '') +
+              ' · total ' + imp.total;
+            pollStatus.innerHTML = '✓ Done! Account imported.';
+            var saveBtn = document.getElementById('cbOAuthSave');
+            if (saveBtn) { saveBtn.style.display = ''; saveBtn.textContent = 'Done'; saveBtn.disabled = false;
+              saveBtn.onclick = function() { closeAddCBOAuthModal(); loadCBStats(); if (typeof refresh === 'function') refresh(); };
+            }
+            if (typeof refresh === 'function') refresh();
+          })
+          .catch(function(e) {
+            var pollStatus2 = document.getElementById('cbOAuthPollStatus');
+            pollStatus2.style.background = 'rgba(239,68,68,0.1)';
+            pollStatus2.style.color = 'var(--red)';
+            pollStatus2.innerHTML = '✗ Import failed: ' + escHtml(e.message) + '<br>Tokens received but not imported. Try Manual mode.';
+            // Show save button so user can switch to manual and retry
+            var saveBtn = document.getElementById('cbOAuthSave');
+            if (saveBtn) { saveBtn.style.display = ''; saveBtn.textContent = 'Import'; saveBtn.disabled = false; }
+          });
+      } else if (d.status === 'error') {
+        cbOAuthCancelPoll();
+        var pollStatus = document.getElementById('cbOAuthPollStatus');
+        pollStatus.style.display = 'block';
+        pollStatus.style.background = 'rgba(239,68,68,0.1)';
+        pollStatus.style.color = 'var(--red)';
+        pollStatus.textContent = '✗ Error: ' + (d.error || 'unknown');
+      }
+      // else: pending — keep polling
+    })
+    .catch(function(e) {
+      // Network error — keep polling, don't abort
+      var pollStatus = document.getElementById('cbOAuthPollStatus');
+      if (pollStatus && pollStatus.style.display !== 'none') {
+        pollStatus.textContent = '⏳ Waiting for login... (retrying after network error)';
+      }
+    });
+}
 
 function submitAddCBOAuth() {
+  if (cbOAuthMode === 'url') return; // URL mode auto-imports
   var email = document.getElementById('cbOAuthEmail').value.trim();
   var at = document.getElementById('cbOAuthAccessToken').value.trim();
   var rt = document.getElementById('cbOAuthRefreshToken').value.trim();

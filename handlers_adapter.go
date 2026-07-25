@@ -24,6 +24,8 @@ var (
 	handleImportCBKey      = handlers.HandleImportCBKey
 	handleImportCBOAuth    = handlers.HandleImportCBOAuth
 	handleImportCBOAuthBulk = handlers.HandleImportCBOAuthBulk
+	handleCBOAuthDeviceStart = handlers.HandleCBOAuthDeviceStart
+	handleCBOAuthDevicePoll  = handlers.HandleCBOAuthDevicePoll
 	handleImportAccount    = handlers.HandleImportAccount
 	handleImportCBKeyBulk  = handlers.HandleImportCBKeyBulk
 	handleImportAccountBulk = handlers.HandleImportAccountBulk
