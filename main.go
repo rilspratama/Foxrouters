@@ -270,6 +270,8 @@ func main() {
 	r.POST("/cb/oauth/device/start", csrfGuard(), adminAuth, handleCBOAuthDeviceStart())
 	r.GET("/cb/oauth/device/poll", csrfGuard(), adminAuth, handleCBOAuthDevicePoll())
 	r.POST("/cb/credits/sync", csrfGuard(), adminAuth, handleSyncCBCredits(cbKM))
+	r.POST("/cb/keys/test", csrfGuard(), adminAuth, handleTestCBKey(cbKM))
+	r.POST("/accounts/test", csrfGuard(), adminAuth, handleTestGrokAccount(grokAM))
 	r.DELETE("/accounts/:email", csrfGuard(), adminAuth, handleDeleteAccount(grokAM))
 	r.DELETE("/cb/keys/:key", csrfGuard(), adminAuth, handleDeleteCBKey(cbKM))
 	r.POST("/cleanup/disabled", csrfGuard(), adminAuth, handleCleanupDisabled(grokAM, cbKM))

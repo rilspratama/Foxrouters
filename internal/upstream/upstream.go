@@ -230,6 +230,20 @@ var healthCheckClient = &http.Client{
 // same connection pool without reaching for the package-level var.
 func UpstreamClient() *http.Client { return upstreamClient }
 
+// TokenRefreshClient returns the shared short-timeout client used for
+// OAuth/token refresh and (via getClient) some credential probes.
+func TokenRefreshClient() *http.Client { return tokenRefreshClient }
+
+// HealthCheckClient returns the shared health-check HTTP client (also used
+// by credential probes so they inherit the 30s timeout).
+func HealthCheckClient() *http.Client { return healthCheckClient }
+
+// SetUpstreamClient / SetTokenRefreshClient / SetHealthCheckClient swap the
+// package clients for tests. Callers must restore the previous value.
+func SetUpstreamClient(c *http.Client)     { upstreamClient = c }
+func SetTokenRefreshClient(c *http.Client) { tokenRefreshClient = c }
+func SetHealthCheckClient(c *http.Client)  { healthCheckClient = c }
+
 // truncateLog truncates text to maxLen, adding "..." suffix if truncated.
 func truncateLog(s string, maxLen int) string {
 	if len(s) <= maxLen {

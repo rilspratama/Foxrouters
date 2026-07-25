@@ -1908,9 +1908,15 @@ document.addEventListener('click', function(e) {
   if (btn.classList.contains('delete-cb-btn')) {
     v = btn.getAttribute('data-key');
     if (v) deleteCBKey(v);
+  } else if (btn.classList.contains('test-cb-btn')) {
+    v = btn.getAttribute('data-key');
+    if (v) testCBKey(v, btn);
   } else if (btn.classList.contains('delete-grok-btn')) {
     v = btn.getAttribute('data-email');
     if (v) deleteGrokAccount(v);
+  } else if (btn.classList.contains('test-grok-btn')) {
+    v = btn.getAttribute('data-email');
+    if (v) testGrokAccount(v, btn);
   } else if (btn.classList.contains('delete-key-btn')) {
     v = btn.getAttribute('data-key');
     if (v) deleteKey(v);
@@ -2089,7 +2095,10 @@ function renderGrokPage() {
       '<td class="muted" style="font-size:11px">' + expAt + '</td>' +
       '<td class="muted" style="font-size:11px">' + lastRef + '</td>' +
       '<td class="muted" style="font-size:11px">' + disAt + '</td>' +
-      '<td><button class="btn-ghost delete-grok-btn" data-email="' + escHtml(a.email) + '" style="padding:3px 8px;font-size:12px;color:var(--red)">Delete</button></td>' +
+      '<td style="white-space:nowrap">' +
+        '<button class="btn-ghost test-grok-btn" data-email="' + escHtml(a.email) + '" style="padding:3px 8px;font-size:12px;color:var(--brand);margin-right:4px">Test</button>' +
+        '<button class="btn-ghost delete-grok-btn" data-email="' + escHtml(a.email) + '" style="padding:3px 8px;font-size:12px;color:var(--red)">Delete</button>' +
+      '</td>' +
     '</tr>';
   }
   document.getElementById('grokBody').innerHTML = gRows || '<tr><td colspan="6" class="history-empty">No Grok accounts loaded</td></tr>';
@@ -2177,7 +2186,10 @@ function renderCBPage() {
       '<td class="mono">' + (k.total_requests || 0) + '</td>' +
       '<td class="muted" style="font-size:11px">' + exp + '</td>' +
       '<td>' + status + '</td>' +
-      '<td><button class="btn-ghost delete-cb-btn" data-key="' + escHtml(k.key) + '" style="padding:3px 8px;font-size:12px;color:var(--red)">Delete</button></td>' +
+      '<td style="white-space:nowrap">' +
+        '<button class="btn-ghost test-cb-btn" data-key="' + escHtml(k.key) + '" style="padding:3px 8px;font-size:12px;color:var(--brand);margin-right:4px">Test</button>' +
+        '<button class="btn-ghost delete-cb-btn" data-key="' + escHtml(k.key) + '" style="padding:3px 8px;font-size:12px;color:var(--red)">Delete</button>' +
+      '</td>' +
     '</tr>';
   }
   document.getElementById('cbBody').innerHTML = cbRows || '<tr><td colspan="8" class="history-empty">No CodeBuddy keys loaded</td></tr>';
@@ -3127,6 +3139,34 @@ function deleteCBKey(key) {
   });
 }
 
+async function testCBKey(key, btn) {
+  if (!key) return;
+  var originalText = btn ? btn.textContent : null;
+  if (btn) { btn.textContent = '…'; btn.disabled = true; }
+  try {
+    var r = await apiFetch('/cb/keys/test', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key: key })
+    });
+    var lat = (r.latency_ms != null) ? (Number(r.latency_ms) / 1000).toFixed(1) + 's' : '?';
+    if (r.ok) {
+      var extra = '';
+      if (r.credit != null && r.credit !== 0) extra += ' credit=' + r.credit;
+      else if (r.credit === 0) extra += ' credit=0';
+      if (r.content) extra += ' "' + String(r.content).substring(0, 40) + '"';
+      alert('OK ' + (r.status || 200) + ' ' + lat + extra);
+    } else {
+      alert('FAIL ' + (r.status || '?') + ' ' + lat + ' ' + (r.error || 'unknown error'));
+    }
+  } catch (e) {
+    if (e.message === '__redirect__') return;
+    alert('Test failed: ' + e.message);
+  } finally {
+    if (btn && originalText !== null) { btn.textContent = originalText; btn.disabled = false; }
+  }
+}
+
 function deleteGrokAccount(email) {
   if (!confirm('Delete Grok account ' + email + '? This cannot be undone.')) return;
   apiFetch('/accounts/' + encodeURIComponent(email), {
@@ -3136,6 +3176,33 @@ function deleteGrokAccount(email) {
   }).catch(function(e) {
     alert('Delete failed: ' + e.message);
   });
+}
+
+async function testGrokAccount(email, btn) {
+  if (!email) return;
+  var originalText = btn ? btn.textContent : null;
+  if (btn) { btn.textContent = '…'; btn.disabled = true; }
+  try {
+    var r = await apiFetch('/accounts/test', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: email })
+    });
+    var lat = (r.latency_ms != null) ? (Number(r.latency_ms) / 1000).toFixed(1) + 's' : '?';
+    if (r.ok) {
+      var extra = '';
+      if (r.token_status) extra += ' token=' + r.token_status;
+      if (r.content) extra += ' "' + String(r.content).substring(0, 40) + '"';
+      alert('OK ' + (r.status || 200) + ' ' + lat + extra);
+    } else {
+      alert('FAIL ' + (r.status || '?') + ' ' + lat + ' ' + (r.error || 'unknown error'));
+    }
+  } catch (e) {
+    if (e.message === '__redirect__') return;
+    alert('Test failed: ' + e.message);
+  } finally {
+    if (btn && originalText !== null) { btn.textContent = originalText; btn.disabled = false; }
+  }
 }
 
 function cleanupDisabled(type) {

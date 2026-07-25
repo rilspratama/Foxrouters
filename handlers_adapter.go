@@ -32,6 +32,8 @@ var (
 	handleSyncCBCredits    = handlers.HandleSyncCBCredits
 	handleDeleteAccount    = handlers.HandleDeleteAccount
 	handleDeleteCBKey      = handlers.HandleDeleteCBKey
+	handleTestCBKey        = handlers.HandleTestCBKey
+	handleTestGrokAccount  = handlers.HandleTestGrokAccount
 	handleCleanupDisabled  = handlers.HandleCleanupDisabled
 	handleCleanupBanned    = handlers.HandleCleanupBanned
 	handleHistory          = handlers.HandleHistory
