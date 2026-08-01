@@ -136,7 +136,6 @@ func ProxyRequest(grokAM *upstream.GrokAccountManager, cbKM *upstream.CBKeyManag
 				{"id": "cb/gpt-5.6-luna", "object": "model", "owned_by": "codebuddy"},
 				{"id": "cb/gpt-5.5", "object": "model", "owned_by": "codebuddy"},
 				{"id": "cb/gpt-5.4", "object": "model", "owned_by": "codebuddy"},
-				{"id": "cb/gpt-5.2", "object": "model", "owned_by": "codebuddy"},
 				{"id": "cb/gpt-5.1", "object": "model", "owned_by": "codebuddy"},
 				{"id": "cb/gpt-5", "object": "model", "owned_by": "codebuddy"},
 				{"id": "cb/gpt-4.1", "object": "model", "owned_by": "codebuddy"},

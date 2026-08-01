@@ -321,7 +321,6 @@ func (hc *HealthChecker) checkGrok() {
 
 func (hc *HealthChecker) checkCB() {
 	h := hc.CB
-	start := time.Now()
 
 	keys := hc.cbKM.GetAll()
 	if len(keys) == 0 {
@@ -340,29 +339,38 @@ func (hc *HealthChecker) checkCB() {
 		return
 	}
 
-	var key *CBKey
-	for _, k := range keys {
-		k.mu.Lock()
-		d := k.disabled
-		k.mu.Unlock()
-		if !d {
-			key = k
-			break
+	// Probe up to 3 enabled credentials before declaring failure — a single
+	// exhausted/dead key must not flip the circuit.
+	n := len(keys)
+	tried := 0
+	for i := 0; i < n && tried < 3; i++ {
+		key := keys[i]
+		if key.IsDisabled() {
+			continue
+		}
+		tried++
+		if hc.probeCBKey(h, key) {
+			return // success — circuit closed/reset inside
 		}
 	}
-	if key == nil {
+	if tried == 0 {
 		h.mu.Lock()
 		h.lastCheckAt = time.Now()
 		h.lastCheckOK = false
 		h.lastCheckLatMs = 0
 		h.lastErrorMsg.Store("all cb keys disabled")
 		h.mu.Unlock()
-		return
 	}
+}
 
-	body := `{"model":"gpt-5.2","messages":[{"role":"system","content":"You are a helpful assistant."},{"role":"user","content":"Hi"}],"stream":true,"max_completion_tokens":5}`
+// probeCBKey runs one LLM test against a single credential.
+// Returns true on healthy (2xx/3xx) — also handles circuit state transitions.
+func (hc *HealthChecker) probeCBKey(h *UpstreamHealth, key *CBKey) bool {
+	start := time.Now()
+
+	body := `{"model":"gpt-5.5","messages":[{"role":"system","content":"You are a helpful assistant."},{"role":"user","content":"Hi"}],"stream":true,"max_completion_tokens":5}`
 	req, _ := http.NewRequest("POST", CB_UPSTREAM_URL, strings.NewReader(body))
-	req.Header.Set("Authorization", "Bearer "+key.Key)
+	req.Header.Set("Authorization", key.AuthHeader()) // OAuth → Bearer AT, api_key → Bearer ck_*
 	req.Header.Set("Content-Type", "application/json")
 
 	client, proxyID := getClient(healthCheckClient, "codebuddy")
@@ -376,40 +384,43 @@ func (hc *HealthChecker) checkCB() {
 	}())
 
 	h.mu.Lock()
+	defer h.mu.Unlock()
 	h.lastCheckAt = time.Now()
 	h.lastCheckLatMs = latency.Milliseconds()
 	if err != nil {
 		h.lastCheckOK = false
-		h.lastErrorMsg.Store(err.Error())
+		h.lastErrorMsg.Store(fmt.Sprintf("LLM test error (%s): %v", key.DisplayID(), err))
 		h.consecutiveErrs++
 		if h.consecutiveErrs >= CB_OPEN_THRESHOLD && h.state == CircuitClosed {
 			h.state = CircuitOpen
 			h.openedAt = time.Now()
 			slog.Warn("circuit OPENED (LLM test failed)", "module", "health", "upstream", "codebuddy", "error", err)
 		}
-	} else {
-		resp.Body.Close()
-		h.lastCheckOK = HealthStatusOK(resp.StatusCode)
-		if h.lastCheckOK {
-			h.lastErrorMsg.Store("")
-			if h.state == CircuitHalfOpen {
-				h.state = CircuitClosed
-				h.consecutiveErrs = 0
-				slog.Info("circuit CLOSED (LLM test OK)", "module", "health", "upstream", "codebuddy", "latency_ms", latency.Milliseconds())
-			} else if h.state == CircuitClosed {
-				h.consecutiveErrs = 0
-			}
-		} else {
-			h.lastErrorMsg.Store(fmt.Sprintf("LLM test status %d", resp.StatusCode))
-			h.consecutiveErrs++
-			if h.consecutiveErrs >= CB_OPEN_THRESHOLD && h.state == CircuitClosed {
-				h.state = CircuitOpen
-				h.openedAt = time.Now()
-				slog.Warn("circuit OPENED (LLM test status)", "module", "health", "upstream", "codebuddy", "status", resp.StatusCode)
-			}
-		}
+		return false
 	}
-	h.mu.Unlock()
+	resp.Body.Close()
+	if HealthStatusOK(resp.StatusCode) {
+		h.lastCheckOK = true
+		h.lastErrorMsg.Store("")
+		if h.state == CircuitHalfOpen {
+			h.state = CircuitClosed
+			h.consecutiveErrs = 0
+			slog.Info("circuit CLOSED (LLM test OK)", "module", "health", "upstream", "codebuddy", "latency_ms", latency.Milliseconds())
+		} else if h.state == CircuitClosed {
+			h.consecutiveErrs = 0
+		}
+		return true
+	}
+	// unhealthy status — 401/403/429 on ONE credential ≠ upstream down; log which key failed
+	h.lastCheckOK = false
+	h.lastErrorMsg.Store(fmt.Sprintf("LLM test status %d (%s)", resp.StatusCode, key.DisplayID()))
+	h.consecutiveErrs++
+	if h.consecutiveErrs >= CB_OPEN_THRESHOLD && h.state == CircuitClosed {
+		h.state = CircuitOpen
+		h.openedAt = time.Now()
+		slog.Warn("circuit OPENED (LLM test status)", "module", "health", "upstream", "codebuddy", "status", resp.StatusCode, "key", key.DisplayID())
+	}
+	return false
 }
 
 func round2(f float64) float64 {
