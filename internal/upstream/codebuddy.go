@@ -566,10 +566,92 @@ type CBKeyManager struct {
 	mu   sync.RWMutex
 	next int
 	db   *db.Store
+
+	// sticky sessions: sessionID → bound key (prompt-cache locality)
+	sticky   map[string]*stickyBinding
+	stickyMu sync.Mutex
 }
 
+type stickyBinding struct {
+	key      *CBKey
+	lastSeen time.Time
+}
+
+// stickyTTL is how long a session binding survives without traffic.
+const stickyTTL = 30 * time.Minute
+
 func NewCBKeyManager(store *db.Store) *CBKeyManager {
-	return &CBKeyManager{keys: make([]*CBKey, 0), db: store}
+	km := &CBKeyManager{keys: make([]*CBKey, 0), db: store, sticky: make(map[string]*stickyBinding)}
+	go km.stickyJanitor()
+	return km
+}
+
+// stickyJanitor evicts idle bindings so the map doesn't grow unbounded.
+func (km *CBKeyManager) stickyJanitor() {
+	if km.sticky == nil {
+		return
+	}
+	ticker := time.NewTicker(5 * time.Minute)
+	defer ticker.Stop()
+	for range ticker.C {
+		cutoff := time.Now().Add(-stickyTTL)
+		km.stickyMu.Lock()
+		for sid, b := range km.sticky {
+			if b.lastSeen.Before(cutoff) {
+				delete(km.sticky, sid)
+			}
+		}
+		km.stickyMu.Unlock()
+	}
+}
+
+// NextSticky returns the key bound to sessionID. If unbound, or the bound key
+// got disabled (credits exhausted etc.), it binds the next round-robin key.
+// All requests with the same sessionID hit the same upstream account →
+// CodeBuddy prompt-cache stays hot instead of regenerating per request.
+func (km *CBKeyManager) NextSticky(sessionID string) (*CBKey, error) {
+	if sessionID == "" || km.sticky == nil {
+		return km.Next()
+	}
+	km.stickyMu.Lock()
+	if b, ok := km.sticky[sessionID]; ok {
+		if !b.key.IsDisabled() {
+			b.lastSeen = time.Now()
+			km.stickyMu.Unlock()
+			return b.key, nil
+		}
+		delete(km.sticky, sessionID) // bound key died — rebind below
+	}
+	km.stickyMu.Unlock()
+
+	key, err := km.Next()
+	if err != nil {
+		return nil, err
+	}
+	km.stickyMu.Lock()
+	km.sticky[sessionID] = &stickyBinding{key: key, lastSeen: time.Now()}
+	km.stickyMu.Unlock()
+	return key, nil
+}
+
+// UnbindSticky drops a session binding (e.g. after permanent disable so the
+// next request rebinds to a fresh key instead of the dead one).
+func (km *CBKeyManager) UnbindSticky(sessionID string, key *CBKey) {
+	if sessionID == "" || km.sticky == nil {
+		return
+	}
+	km.stickyMu.Lock()
+	if b, ok := km.sticky[sessionID]; ok && b.key == key {
+		delete(km.sticky, sessionID)
+	}
+	km.stickyMu.Unlock()
+}
+
+// StickyCount reports active session bindings (dashboard/debug).
+func (km *CBKeyManager) StickyCount() int {
+	km.stickyMu.Lock()
+	defer km.stickyMu.Unlock()
+	return len(km.sticky)
 }
 
 // SetKeysForTest replaces the internal slice. Whitebox tests only.
@@ -1158,18 +1240,44 @@ func ProxyCodeBuddy(c *gin.Context, body []byte, bodyMap map[string]any, km *CBK
 	client, proxyID := getClient(upstreamClient, "codebuddy")
 	total := km.Len()
 
+	// Sticky session: client may pin all requests in a conversation to the
+	// same upstream key via header (prompt-cache locality). First header wins:
+	// x-session-id, x-conversation-id, x-chat-id.
+	sessionID := c.GetHeader("x-session-id")
+	if sessionID == "" {
+		sessionID = c.GetHeader("x-conversation-id")
+	}
+	if sessionID == "" {
+		sessionID = c.GetHeader("x-chat-id")
+	}
+	if len(sessionID) > 128 {
+		sessionID = sessionID[:128]
+	}
+
 	var lastResp *http.Response
 	var lastKey *CBKey
 	reqStart := time.Now()
 
-	for attempt := 0; attempt < total; attempt++ {
+	// Sticky-bound key gets the first attempts before falling back to RR.
+	stickyAttempts := 0
+	if sessionID != "" {
+		stickyAttempts = 2
+	}
+
+	for attempt := 0; attempt < total+stickyAttempts; attempt++ {
 		// C10: bail out early if the client cancelled — don't walk the
 		// whole key list burning upstream calls for a dead request.
 		if err := c.Request.Context().Err(); err != nil {
 			slog.Debug("client cancelled before attempt", "module", "cb", "attempt", attempt+1, "error", err)
 			return
 		}
-		key, err := km.Next()
+		var key *CBKey
+		var err error
+		if attempt < stickyAttempts {
+			key, err = km.NextSticky(sessionID)
+		} else {
+			key, err = km.Next()
+		}
 		if err != nil {
 			break
 		}
@@ -1199,6 +1307,7 @@ func ProxyCodeBuddy(c *gin.Context, body []byte, bodyMap map[string]any, km *CBK
 				refreshErr := key.Refresh()
 				if refreshErr != nil {
 					permanentDisable(key, "401 oauth refresh failed: "+refreshErr.Error())
+					km.UnbindSticky(sessionID, key)
 					continue
 				}
 				// Rebuild request with fresh AT
@@ -1215,11 +1324,13 @@ func ProxyCodeBuddy(c *gin.Context, body []byte, bodyMap map[string]any, km *CBK
 				if resp.StatusCode == 401 {
 					resp.Body.Close()
 					permanentDisable(key, "401 after oauth refresh, permanent")
+					km.UnbindSticky(sessionID, key)
 					continue
 				}
 				// Fall through to process non-401 response below.
 			} else {
 				permanentDisable(key, "401 unauthorized, permanent")
+				km.UnbindSticky(sessionID, key)
 				continue
 			}
 		}
@@ -1231,6 +1342,7 @@ func ProxyCodeBuddy(c *gin.Context, body []byte, bodyMap map[string]any, km *CBK
 			resp.Body.Close()
 			if strings.Contains(bodyStr, "14017") {
 				permanentDisable(key, "429 trial not activated, permanent")
+				km.UnbindSticky(sessionID, key)
 			} else {
 				cooldownDisable(key, "429 rate limited, cooldown 10m")
 			}
@@ -1244,10 +1356,12 @@ func ProxyCodeBuddy(c *gin.Context, body []byte, bodyMap map[string]any, km *CBK
 			// 403 with code 11140 = "request illegal" (banned/flagged key) → permanent disable
 			if resp.StatusCode == 403 && strings.Contains(bodyStr, "11140") {
 				permanentDisable(key, "403 request illegal, banned, permanent")
+				km.UnbindSticky(sessionID, key)
 				continue
 			}
 			if strings.Contains(bodyStr, "14018") || strings.Contains(bodyStr, "Credits exhausted") {
 				permanentDisable(key, "credits exhausted, code 14018")
+				km.UnbindSticky(sessionID, key) // session rebinds to fresh key next request
 				continue
 			}
 			if resp.StatusCode == 400 && (strings.Contains(bodyStr, "11133") || strings.Contains(bodyStr, "Invalid request parameters")) {
