@@ -22,6 +22,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -94,12 +95,17 @@ func (s *sqliteStore) EnsureSchema(ctx context.Context) error {
 			latency_ms    INTEGER NOT NULL DEFAULT 0,
 			tokens_in     INTEGER NOT NULL DEFAULT 0,
 			tokens_out    INTEGER NOT NULL DEFAULT 0,
+			cache_hit_pct REAL NOT NULL DEFAULT -1,
 			error_msg     TEXT NOT NULL DEFAULT '',
 			input_text    TEXT NOT NULL DEFAULT '',
 			output_text   TEXT NOT NULL DEFAULT '',
 			request_body  TEXT NOT NULL DEFAULT '',
 			response_body TEXT NOT NULL DEFAULT ''
 		)`,
+		// Migration: add cache_hit_pct column if missing. SQLite ALTER TABLE
+		// ADD COLUMN is NOT idempotent — "duplicate column" error is expected
+		// on restarts and silently ignored below.
+		`ALTER TABLE request_logs ADD COLUMN cache_hit_pct REAL NOT NULL DEFAULT -1`,
 		`CREATE INDEX IF NOT EXISTS idx_request_logs_timestamp ON request_logs(timestamp DESC)`,
 		`CREATE INDEX IF NOT EXISTS idx_request_logs_model     ON request_logs(model)`,
 		`CREATE INDEX IF NOT EXISTS idx_request_logs_client    ON request_logs(client_key)`,
@@ -127,7 +133,11 @@ func (s *sqliteStore) EnsureSchema(ctx context.Context) error {
 	}
 	for _, q := range stmts {
 		if _, err := s.db.ExecContext(ctx, q); err != nil {
-			return fmt.Errorf("sqlite ensure schema: %w", err)
+			// ALTER TABLE ADD COLUMN fails with "duplicate column" on restarts
+			// — that's expected and safe to ignore. Everything else is fatal.
+			if !strings.Contains(err.Error(), "duplicate column") {
+				return fmt.Errorf("sqlite ensure schema: %w", err)
+			}
 		}
 	}
 	// Start the TTL sweeper only after schema is confirmed.
@@ -182,8 +192,8 @@ func (s *sqliteStore) InsertRequestBatch(ctx context.Context, batch []RequestLog
 	stmt, err := tx.PrepareContext(ctx, `INSERT INTO request_logs (
 		timestamp, request_id, client_key, model, upstream, account_id,
 		status_code, latency_ms, tokens_in, tokens_out, error_msg,
-		input_text, output_text, request_body, response_body
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+		input_text, output_text, request_body, response_body, cache_hit_pct
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
 	if err != nil {
 		return err
 	}
@@ -193,6 +203,9 @@ func (s *sqliteStore) InsertRequestBatch(ctx context.Context, batch []RequestLog
 		if ts.IsZero() {
 			ts = time.Now().UTC()
 		}
+		// Extract cache hit % from response body at write time (cheap, runs
+		// once per request in the async batch — not on every list query).
+		ch := extractCacheHitPct(r.ResponseBody)
 		if _, err := stmt.ExecContext(ctx,
 			ts,
 			r.RequestID,
@@ -209,6 +222,7 @@ func (s *sqliteStore) InsertRequestBatch(ctx context.Context, batch []RequestLog
 			r.OutputText,
 			bodyString(r.RequestBody),
 			bodyString(r.ResponseBody),
+			ch,
 		); err != nil {
 			slog.Error("sqlite reqlog insert", "module", "db-sqlite", "error", err)
 		}
@@ -365,7 +379,7 @@ func (s *sqliteStore) GetRecentRequests(ctx context.Context, limit int) ([]Recen
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT id, timestamp, client_key, model, upstream, account_id,
 		       status_code, latency_ms, tokens_in, tokens_out, error_msg,
-		       input_text, output_text
+		       input_text, output_text, cache_hit_pct
 		FROM request_logs
 		ORDER BY timestamp DESC, id DESC
 		LIMIT ?
@@ -381,7 +395,7 @@ func (s *sqliteStore) GetRecentRequests(ctx context.Context, limit int) ([]Recen
 		var ts time.Time
 		if err := rows.Scan(&id, &ts, &r.ClientKey, &r.Model, &r.Upstream,
 			&r.AccountID, &r.StatusCode, &r.LatencyMs, &r.TokensIn, &r.TokensOut,
-			&r.ErrorMsg, &r.InputText, &r.OutputText); err != nil {
+			&r.ErrorMsg, &r.InputText, &r.OutputText, &r.CacheHitPct); err != nil {
 			slog.Error("sqlite recent scan", "module", "db-sqlite", "error", err)
 			continue
 		}
@@ -438,4 +452,97 @@ func (s *sqliteStore) Close() error {
 		return s.db.Close()
 	}
 	return nil
+}
+
+// extractCacheHitPct parses usage from a stored response body and returns
+// prompt_cache_hit_tokens / prompt_tokens * 100 (rounded to 1 decimal).
+// Returns -1 if usage is absent or prompt_tokens is 0; 0 if no cache hit.
+// Handles both non-stream (usage at top level) and stream (usage in last
+// SSE data chunk) response bodies stored in request_logs.response_body.
+func extractCacheHitPct(body []byte) float64 {
+	if len(body) == 0 {
+		return -1
+	}
+	// Try top-level usage (non-stream response)
+	var top map[string]any
+	if err := json.Unmarshal(body, &top); err == nil {
+		if u, ok := top["usage"].(map[string]any); ok {
+			if pct := cachePctFromUsage(u); pct >= 0 {
+				return pct
+			}
+		}
+	}
+	// Try SSE stream: scan for last data chunk with usage
+	s := string(body)
+	for i := len(s) - 1; i >= 0; {
+		idx := lastIndexDataLine(s[:i])
+		if idx < 0 {
+			break
+		}
+		chunk := s[idx:]
+		// trim to end of this data line
+		if nl := indexOf(chunk, "\n"); nl >= 0 {
+			chunk = chunk[:nl]
+		}
+		chunk = strings.TrimPrefix(chunk, "data: ")
+		var m map[string]any
+		if json.Unmarshal([]byte(chunk), &m) == nil {
+			if u, ok := m["usage"].(map[string]any); ok {
+				return cachePctFromUsage(u)
+			}
+		}
+		i = idx
+	}
+	return -1
+}
+
+// cachePctFromUsage computes hit/prompt*100 from a usage map.
+func cachePctFromUsage(u map[string]any) float64 {
+	pt, _ := toFloat64(u["prompt_tokens"])
+	if pt <= 0 {
+		return -1
+	}
+	hit, ok := toFloat64(u["prompt_cache_hit_tokens"])
+	if !ok || hit <= 0 {
+		if d, ok := u["prompt_tokens_details"].(map[string]any); ok {
+			hit, _ = toFloat64(d["cached_tokens"])
+		}
+	}
+	if hit <= 0 {
+		return 0
+	}
+	return float64(int(hit/pt*1000)) / 10
+}
+
+func toFloat64(v any) (float64, bool) {
+	switch n := v.(type) {
+	case float64:
+		return n, true
+	case int:
+		return float64(n), true
+	case int64:
+		return float64(n), true
+	}
+	return 0, false
+}
+
+// lastIndexDataLine finds the start of the last "data: " line in s.
+func lastIndexDataLine(s string) int {
+	for i := len(s) - 1; i >= 5; i-- {
+		if s[i] == ' ' && s[i-1] == ':' && s[i-2] == 'a' && s[i-3] == 't' && s[i-4] == 'a' && s[i-5] == 'd' {
+			if i >= 5 && (i-5 == 0 || s[i-6] == '\n') {
+				return i - 5
+			}
+		}
+	}
+	return -1
+}
+
+func indexOf(s, sub string) int {
+	for i := 0; i <= len(s)-len(sub); i++ {
+		if s[i:i+len(sub)] == sub {
+			return i
+		}
+	}
+	return -1
 }

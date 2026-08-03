@@ -117,19 +117,20 @@ type ModelStats struct {
 // precision (Number.MAX_SAFE_INTEGER = 2^53-1; our random 64-bit ids exceed
 // that). The frontend passes it back verbatim to /history/detail/:id.
 type RecentRequest struct {
-	ID         string `json:"id"`
-	Timestamp  string `json:"timestamp"`
-	ClientKey  string `json:"client_key"`
-	Model      string `json:"model"`
-	Upstream   string `json:"upstream"`
-	AccountID  string `json:"account_id"`
-	StatusCode int    `json:"status_code"`
-	LatencyMs  int    `json:"latency_ms"`
-	TokensIn   int    `json:"tokens_in"`
-	TokensOut  int    `json:"tokens_out"`
-	InputText  string `json:"input_text,omitempty"`
-	OutputText string `json:"output_text,omitempty"`
-	ErrorMsg   string `json:"error_msg,omitempty"`
+	ID          string  `json:"id"`
+	Timestamp   string  `json:"timestamp"`
+	ClientKey   string  `json:"client_key"`
+	Model       string  `json:"model"`
+	Upstream    string  `json:"upstream"`
+	AccountID   string  `json:"account_id"`
+	StatusCode  int     `json:"status_code"`
+	LatencyMs   int     `json:"latency_ms"`
+	TokensIn    int     `json:"tokens_in"`
+	TokensOut   int     `json:"tokens_out"`
+	CacheHitPct float64 `json:"cache_hit_pct"`
+	InputText   string  `json:"input_text,omitempty"`
+	OutputText  string  `json:"output_text,omitempty"`
+	ErrorMsg    string  `json:"error_msg,omitempty"`
 }
 
 // RequestDetail is a single log with full request/response JSON bodies.

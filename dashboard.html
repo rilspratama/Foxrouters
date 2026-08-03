@@ -996,6 +996,11 @@ body {
           <div class="stat-sub" id="totalTokensSub">24h usage</div>
         </div>
         <div class="stat-card">
+          <div class="stat-label">Cache Hit (24h)</div>
+          <div class="stat-value" id="cacheHitAvg">—</div>
+          <div class="stat-sub" id="cacheHitSub">prompt cache</div>
+        </div>
+        <div class="stat-card">
           <div class="stat-label">Grok Circuit</div>
           <div class="stat-value" id="grokCircuit" style="font-size:15px;padding-top:4px">—</div>
           <div class="stat-sub" id="grokLatency"></div>
@@ -1065,7 +1070,7 @@ body {
         <div class="tbl-scroll" style="max-height:400px;margin:0 0 4px">
           <table class="tbl" id="historyTable">
             <thead><tr>
-              <th>Time</th><th>Model</th><th>Upstream</th><th>Status</th><th>Latency</th><th>Tokens</th>
+              <th>Time</th><th>Model</th><th>Upstream</th><th>Status</th><th>Latency</th><th>Tokens</th><th>Cache%</th>
             </tr></thead>
             <tbody id="historyBody"></tbody>
           </table>
@@ -1101,6 +1106,17 @@ body {
             <button class="btn-ghost" id="grokCleanupBtn" onclick="cleanupDisabled('grok')" style="padding:5px 12px;font-size:12px;color:var(--danger);display:none">Cleanup Disabled</button>
             <button class="btn-ghost" id="grokCleanupBannedBtn" onclick="cleanupBanned('grok')" style="padding:5px 12px;font-size:12px;color:var(--danger);display:none">Cleanup Banned</button>
           </div>
+        </div>
+        <!-- CB selector mode (routing strategy for prompt-cache locality) -->
+        <div id="cbSelectorBar" style="display:flex;align-items:center;gap:10px;padding:8px 16px;border-bottom:1px solid var(--border);font-size:12px;color:var(--text-tertiary)">
+          <span style="font-weight:600;color:var(--text-secondary)">Key Selection:</span>
+          <select id="cbSelectorMode" onchange="changeCBSelectorMode(this.value)" style="background:var(--bg-input);color:var(--text-primary);border:1px solid var(--border);border-radius:6px;padding:3px 8px;font-size:12px">
+            <option value="rr">Round Robin</option>
+            <option value="sticky">Sticky Session</option>
+            <option value="content-hash">Content Hash</option>
+            <option value="hybrid">Hybrid (bucket)</option>
+          </select>
+          <span id="cbSelectorSticky" style="opacity:0.6"></span>
         </div>
         <div id="cbPanel" class="tbl-scroll" style="max-height:500px">
           <table class="tbl">
@@ -2251,6 +2267,10 @@ function showTab(e, tab) {
   document.getElementById('grokBulkBtn').style.display = tab === 'grok' ? '' : 'none';
   document.getElementById('grokCleanupBtn').style.display = tab === 'grok' ? '' : 'none';
   document.getElementById('grokCleanupBannedBtn').style.display = tab === 'grok' ? '' : 'none';
+  // Selector mode bar only relevant for CodeBuddy tab
+  var selBar = document.getElementById('cbSelectorBar');
+  if (selBar) selBar.style.display = tab === 'cb' ? '' : 'none';
+  if (tab === 'cb') loadCBSelectorMode();
 }
 
 /* ══════════════════════════════════════════════════════════
@@ -2308,6 +2328,22 @@ async function loadHistory() {
       if (subEl) subEl.textContent = 'in:' + (s.total_tokens_in||0) + ' out:' + (s.total_tokens_out||0);
     }
 
+    // Update Cache Hit avg card (from recent requests that have cache_hit_pct)
+    var recentRows = (recentRes.recent_requests || []);
+    var cacheHits = recentRows.filter(function(r) { return r.cache_hit_pct !== undefined && r.cache_hit_pct >= 0; });
+    var cacheEl = document.getElementById('cacheHitAvg');
+    var cacheSubEl = document.getElementById('cacheHitSub');
+    if (cacheEl) {
+      if (cacheHits.length > 0) {
+        var avg = cacheHits.reduce(function(a, r) { return a + r.cache_hit_pct; }, 0) / cacheHits.length;
+        cacheEl.textContent = avg.toFixed(1) + '%';
+        if (cacheSubEl) cacheSubEl.textContent = 'avg over ' + cacheHits.length + ' reqs';
+      } else {
+        cacheEl.textContent = '—';
+        if (cacheSubEl) cacheSubEl.textContent = 'prompt cache';
+      }
+    }
+
     // History stats cards
     var statsEl = document.getElementById('historyStats');
     var errClass = s.total_errors > 0 ? 'err' : '';
@@ -2321,7 +2357,7 @@ async function loadHistory() {
     var body = document.getElementById('historyBody');
     historyLogs = recentRes.recent_requests || [];
     if (historyLogs.length === 0) {
-      body.innerHTML = '<tr><td colspan="6" class="history-empty">No requests logged yet</td></tr>';
+      body.innerHTML = '<tr><td colspan="7" class="history-empty">No requests logged yet</td></tr>';
       return;
     }
     body.innerHTML = historyLogs.map(function(l, i) {
@@ -2329,6 +2365,16 @@ async function loadHistory() {
       var cls = sc >= 500 ? 'stcode-5xx' : sc >= 400 ? 'stcode-4xx' : 'stcode-2xx';
       var tok = (l.tokens_in + l.tokens_out) > 0 ? (l.tokens_in + '/' + l.tokens_out) : '—';
       var err = l.error_msg ? ' <span style="opacity:0.5" title="' + escHtml(l.error_msg) + '">!</span>' : '';
+      var cachePct = l.cache_hit_pct;
+      var cacheCol;
+      if (cachePct === undefined || cachePct < 0) {
+        cacheCol = '<span style="opacity:0.3">—</span>';
+      } else if (cachePct === 0) {
+        cacheCol = '<span style="opacity:0.4">0%</span>';
+      } else {
+        var cColor = cachePct >= 70 ? 'var(--green)' : cachePct >= 30 ? 'var(--yellow)' : 'var(--text-tertiary)';
+        cacheCol = '<span style="color:' + cColor + ';font-weight:600">' + cachePct + '%</span>';
+      }
       return '<tr style="cursor:pointer" onclick="showDetail(' + i + ')">' +
         '<td class="mono">' + escHtml(l.timestamp) + '</td>' +
         '<td>' + escHtml(l.model) + '</td>' +
@@ -2336,6 +2382,7 @@ async function loadHistory() {
         '<td class="' + cls + '">' + sc + err + '</td>' +
         '<td class="mono">' + l.latency_ms + 'ms</td>' +
         '<td class="mono">' + tok + '</td>' +
+        '<td class="mono">' + cacheCol + '</td>' +
       '</tr>';
     }).join('');
   } catch (e) {
@@ -2360,6 +2407,7 @@ function showDetail(idx) {
       '<div class="modal-field"><div class="field-label">Status</div><div class="field-value ' + cls + '">' + sc + '</div></div>' +
       '<div class="modal-field"><div class="field-label">Latency</div><div class="field-value">' + l.latency_ms + 'ms</div></div>' +
       '<div class="modal-field"><div class="field-label">Tokens</div><div class="field-value">' + l.tokens_in + ' in / ' + l.tokens_out + ' out</div></div>' +
+      (l.cache_hit_pct !== undefined && l.cache_hit_pct >= 0 ? '<div class="modal-field"><div class="field-label">Cache Hit</div><div class="field-value">' + l.cache_hit_pct + '%</div></div>' : '') +
     '</div>';
 
   if (l.error_msg) {
@@ -2477,6 +2525,24 @@ async function refreshAccounts() {
   } catch (e) {
     alert('Refresh error: ' + e.message);
   }
+}
+
+/* ── CB selector mode (rr|sticky|content-hash|hybrid) ── */
+async function loadCBSelectorMode() {
+  try {
+    var r = await fetchJSON('/cb/selector-mode');
+    var sel = document.getElementById('cbSelectorMode');
+    if (sel && r.mode) sel.value = r.mode;
+    var stickyEl = document.getElementById('cbSelectorSticky');
+    if (stickyEl) stickyEl.textContent = r.sticky_active > 0 ? ('· ' + r.sticky_active + ' active session' + (r.sticky_active !== 1 ? 's' : '')) : '';
+  } catch (e) { /* silent — only visible to admin */ }
+}
+async function changeCBSelectorMode(mode) {
+  try {
+    var r = await apiFetch('/cb/selector-mode', { method: 'PUT', body: JSON.stringify({ mode: mode }) });
+    if (r.error) { alert('Failed: ' + r.error); loadCBSelectorMode(); return; }
+    loadCBSelectorMode();
+  } catch (e) { alert('Error: ' + e.message); loadCBSelectorMode(); }
 }
 
 /* ══════════════════════════════════════════════════════════
