@@ -136,35 +136,21 @@ func ProxyRequest(grokAM *upstream.GrokAccountManager, cbKM *upstream.CBKeyManag
 				{"id": "cb/gpt-5.6-luna", "object": "model", "owned_by": "codebuddy"},
 				{"id": "cb/gpt-5.5", "object": "model", "owned_by": "codebuddy"},
 				{"id": "cb/gpt-5.4", "object": "model", "owned_by": "codebuddy"},
-				{"id": "cb/gpt-5.1", "object": "model", "owned_by": "codebuddy"},
-				{"id": "cb/gpt-5", "object": "model", "owned_by": "codebuddy"},
 				{"id": "cb/gpt-4.1", "object": "model", "owned_by": "codebuddy"},
 				{"id": "cb/gpt-5.3-codex", "object": "model", "owned_by": "codebuddy"},
-				{"id": "cb/gpt-5.1-codex", "object": "model", "owned_by": "codebuddy"},
-				{"id": "cb/gpt-5.1-codex-mini", "object": "model", "owned_by": "codebuddy"},
 				// CodeBuddy — Claude
 				{"id": "cb/claude-opus-4.7-1m", "object": "model", "owned_by": "codebuddy"},
 				{"id": "cb/claude-opus-4.6", "object": "model", "owned_by": "codebuddy"},
 				{"id": "cb/claude-sonnet-4.6", "object": "model", "owned_by": "codebuddy"},
-				{"id": "cb/claude-haiku-4.5", "object": "model", "owned_by": "codebuddy"},
 				// CodeBuddy — Gemini
 				{"id": "cb/gemini-3.1-pro", "object": "model", "owned_by": "codebuddy"},
 				{"id": "cb/gemini-3.5-flash", "object": "model", "owned_by": "codebuddy"},
-				{"id": "cb/gemini-3.0-flash", "object": "model", "owned_by": "codebuddy"},
-				{"id": "cb/gemini-2.5-pro", "object": "model", "owned_by": "codebuddy"},
-				{"id": "cb/gemini-2.5-flash", "object": "model", "owned_by": "codebuddy"},
-				{"id": "cb/gemini-3.1-flash-lite", "object": "model", "owned_by": "codebuddy"},
-				// CodeBuddy — OpenAI Reasoning
-				{"id": "cb/o3", "object": "model", "owned_by": "codebuddy"},
-				{"id": "cb/o4-mini", "object": "model", "owned_by": "codebuddy"},
 				// CodeBuddy — GLM
 				{"id": "cb/glm-5.2", "object": "model", "owned_by": "codebuddy"},
 				{"id": "cb/glm-5.1", "object": "model", "owned_by": "codebuddy"},
 				{"id": "cb/glm-5.0", "object": "model", "owned_by": "codebuddy"},
-				{"id": "cb/glm-4.6", "object": "model", "owned_by": "codebuddy"},
 				// CodeBuddy — DeepSeek
 				{"id": "cb/deepseek-v3", "object": "model", "owned_by": "codebuddy"},
-				{"id": "cb/deepseek-v3.2", "object": "model", "owned_by": "codebuddy"},
 				// CodeBuddy — Kimi
 				{"id": "cb/kimi-k2.5", "object": "model", "owned_by": "codebuddy"},
 				{"id": "cb/kimi-k3", "object": "model", "owned_by": "codebuddy"},

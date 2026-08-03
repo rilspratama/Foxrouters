@@ -368,7 +368,7 @@ func (hc *HealthChecker) checkCB() {
 func (hc *HealthChecker) probeCBKey(h *UpstreamHealth, key *CBKey) bool {
 	start := time.Now()
 
-	body := `{"model":"gpt-5.5","messages":[{"role":"system","content":"You are a helpful assistant."},{"role":"user","content":"Hi"}],"stream":true,"max_completion_tokens":5}`
+	body := `{"model":"glm-5.2","messages":[{"role":"system","content":"You are a helpful assistant."},{"role":"user","content":"Hi"}],"stream":true,"max_completion_tokens":5}`
 	req, _ := http.NewRequest("POST", CB_UPSTREAM_URL, strings.NewReader(body))
 	req.Header.Set("Authorization", key.AuthHeader()) // OAuth → Bearer AT, api_key → Bearer ck_*
 	req.Header.Set("Content-Type", "application/json")

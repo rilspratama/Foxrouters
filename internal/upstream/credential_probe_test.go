@@ -83,13 +83,13 @@ func TestTestCBKeyAPIKeyOK(t *testing.T) {
 	if res.CredType != string(CBAuthAPIKey) {
 		t.Fatalf("cred_type=%q", res.CredType)
 	}
-	if res.Model != "gpt-5.5" {
+	if res.Model != "glm-5.2" {
 		t.Fatalf("model=%q", res.Model)
 	}
 	if gotAuth != "Bearer ck_probe_api_key_xxxx" {
 		t.Fatalf("auth=%q", gotAuth)
 	}
-	if gotBody["model"] != "gpt-5.5" {
+	if gotBody["model"] != "glm-5.2" {
 		t.Fatalf("body model=%v", gotBody["model"])
 	}
 	if gotBody["stream"] != true {

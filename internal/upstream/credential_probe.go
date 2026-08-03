@@ -60,7 +60,7 @@ func (am *GrokAccountManager) GetByEmail(email string) *GrokAccount {
 // Disabled keys are still tested so operators can verify recovery.
 // Network I/O happens outside any account mutex.
 func TestCBKey(key *CBKey) CredentialProbeResult {
-	const model = "gpt-5.5"
+	const model = "glm-5.2"
 	res := CredentialProbeResult{Model: model}
 	if key == nil {
 		res.Error = "cb key is nil"
