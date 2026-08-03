@@ -1299,6 +1299,42 @@ func cbTransform(body []byte) ([]byte, error) {
 			m["messages"] = append([]any{sys}, msgs...)
 		}
 	}
+	// Normalize reasoning params. CodeBuddy upstream only accepts
+	// `reasoning_effort` (flat string: low/medium/high/xhigh). Clients send
+	// different shapes:
+	//   Hermes/OpenRouter: extra_body.reasoning = {enabled:true, effort:"high"}
+	//   DeepSeek: thinking = {type:"enabled"}
+	//   Qwen/ZAI: enable_thinking = true
+	// Translate all of them to reasoning_effort if not already set.
+	if _, hasRE := m["reasoning_effort"]; !hasRE {
+		if r, ok := m["reasoning"].(map[string]any); ok {
+			if enabled, ok := r["enabled"].(bool); ok && !enabled {
+				// explicitly disabled — skip
+			} else if effort, ok := r["effort"].(string); ok && effort != "" {
+				m["reasoning_effort"] = effort
+			} else {
+				m["reasoning_effort"] = "medium"
+			}
+		} else if t, ok := m["thinking"].(map[string]any); ok {
+			if tp, ok := t["type"].(string); ok && tp == "enabled" {
+				m["reasoning_effort"] = "medium"
+			}
+		} else if et, ok := m["enable_thinking"].(bool); ok && et {
+			m["reasoning_effort"] = "medium"
+		}
+	}
+	// Also check nested extra_body.reasoning (OpenAI SDK wraps extra_body fields)
+	if eb, ok := m["extra_body"].(map[string]any); ok {
+		if _, hasRE := m["reasoning_effort"]; !hasRE {
+			if r, ok := eb["reasoning"].(map[string]any); ok {
+				if effort, ok := r["effort"].(string); ok && effort != "" {
+					m["reasoning_effort"] = effort
+				} else {
+					m["reasoning_effort"] = "medium"
+				}
+			}
+		}
+	}
 	return json.Marshal(m)
 }
 
