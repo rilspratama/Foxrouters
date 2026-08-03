@@ -15,6 +15,7 @@ type GrokAccount = upstream.GrokAccount
 type GrokAccountManager = upstream.GrokAccountManager
 type CBKey = upstream.CBKey
 type CBKeyManager = upstream.CBKeyManager
+type CBSelectorMode = upstream.CBSelectorMode
 type UpstreamHealth = upstream.UpstreamHealth
 type HealthChecker = upstream.HealthChecker
 type CircuitState = upstream.CircuitState
@@ -39,6 +40,12 @@ const (
 	// CodeBuddy credential types
 	CBAuthAPIKey = upstream.CBAuthAPIKey
 	CBAuthOAuth  = upstream.CBAuthOAuth
+
+	// CB selector modes
+	SelectorRR          = upstream.SelectorRR
+	SelectorSticky      = upstream.SelectorSticky
+	SelectorContentHash = upstream.SelectorContentHash
+	SelectorHybrid      = upstream.SelectorHybrid
 )
 
 // Function/worker re-exports
@@ -57,6 +64,11 @@ var (
 	proxyGrok       = upstream.ProxyGrok
 	proxyCodeBuddy  = upstream.ProxyCodeBuddy
 	healthStatusOK  = upstream.HealthStatusOK
+
+	// CB selector mode (rr|sticky|content-hash|hybrid)
+	GetSelectorMode  = upstream.GetSelectorMode
+	SetSelectorMode  = upstream.SetSelectorMode
+	LoadSelectorMode = upstream.LoadSelectorMode
 
 	truncateLog = upstream.TruncateLog
 )

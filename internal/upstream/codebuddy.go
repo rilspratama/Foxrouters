@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"hash/fnv"
 	"io"
 	"log/slog"
 	"net/http"
@@ -13,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -654,6 +656,181 @@ func (km *CBKeyManager) StickyCount() int {
 	return len(km.sticky)
 }
 
+// ---------------------------------------------------------------------------
+// Key selection modes (router-level strategy, runtime-configurable)
+// ---------------------------------------------------------------------------
+
+// CBSelectorMode picks how ProxyCodeBuddy chooses the upstream key.
+type CBSelectorMode string
+
+const (
+	// SelectorRR — classic round-robin over enabled keys (no cache locality).
+	SelectorRR CBSelectorMode = "rr"
+	// SelectorSticky — session-id header binds conversation to one key until
+	// it dies (per-conversation cache locality; different sessions may land on
+	// different keys, re-caching the shared system prompt each time).
+	SelectorSticky CBSelectorMode = "sticky"
+	// SelectorContentHash — hash(model + first system message) deterministically
+	// maps to one key: every session sharing the same system prompt lands on
+	// the same account → giant shared prefix cached once.
+	SelectorContentHash CBSelectorMode = "content-hash"
+	// SelectorHybrid — content-hash picks a small bucket (~3 keys); session-id
+	// sticks to one key inside the bucket. Dead keys rebind within the bucket,
+	// keeping the shared system-prompt cache warm.
+	SelectorHybrid CBSelectorMode = "hybrid"
+)
+
+// hybridBucketSize is how many enabled keys form one hybrid bucket.
+const hybridBucketSize = 3
+
+// selectorMode holds the active mode (atomic for lock-free hot-path reads).
+var selectorMode atomic.Value // stores CBSelectorMode
+
+func init() {
+	m := CBSelectorMode(os.Getenv("CB_SELECTOR_MODE"))
+	if !validSelectorMode(m) {
+		m = SelectorSticky // default: sticky sessions (prompt-cache locality)
+	}
+	selectorMode.Store(m)
+}
+
+func validSelectorMode(m CBSelectorMode) bool {
+	switch m {
+	case SelectorRR, SelectorSticky, SelectorContentHash, SelectorHybrid:
+		return true
+	}
+	return false
+}
+
+// GetSelectorMode returns the active CB key selection mode.
+func GetSelectorMode() CBSelectorMode { return selectorMode.Load().(CBSelectorMode) }
+
+// SetSelectorMode validates + stores the mode and persists it to Redis
+// (cb:config hash) so restarts keep the operator's choice.
+func SetSelectorMode(store *db.Store, m CBSelectorMode) error {
+	if !validSelectorMode(m) {
+		return fmt.Errorf("invalid selector mode %q (valid: rr|sticky|content-hash|hybrid)", m)
+	}
+	selectorMode.Store(m)
+	if store != nil {
+		if err := store.SetCBConfig("selector_mode", string(m)); err != nil {
+			slog.Warn("selector mode persist failed", "module", "cb", "error", err)
+		}
+	}
+	slog.Info("cb selector mode changed", "module", "cb", "mode", m)
+	return nil
+}
+
+// LoadSelectorMode restores the persisted mode from Redis (called at startup).
+func LoadSelectorMode(store *db.Store) {
+	if store == nil {
+		return
+	}
+	if v, err := store.GetCBConfig("selector_mode"); err == nil && validSelectorMode(CBSelectorMode(v)) {
+		selectorMode.Store(CBSelectorMode(v))
+		slog.Info("cb selector mode restored", "module", "cb", "mode", v)
+	}
+}
+
+// NextForMode selects a key according to the active mode.
+//   - sessionID: from x-session-id/x-conversation-id/x-chat-id header (may be "")
+//   - sysHash:   hash of model + first system message content (may be "")
+func (km *CBKeyManager) NextForMode(mode CBSelectorMode, sessionID, sysHash string) (*CBKey, error) {
+	switch mode {
+	case SelectorRR:
+		return km.Next()
+	case SelectorContentHash:
+		return km.nextByHash(sysHash)
+	case SelectorHybrid:
+		return km.nextHybrid(sessionID, sysHash)
+	case SelectorSticky:
+		fallthrough
+	default:
+		if sessionID != "" {
+			return km.NextSticky(sessionID)
+		}
+		return km.Next()
+	}
+}
+
+// nextByHash: deterministic key from sysHash (FNV-1a over enabled keys).
+// All sessions with the same system prompt land on the same account.
+func (km *CBKeyManager) nextByHash(sysHash string) (*CBKey, error) {
+	km.mu.RLock()
+	enabled := make([]*CBKey, 0, len(km.keys))
+	for _, k := range km.keys {
+		if !k.IsDisabled() {
+			enabled = append(enabled, k)
+		}
+	}
+	km.mu.RUnlock()
+	if len(enabled) == 0 {
+		return nil, fmt.Errorf("all cb keys disabled")
+	}
+	if sysHash == "" {
+		return km.Next()
+	}
+	h := fnv.New64a()
+	h.Write([]byte(sysHash))
+	return enabled[h.Sum64()%uint64(len(enabled))], nil
+}
+
+// nextHybrid: content-hash selects a bucket of hybridBucketSize enabled keys;
+// session-id sticks to one key inside the bucket (rebinding within the bucket
+// when the key dies → shared system-prompt cache stays warm).
+func (km *CBKeyManager) nextHybrid(sessionID, sysHash string) (*CBKey, error) {
+	km.mu.RLock()
+	enabled := make([]*CBKey, 0, len(km.keys))
+	for _, k := range km.keys {
+		if !k.IsDisabled() {
+			enabled = append(enabled, k)
+		}
+	}
+	km.mu.RUnlock()
+	if len(enabled) == 0 {
+		return nil, fmt.Errorf("all cb keys disabled")
+	}
+	if sysHash == "" {
+		if sessionID != "" {
+			return km.NextSticky(sessionID)
+		}
+		return km.Next()
+	}
+
+	// Bucket = consecutive slice of enabled keys starting at hash position.
+	h := fnv.New64a()
+	h.Write([]byte(sysHash))
+	start := int(h.Sum64() % uint64(len(enabled)))
+	bucket := make([]*CBKey, 0, hybridBucketSize)
+	for i := 0; i < hybridBucketSize && i < len(enabled); i++ {
+		bucket = append(bucket, enabled[(start+i)%len(enabled)])
+	}
+
+	// Session binding within bucket (reuse sticky map — but only accept the
+	// bound key if it is in THIS bucket; otherwise rebind into the bucket).
+	if sessionID != "" {
+		km.stickyMu.Lock()
+		if b, ok := km.sticky[sessionID]; ok && !b.key.IsDisabled() {
+			for _, k := range bucket {
+				if k == b.key {
+					b.lastSeen = time.Now()
+					km.stickyMu.Unlock()
+					return k, nil
+				}
+			}
+		}
+		delete(km.sticky, sessionID)
+		// bind first bucket key (deterministic per session: hash sessionID)
+		sh := fnv.New64a()
+		sh.Write([]byte(sessionID))
+		pick := bucket[sh.Sum64()%uint64(len(bucket))]
+		km.sticky[sessionID] = &stickyBinding{key: pick, lastSeen: time.Now()}
+		km.stickyMu.Unlock()
+		return pick, nil
+	}
+	return bucket[0], nil
+}
+
 // SetKeysForTest replaces the internal slice. Whitebox tests only.
 func (km *CBKeyManager) SetKeysForTest(keys []*CBKey) {
 	km.mu.Lock()
@@ -1259,13 +1436,35 @@ func ProxyCodeBuddy(c *gin.Context, body []byte, bodyMap map[string]any, km *CBK
 		sessionID = sessionID[:128]
 	}
 
+	// sysHash: identifies the shared prompt prefix (model + first system
+	// message) for content-hash / hybrid selection modes. Computed from the
+	// already-transformed body so the prefix matches what upstream sees.
+	sysHash := ""
+	{
+		var tm map[string]any
+		if json.Unmarshal(transformed, &tm) == nil {
+			if model, _ := tm["model"].(string); model != "" {
+				sysHash = model
+			}
+			if msgs, ok := tm["messages"].([]any); ok && len(msgs) > 0 {
+				if first, ok := msgs[0].(map[string]any); ok && first["role"] == "system" {
+					if sc, ok := first["content"].(string); ok {
+						sysHash += "|" + sc
+					}
+				}
+			}
+		}
+	}
+	mode := GetSelectorMode()
+
 	var lastResp *http.Response
 	var lastKey *CBKey
 	reqStart := time.Now()
 
-	// Sticky-bound key gets the first attempts before falling back to RR.
+	// Mode-selected key gets the first attempts before falling back to RR.
+	// RR mode: no preference — every attempt is plain round-robin.
 	stickyAttempts := 0
-	if sessionID != "" {
+	if mode != SelectorRR {
 		stickyAttempts = 2
 	}
 
@@ -1279,7 +1478,7 @@ func ProxyCodeBuddy(c *gin.Context, body []byte, bodyMap map[string]any, km *CBK
 		var key *CBKey
 		var err error
 		if attempt < stickyAttempts {
-			key, err = km.NextSticky(sessionID)
+			key, err = km.NextForMode(mode, sessionID, sysHash)
 		} else {
 			key, err = km.Next()
 		}

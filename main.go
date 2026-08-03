@@ -112,6 +112,7 @@ func main() {
 	if err := cbKM.LoadFromRedis(); err != nil {
 		slog.Warn("LoadFromRedis failed, starting empty", "module", "cb", "error", err)
 	}
+	LoadSelectorMode(db) // restore persisted selector mode (rr|sticky|content-hash|hybrid)
 
 	// Health checker: active + passive monitoring with circuit breaker
 	hc := newHealthChecker(grokAM, cbKM)
@@ -270,6 +271,28 @@ func main() {
 	r.POST("/cb/oauth/device/start", csrfGuard(), adminAuth, handleCBOAuthDeviceStart())
 	r.GET("/cb/oauth/device/poll", csrfGuard(), adminAuth, handleCBOAuthDevicePoll())
 	r.POST("/cb/credits/sync", csrfGuard(), adminAuth, handleSyncCBCredits(cbKM))
+	// CB selector mode: rr | sticky | content-hash | hybrid (runtime switch, Redis-persisted)
+	r.GET("/cb/selector-mode", adminAuth, func(c *gin.Context) {
+		c.JSON(200, gin.H{
+			"mode":          string(GetSelectorMode()),
+			"valid_modes":   []string{string(SelectorRR), string(SelectorSticky), string(SelectorContentHash), string(SelectorHybrid)},
+			"sticky_active": cbKM.StickyCount(),
+		})
+	})
+	r.PUT("/cb/selector-mode", csrfGuard(), adminAuth, func(c *gin.Context) {
+		var body struct {
+			Mode string `json:"mode"`
+		}
+		if err := c.ShouldBindJSON(&body); err != nil {
+			c.JSON(400, gin.H{"error": "invalid json"})
+			return
+		}
+		if err := SetSelectorMode(db, CBSelectorMode(body.Mode)); err != nil {
+			c.JSON(400, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(200, gin.H{"mode": body.Mode, "persisted": true})
+	})
 	r.POST("/cb/keys/test", csrfGuard(), adminAuth, handleTestCBKey(cbKM))
 	r.POST("/accounts/test", csrfGuard(), adminAuth, handleTestGrokAccount(grokAM))
 	r.DELETE("/accounts/:email", csrfGuard(), adminAuth, handleDeleteAccount(grokAM))

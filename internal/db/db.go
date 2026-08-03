@@ -392,6 +392,26 @@ func (s *Store) SaveCBKey(dto CBKeyDTO) {
 	}
 }
 
+// SetCBConfig writes a scalar CodeBuddy config value (selector mode etc.).
+func (s *Store) SetCBConfig(field, value string) error {
+	if s == nil {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+	return s.rdb.HSet(ctx, "cb:config", field, value).Err()
+}
+
+// GetCBConfig reads a scalar CodeBuddy config value.
+func (s *Store) GetCBConfig(field string) (string, error) {
+	if s == nil {
+		return "", fmt.Errorf("no store")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+	return s.rdb.HGet(ctx, "cb:config", field).Result()
+}
+
 func (s *Store) LoadCBKeys() (map[string]map[string]string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
