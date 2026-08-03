@@ -109,6 +109,7 @@ LOG_SQLITE_PATH=/var/lib/foxrouters/logs.db  # only used when LOG_BACKEND=sqlite
 CLICKHOUSE_ADDR=127.0.0.1:9000   # only used when LOG_BACKEND=clickhouse
 CLICKHOUSE_DB=gateway
 GATEWAY_KEY_FILE / CB_KEY_FILE
+CB_SELECTOR_MODE=sticky          # rr | sticky (default) | content-hash | hybrid
 PORT=20130
 COOKIE_SECURE=0  # dev HTTP; omit for prod (defaults to HTTPS-only)
 ```
@@ -134,6 +135,8 @@ curl -s http://127.0.0.1:20130/health
 | `GET/POST /accounts` … | Grok import/delete/refresh |
 | `POST /cb/import` | CB API key (`ck_*`) single |
 | `POST /cb/import/bulk` | CB API keys bulk |
+| `GET /cb/selector-mode` | Current key-selection mode + sticky count |
+| `PUT /cb/selector-mode` | `{"mode":"hybrid"}` → switch + Redis-persist |
 | `POST /cb/oauth/import` | CB OAuth single (email+AT+RT+expires_in?) — eager refresh if AT near-expiry |
 | `POST /cb/oauth/import/bulk` | CB OAuth bulk (`accounts[]` JSON array) — idempotent by email |
 | `POST /cb/oauth/device/start` | OAuth login URL — `{state, auth_url}` (platform default CLI) |

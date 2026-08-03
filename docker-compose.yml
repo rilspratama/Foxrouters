@@ -93,6 +93,10 @@ services:
       CLICKHOUSE_USER: default
       CLICKHOUSE_PASSWORD: "${CLICKHOUSE_PASSWORD}"
       PORT: "20130"
+      # CodeBuddy key selection strategy (rr|sticky|content-hash|hybrid).
+      # Sticky (default) binds conversations to one account for prompt-cache
+      # locality. Runtime switchable via PUT /cb/selector-mode (Redis-persisted).
+      CB_SELECTOR_MODE: "${CB_SELECTOR_MODE:-sticky}"
     volumes:
       # Persist the sqlite log DB (only used in the default sqlite backend).
       # Safe to keep mounted even when running ClickHouse mode — the gateway
