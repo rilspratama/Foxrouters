@@ -120,43 +120,67 @@ func ProxyRequest(grokAM *upstream.GrokAccountManager, cbKM *upstream.CBKeyManag
 		if path == "/v1/models" || path == "/models" {
 			models := []gin.H{
 				// Grok models
-				{"id": "grok-4.5", "object": "model", "owned_by": "xai"},
-				{"id": "grok-4.5-high", "object": "model", "owned_by": "xai"},
-				{"id": "grok-4.5-medium", "object": "model", "owned_by": "xai"},
-				{"id": "grok-4.5-low", "object": "model", "owned_by": "xai"},
-				{"id": "grok-4.5-xhigh", "object": "model", "owned_by": "xai"},
-				{"id": "grok-4.5-auto", "object": "model", "owned_by": "xai"},
-				{"id": "grok-4.5-none", "object": "model", "owned_by": "xai"},
-				{"id": "grok-4", "object": "model", "owned_by": "xai"},
-				{"id": "grok-4-fast-reasoning", "object": "model", "owned_by": "xai"},
-				{"id": "grok-code-fast-1", "object": "model", "owned_by": "xai"},
+				{"id": "grok-4.5", "object": "model", "owned_by": "xai", "reasoning": true},
+				{"id": "grok-4.5-high", "object": "model", "owned_by": "xai", "reasoning": true},
+				{"id": "grok-4.5-medium", "object": "model", "owned_by": "xai", "reasoning": true},
+				{"id": "grok-4.5-low", "object": "model", "owned_by": "xai", "reasoning": true},
+				{"id": "grok-4.5-xhigh", "object": "model", "owned_by": "xai", "reasoning": true},
+				{"id": "grok-4.5-auto", "object": "model", "owned_by": "xai", "reasoning": true},
+				{"id": "grok-4.5-none", "object": "model", "owned_by": "xai", "reasoning": true},
+				{"id": "grok-4", "object": "model", "owned_by": "xai", "reasoning": true},
+				{"id": "grok-4-fast-reasoning", "object": "model", "owned_by": "xai", "reasoning": true},
+				{"id": "grok-code-fast-1", "object": "model", "owned_by": "xai", "reasoning": true},
 				// CodeBuddy — GPT
-				{"id": "cb/gpt-5.6-sol", "object": "model", "owned_by": "codebuddy"},
-				{"id": "cb/gpt-5.6-terra", "object": "model", "owned_by": "codebuddy"},
-				{"id": "cb/gpt-5.6-luna", "object": "model", "owned_by": "codebuddy"},
-				{"id": "cb/gpt-5.5", "object": "model", "owned_by": "codebuddy"},
-				{"id": "cb/gpt-5.4", "object": "model", "owned_by": "codebuddy"},
-				{"id": "cb/gpt-4.1", "object": "model", "owned_by": "codebuddy"},
-				{"id": "cb/gpt-5.3-codex", "object": "model", "owned_by": "codebuddy"},
+				{"id": "gpt-5.6-sol", "object": "model", "owned_by": "codebuddy", "reasoning": true},
+				{"id": "gpt-5.6-terra", "object": "model", "owned_by": "codebuddy", "reasoning": true},
+				{"id": "gpt-5.6-luna", "object": "model", "owned_by": "codebuddy", "reasoning": true},
+				{"id": "gpt-5.5", "object": "model", "owned_by": "codebuddy", "reasoning": true},
+				{"id": "gpt-5.4", "object": "model", "owned_by": "codebuddy", "reasoning": true},
+				{"id": "gpt-4.1", "object": "model", "owned_by": "codebuddy", "reasoning": false},
+				{"id": "gpt-5.3-codex", "object": "model", "owned_by": "codebuddy", "reasoning": true},
 				// CodeBuddy — Claude
-				{"id": "cb/claude-opus-4.7-1m", "object": "model", "owned_by": "codebuddy"},
-				{"id": "cb/claude-opus-4.6", "object": "model", "owned_by": "codebuddy"},
-				{"id": "cb/claude-sonnet-4.6", "object": "model", "owned_by": "codebuddy"},
+				{"id": "claude-opus-4.7-1m", "object": "model", "owned_by": "codebuddy", "reasoning": true},
+				{"id": "claude-opus-4.6", "object": "model", "owned_by": "codebuddy", "reasoning": true},
+				{"id": "claude-sonnet-4.6", "object": "model", "owned_by": "codebuddy", "reasoning": true},
 				// CodeBuddy — Gemini
-				{"id": "cb/gemini-3.1-pro", "object": "model", "owned_by": "codebuddy"},
-				{"id": "cb/gemini-3.5-flash", "object": "model", "owned_by": "codebuddy"},
+				{"id": "gemini-3.1-pro", "object": "model", "owned_by": "codebuddy", "reasoning": true},
+				{"id": "gemini-3.5-flash", "object": "model", "owned_by": "codebuddy", "reasoning": false},
 				// CodeBuddy — GLM
-				{"id": "cb/glm-5.2", "object": "model", "owned_by": "codebuddy"},
-				{"id": "cb/glm-5.1", "object": "model", "owned_by": "codebuddy"},
-				{"id": "cb/glm-5.0", "object": "model", "owned_by": "codebuddy"},
+				{"id": "glm-5.2", "object": "model", "owned_by": "codebuddy", "reasoning": true},
+				{"id": "glm-5.1", "object": "model", "owned_by": "codebuddy", "reasoning": true},
+				{"id": "glm-5.0", "object": "model", "owned_by": "codebuddy", "reasoning": true},
 				// CodeBuddy — DeepSeek
-				{"id": "cb/deepseek-v3", "object": "model", "owned_by": "codebuddy"},
+				{"id": "deepseek-v3", "object": "model", "owned_by": "codebuddy", "reasoning": true},
 				// CodeBuddy — Kimi
-				{"id": "cb/kimi-k2.5", "object": "model", "owned_by": "codebuddy"},
-				{"id": "cb/kimi-k3", "object": "model", "owned_by": "codebuddy"},
+				{"id": "kimi-k2.5", "object": "model", "owned_by": "codebuddy", "reasoning": true},
+				{"id": "kimi-k3", "object": "model", "owned_by": "codebuddy", "reasoning": true},
 				// CodeBuddy — Default
-				{"id": "cb/default-model", "object": "model", "owned_by": "codebuddy"},
+				{"id": "default-model", "object": "model", "owned_by": "codebuddy", "reasoning": true},
 			}
+			// Backward-compat aliases: cb/<model> → same model, same upstream.
+			// Routing treats non-grok-* as CodeBuddy, so both shapes work.
+			cbAliases := []gin.H{
+				{"id": "cb/gpt-5.6-sol", "object": "model", "owned_by": "codebuddy", "reasoning": true},
+				{"id": "cb/gpt-5.6-terra", "object": "model", "owned_by": "codebuddy", "reasoning": true},
+				{"id": "cb/gpt-5.6-luna", "object": "model", "owned_by": "codebuddy", "reasoning": true},
+				{"id": "cb/gpt-5.5", "object": "model", "owned_by": "codebuddy", "reasoning": true},
+				{"id": "cb/gpt-5.4", "object": "model", "owned_by": "codebuddy", "reasoning": true},
+				{"id": "cb/gpt-4.1", "object": "model", "owned_by": "codebuddy", "reasoning": false},
+				{"id": "cb/gpt-5.3-codex", "object": "model", "owned_by": "codebuddy", "reasoning": true},
+				{"id": "cb/claude-opus-4.7-1m", "object": "model", "owned_by": "codebuddy", "reasoning": true},
+				{"id": "cb/claude-opus-4.6", "object": "model", "owned_by": "codebuddy", "reasoning": true},
+				{"id": "cb/claude-sonnet-4.6", "object": "model", "owned_by": "codebuddy", "reasoning": true},
+				{"id": "cb/gemini-3.1-pro", "object": "model", "owned_by": "codebuddy", "reasoning": true},
+				{"id": "cb/gemini-3.5-flash", "object": "model", "owned_by": "codebuddy", "reasoning": false},
+				{"id": "cb/glm-5.2", "object": "model", "owned_by": "codebuddy", "reasoning": true},
+				{"id": "cb/glm-5.1", "object": "model", "owned_by": "codebuddy", "reasoning": true},
+				{"id": "cb/glm-5.0", "object": "model", "owned_by": "codebuddy", "reasoning": true},
+				{"id": "cb/deepseek-v3", "object": "model", "owned_by": "codebuddy", "reasoning": true},
+				{"id": "cb/kimi-k2.5", "object": "model", "owned_by": "codebuddy", "reasoning": true},
+				{"id": "cb/kimi-k3", "object": "model", "owned_by": "codebuddy", "reasoning": true},
+				{"id": "cb/default-model", "object": "model", "owned_by": "codebuddy", "reasoning": true},
+			}
+			models = append(models, cbAliases...)
 			// Append runtime-registered custom models.
 			if registry != nil {
 				for _, entry := range registry.ListModels() {
