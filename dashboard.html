@@ -1877,6 +1877,9 @@ function router() {
     showCurrentKey();
     loadGatewayKeys();
   }
+  if (hash === '#/accounts') {
+    loadCBSelectorMode();
+  }
   if (hash === '#/models') {
     loadModels();
   }
