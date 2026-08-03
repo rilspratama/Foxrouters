@@ -2,13 +2,32 @@
 
 **Service:** Docker Compose (`foxrouters` container) · port **20130** · image local / GHCR  
 **Repo:** `/root/nexus-workspace/foxrouters/`  
-**Live version:** `const Version` in `main.go` / image tag (currently **v1.6.2**)
+**Live version:** `const Version` in `main.go` / image tag (currently **v1.6.3**)
 
 Policy: **test (`go test -race`) before build/restart**. Secrets only via `.gateway.env` (gitignored).
 
 ---
 
-## Unreleased — Sticky sessions + selector modes + cache HIT % + reasoning (2026-08-03)
+## v1.6.3 — Circuit breaker fixes + model cleanup + reasoning normalization (2026-08-03)
+
+### Fixed
+- **Circuit breaker opens on model-not-found (P0)** — `400/11102` errors from retired models were counted toward `consecutiveErrs`, opening the circuit and blocking ALL CB traffic. Two fixes: (1) proxy path no longer calls `RecordRequest` with error on 400/11102, (2) health probe reads 400 body before close — `resp.Body.Close()` was running before `io.ReadAll`, making the model-not-found detection non-functional.
+- **`resp.Body` read-after-close in health probe (P0 audit)** — `resp.Body.Close()` at line 402 ran unconditionally before the 400 model-not-found check at line 423. `io.ReadAll` on closed body returns empty → detection never matched. Fixed: each branch closes explicitly.
+- **`extra_body.reasoning.enabled=false` ignored (P1 audit)** — `cbTransform`'s nested `extra_body.reasoning` branch only checked for `effort` string, defaulting to `"medium"`. Clients explicitly disabling reasoning got it force-enabled. Now mirrors top-level check: skip if `enabled:false`.
+- **Stream cache-hit tracking** — stream path rebuilt minimal usage JSON (prompt/completion/total only), dropping `prompt_cache_hit_tokens`. Fixed: capture full `streamUsage` map from last non-nil SSE chunk, embed as-is in stored `response_body`.
+- **Dashboard selector not syncing** — `loadCBSelectorMode()` only called via `showTab()` subtab click, not on `#/accounts` page entry. Fixed: call in `router()` for `#/accounts` hash.
+
+### Changed
+- **Removed 15 unavailable CB models** from `/v1/models` — verified "not available" on CodeBuddy upstream: gpt-5, gpt-5.1, gpt-5.1-codex, gpt-5.1-codex-mini, gpt-5.2, claude-haiku-4.5, deepseek-v3.2, gemini-3.0-flash, gemini-2.5-pro, gemini-2.5-flash, gemini-3.1-flash-lite, glm-4.6, glm-5.4, o3, o4-mini.
+- **Probe/health-check model** — `gpt-5.5` → `glm-5.2` (always available + returns reasoning_content).
+- **Dashboard Quick Test** — updated dropdown to available models only.
+
+### Added
+- **Reasoning normalization in `cbTransform`** — translates 4 client formats to `reasoning_effort` flat string: `reasoning:{effort}`, `extra_body.reasoning:{effort}`, `thinking:{type:enabled}`, `enable_thinking:true`. Non-invasive (skips if `reasoning_effort` already set).
+
+---
+
+## v1.6.2 — Sticky sessions + selector modes + cache HIT % + reasoning (2026-08-03)
 
 ### Added
 - **CB key selection modes** (`rr` | `sticky` | `content-hash` | `hybrid`) — runtime-switchable via `GET/PUT /cb/selector-mode`, Redis-persisted (`cb:config.selector_mode`), env default `CB_SELECTOR_MODE=sticky`. `NextForMode()` dispatches by mode; `nextByHash()` (FNV-1a over model+system prompt) for content-hash; `nextHybrid()` picks 3-key bucket + session sticks within bucket.
