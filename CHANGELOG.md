@@ -8,6 +8,18 @@ Policy: **test (`go test -race`) before build/restart**. Secrets only via `.gate
 
 ---
 
+## Unreleased — Sticky sessions + selector modes + cache HIT % + reasoning (2026-08-03)
+
+### Added
+- **CB key selection modes** (`rr` | `sticky` | `content-hash` | `hybrid`) — runtime-switchable via `GET/PUT /cb/selector-mode`, Redis-persisted (`cb:config.selector_mode`), env default `CB_SELECTOR_MODE=sticky`. `NextForMode()` dispatches by mode; `nextByHash()` (FNV-1a over model+system prompt) for content-hash; `nextHybrid()` picks 3-key bucket + session sticks within bucket.
+- **Sticky session binding** — `x-session-id`/`x-conversation-id`/`x-chat-id` header binds conversation to one CB key (30m TTL, 5m janitor). Rebinds on key death (14018/14017/401/403).
+- **Cache HIT % in history** — `request_logs.cache_hit_pct` REAL column (ALTER TABLE migration, idempotent). `extractCacheHitPct()` parses usage at write time. Dashboard: history table Cache% column, stats grid avg card, detail modal field.
+- **Selector mode UI** — Accounts → CodeBuddy tab → Key Selection dropdown with live sticky session count.
+
+### Fixed
+- **reasoning_content dropped in non-stream** — `cbCollectStream` accumulated `delta.reasoning_content` but never attached it to the response `message`. Now surfaced when upstream emits it (gated by `reasoning_effort`/`enable_thinking`).
+- **CB circuit-breaker false-positives** — probe model `gpt-5.2`→`gpt-5.5` (5.2 retired→400), `AuthHeader()` for OAuth (was sending email as Bearer→401), probe 3 keys before opening circuit.
+
 ## v1.6.2 — OAuth Login URL + Credential Test (2026-07-25)
 
 ### Added
