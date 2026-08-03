@@ -1615,9 +1615,10 @@ func ProxyCodeBuddy(c *gin.Context, body []byte, bodyMap map[string]any, km *CBK
 			if resp.StatusCode == 400 && (strings.Contains(bodyStr, "11102") ||
 				strings.Contains(bodyStr, "service info not found") ||
 				strings.Contains(bodyStr, "model [") && strings.Contains(bodyStr, "] service info not found")) {
-				hc.CB.RecordRequest(time.Since(reqStart), fmt.Errorf("cb 400 model not found"))
-				// P3 #7: Don't leak upstream body (contains requestId + internal tracing).
-				// Return generic message only.
+				// Model not available is a CLIENT-side error (wrong model name),
+				// NOT an upstream outage. Do NOT record it as a circuit-breaker
+				// error — otherwise rapid requests to a retired model open the
+				// circuit and block all CB traffic.
 				c.JSON(400, gin.H{"error": "model not available on CodeBuddy"})
 				c.Set("error_msg", "model not available on CodeBuddy")
 				errJSON, _ := json.Marshal(gin.H{"error": "model not available on CodeBuddy"})

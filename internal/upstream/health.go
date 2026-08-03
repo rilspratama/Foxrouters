@@ -2,6 +2,7 @@ package upstream
 
 import (
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -414,6 +415,21 @@ func (hc *HealthChecker) probeCBKey(h *UpstreamHealth, key *CBKey) bool {
 	// unhealthy status — 401/403/429 on ONE credential ≠ upstream down; log which key failed
 	h.lastCheckOK = false
 	h.lastErrorMsg.Store(fmt.Sprintf("LLM test status %d (%s)", resp.StatusCode, key.DisplayID()))
+	// Model-not-found (400/11102) is a probe config error, not an upstream
+	// outage. Don't count it toward the circuit breaker — otherwise a retired
+	// probe model opens the circuit and blocks all CB traffic.
+	if resp.StatusCode == 400 {
+		// Drain body to check for model-not-found error code.
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		bodyStr := string(bodyBytes)
+		if strings.Contains(bodyStr, "11102") || strings.Contains(bodyStr, "service info not found") {
+			slog.Warn("probe model not available on CodeBuddy — fix probe model config", "module", "health", "upstream", "codebuddy", "key", key.DisplayID())
+			return false
+		}
+	} else {
+		resp.Body.Close()
+	}
 	h.consecutiveErrs++
 	if h.consecutiveErrs >= CB_OPEN_THRESHOLD && h.state == CircuitClosed {
 		h.state = CircuitOpen
