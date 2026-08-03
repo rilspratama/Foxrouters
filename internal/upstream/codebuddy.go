@@ -1327,7 +1327,9 @@ func cbTransform(body []byte) ([]byte, error) {
 	if eb, ok := m["extra_body"].(map[string]any); ok {
 		if _, hasRE := m["reasoning_effort"]; !hasRE {
 			if r, ok := eb["reasoning"].(map[string]any); ok {
-				if effort, ok := r["effort"].(string); ok && effort != "" {
+				if enabled, ok := r["enabled"].(bool); ok && !enabled {
+					// explicitly disabled — skip
+				} else if effort, ok := r["effort"].(string); ok && effort != "" {
 					m["reasoning_effort"] = effort
 				} else {
 					m["reasoning_effort"] = "medium"
