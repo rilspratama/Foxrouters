@@ -129,7 +129,7 @@ func TestExtractFromCapturedBody_ToolCalls_JSON(t *testing.T) {
 			"finish_reason":"tool_calls"
 		}]
 	}`)
-	text, finish, tcs := extractFromCapturedBody(body)
+	text, finish, _, tcs := extractFromCapturedBody(body)
 	if text != "" {
 		t.Errorf("text = %q; want empty", text)
 	}
@@ -158,7 +158,7 @@ func TestExtractFromCapturedBody_ToolCalls_SSE(t *testing.T) {
 		`data: [DONE]`,
 		``,
 	}, "\n")
-	_, finish, tcs := extractFromCapturedBody([]byte(sse))
+	_, finish, _, tcs := extractFromCapturedBody([]byte(sse))
 	if finish != "tool_calls" {
 		t.Errorf("finish = %v", finish)
 	}

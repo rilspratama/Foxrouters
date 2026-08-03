@@ -50,6 +50,7 @@ type anthropicRequest struct {
 	Metadata      json.RawMessage    `json:"metadata,omitempty"`
 	Tools         json.RawMessage    `json:"tools,omitempty"`      // pass-through — best effort
 	ToolChoice    json.RawMessage    `json:"tool_choice,omitempty"`
+	Thinking      json.RawMessage    `json:"thinking,omitempty"`   // {type:"enabled", budget_tokens:N} or {type:"adaptive"}
 }
 
 type anthropicMessage struct {
@@ -87,12 +88,15 @@ type anthropicResponse struct {
 	Usage        anthropicUsage             `json:"usage"`
 }
 
-// anthropicContentBlockOut is emitted in Anthropic responses. Supports both
-// text blocks and tool_use blocks. Fields are omitted based on Type.
+// anthropicContentBlockOut is emitted in Anthropic responses. Supports
+// thinking, text, and tool_use blocks. Fields are omitted based on Type.
 type anthropicContentBlockOut struct {
-	Type string `json:"type"` // "text" or "tool_use"
+	Type string `json:"type"` // "thinking", "text", or "tool_use"
 	// text-block fields
 	Text string `json:"text,omitempty"`
+	// thinking-block fields
+	Thinking  string `json:"thinking,omitempty"`
+	Signature string `json:"signature,omitempty"`
 	// tool_use-block fields
 	ID    string          `json:"id,omitempty"`
 	Name  string          `json:"name,omitempty"`
@@ -127,6 +131,7 @@ func mapAnthropicModel(m string, reg *proxy.CustomRegistry) string {
 			return resolved
 		}
 	}
+	// Explicit prefixes → passthrough.
 	if strings.HasPrefix(m, "cb/") || strings.HasPrefix(m, "grok-") {
 		return m
 	}
@@ -134,6 +139,13 @@ func mapAnthropicModel(m string, reg *proxy.CustomRegistry) string {
 	// Escape hatch: "...-grok" or "grok" in the name → route to Grok.
 	if strings.Contains(lower, "grok") {
 		return "grok-4.5"
+	}
+	// Bare model names (glm-5.2, gpt-5.5, kimi-k3, etc.) — passthrough.
+	// The proxy's proxyRequest handles routing: non-grok-* → CodeBuddy.
+	// Only fall through to default if it looks like a Claude model name
+	// (claude-*) that needs translation to a CodeBuddy upstream.
+	if !strings.HasPrefix(lower, "claude-") {
+		return m
 	}
 	return defaultAnthropicUpstream()
 }
@@ -411,6 +423,28 @@ func buildOpenAIBody(req *anthropicRequest, reg *proxy.CustomRegistry) ([]byte, 
 		out["tool_choice"] = tc
 	}
 
+	// Translate Anthropic thinking config → OpenAI reasoning_effort.
+	// Anthropic: {"type":"enabled","budget_tokens":N} or {"type":"adaptive"}
+	// OpenAI:    "reasoning_effort":"high" (or medium/low)
+	if len(req.Thinking) > 0 {
+		var think struct {
+			Type         string `json:"type"`
+			BudgetTokens int    `json:"budget_tokens"`
+		}
+		if json.Unmarshal(req.Thinking, &think) == nil {
+			switch {
+			case think.Type == "enabled" && think.BudgetTokens >= 16000:
+				out["reasoning_effort"] = "high"
+			case think.Type == "enabled" && think.BudgetTokens >= 8000:
+				out["reasoning_effort"] = "medium"
+			case think.Type == "enabled":
+				out["reasoning_effort"] = "low"
+			case think.Type == "adaptive":
+				out["reasoning_effort"] = "high"
+			}
+		}
+	}
+
 	buf, err := json.Marshal(out)
 	if err != nil {
 		return nil, "", err
@@ -485,27 +519,30 @@ func (w *captureWriter) Flush()        { /* swallow — we translate at the end 
 // the form `data: {json}` and the terminator `data: [DONE]`.
 type streamWriter struct {
 	gin.ResponseWriter
-	real       gin.ResponseWriter
-	flusher    http.Flusher
-	msgID      string
-	model      string
-	started    bool // message_start already sent
-	textOpen   bool // content_block_start for text (index 0) already sent
-	textClosed bool // content_block_stop for text emitted
-	stopped    bool // message_stop already sent
-	finish     string
-	inputToks  int
-	outputToks int
-	textBuf    strings.Builder
-	carry      string // partial line from previous Write
-	errBuf     []byte // upstream error body captured before streaming started
+	real          gin.ResponseWriter
+	flusher       http.Flusher
+	msgID         string
+	model         string
+	started       bool // message_start already sent
+	thinkingOpen  bool // content_block_start for thinking (index 0) already sent
+	thinkingClosed bool // content_block_stop for thinking emitted
+	textOpen      bool // content_block_start for text already sent
+	textClosed    bool // content_block_stop for text emitted
+	textBlockIdx  int  // 0 when no thinking, 1 when thinking present
+	stopped       bool // message_stop already sent
+	finish        string
+	inputToks     int
+	outputToks    int
+	textBuf       strings.Builder
+	carry         string // partial line from previous Write
+	errBuf        []byte // upstream error body captured before streaming started
 	// Tool-use tracking. OpenAI streams tool_calls with an `index` field
 	// (0-based within tool_calls array). We map each OpenAI tool_call index
-	// to a distinct Anthropic content_block index (starting at 1, since 0
-	// is reserved for the text block). We buffer arguments per tool so we
-	// can emit input_json_delta as they stream in.
-	toolBlocks map[int]*streamToolBlock
-	nextBlockIdx int // next Anthropic content-block index to assign (starts at 1)
+	// to a distinct Anthropic content_block index (starting after the text
+	// block). We buffer arguments per tool so we can emit input_json_delta
+	// as they stream in.
+	toolBlocks  map[int]*streamToolBlock
+	nextBlockIdx int // next Anthropic content-block index to assign
 	// Headers set by the downstream proxy — we don't forward them; we set our own.
 	sinkHeader http.Header
 	statusCode int
@@ -524,14 +561,15 @@ func newStreamWriter(real gin.ResponseWriter, msgID, model string) *streamWriter
 	fl, _ := real.(http.Flusher)
 	return &streamWriter{
 		ResponseWriter: real,
-		real:           real,
-		flusher:        fl,
-		msgID:          msgID,
-		model:          model,
-		toolBlocks:     make(map[int]*streamToolBlock),
-		nextBlockIdx:   1, // 0 is reserved for text block
-		sinkHeader:     http.Header{},
-		statusCode:     200,
+		real:            real,
+		flusher:         fl,
+		msgID:           msgID,
+		model:           model,
+		toolBlocks:      make(map[int]*streamToolBlock),
+		textBlockIdx:    0, // no thinking yet → text gets index 0
+		nextBlockIdx:    1, // tools start at 1
+		sinkHeader:      http.Header{},
+		statusCode:      200,
 	}
 }
 
@@ -583,16 +621,54 @@ func (w *streamWriter) ensureStart() {
 	w.emitEvent("message_start", startMsg)
 }
 
-// ensureTextBlock emits content_block_start for the text block (index 0)
-// exactly once, right before the first text_delta.
+// ensureThinkingBlock emits content_block_start for the thinking block (index 0)
+// exactly once, right before the first thinking_delta. Once thinking is opened,
+// the text block shifts to index 1 and tool blocks shift accordingly.
+func (w *streamWriter) ensureThinkingBlock() {
+	if w.thinkingOpen {
+		return
+	}
+	w.thinkingOpen = true
+	// Thinking always gets index 0. Text and tools shift up by 1.
+	w.textBlockIdx = 1
+	w.nextBlockIdx = 2
+	w.emitEvent("content_block_start", map[string]any{
+		"type":  "content_block_start",
+		"index": 0,
+		"content_block": map[string]any{
+			"type":      "thinking",
+			"thinking":  "",
+			"signature": "",
+		},
+	})
+}
+
+// closeThinkingBlock emits content_block_stop for the thinking block if open
+// and not already closed. Idempotent.
+func (w *streamWriter) closeThinkingBlock() {
+	if !w.thinkingOpen || w.thinkingClosed {
+		return
+	}
+	w.thinkingClosed = true
+	w.emitEvent("content_block_stop", map[string]any{
+		"type":  "content_block_stop",
+		"index": 0,
+	})
+}
+
+// ensureTextBlock emits content_block_start for the text block
+// exactly once, right before the first text_delta. The index is 0 when no
+// thinking block was opened, or 1 when thinking precedes it.
 func (w *streamWriter) ensureTextBlock() {
 	if w.textOpen {
 		return
 	}
+	// Before opening the text block, close the thinking block if it's open.
+	w.closeThinkingBlock()
 	w.textOpen = true
 	w.emitEvent("content_block_start", map[string]any{
 		"type":          "content_block_start",
-		"index":         0,
+		"index":         w.textBlockIdx,
 		"content_block": map[string]any{"type": "text", "text": ""},
 	})
 }
@@ -606,7 +682,7 @@ func (w *streamWriter) closeTextBlock() {
 	w.textClosed = true
 	w.emitEvent("content_block_stop", map[string]any{
 		"type":  "content_block_stop",
-		"index": 0,
+		"index": w.textBlockIdx,
 	})
 }
 
@@ -710,8 +786,9 @@ func (w *streamWriter) processLine(line string) {
 	var oc struct {
 		Choices []struct {
 			Delta struct {
-				Content   string `json:"content"`
-				Role      string `json:"role"`
+				Content          string `json:"content"`
+				ReasoningContent string `json:"reasoning_content"`
+				Role             string `json:"role"`
 				ToolCalls []struct {
 					Index    int    `json:"index"`
 					ID       string `json:"id,omitempty"`
@@ -740,13 +817,24 @@ func (w *streamWriter) processLine(line string) {
 		return
 	}
 	ch := oc.Choices[0]
+	// Reasoning/thinking deltas — emitted as thinking_delta events.
+	// CodeBuddy/GLM/DeepSeek/Kimi all use reasoning_content in streaming deltas.
+	if ch.Delta.ReasoningContent != "" {
+		w.ensureStart()
+		w.ensureThinkingBlock()
+		w.emitEvent("content_block_delta", map[string]any{
+			"type":  "content_block_delta",
+			"index": 0, // thinking is always index 0
+			"delta": map[string]any{"type": "thinking_delta", "thinking": ch.Delta.ReasoningContent},
+		})
+	}
 	if ch.Delta.Content != "" {
 		w.ensureStart()
 		w.ensureTextBlock()
 		w.textBuf.WriteString(ch.Delta.Content)
 		w.emitEvent("content_block_delta", map[string]any{
 			"type":  "content_block_delta",
-			"index": 0,
+			"index": w.textBlockIdx,
 			"delta": map[string]any{"type": "text_delta", "text": ch.Delta.Content},
 		})
 	}
@@ -777,14 +865,15 @@ func (w *streamWriter) finalize() {
 		return
 	}
 	w.ensureStart() // in case upstream sent no content, still emit shell
-	// If nothing at all was emitted (no text, no tools), open an empty text
-	// block so the client sees a valid single-block message.
-	if !w.textOpen && len(w.toolBlocks) == 0 {
+	// If nothing at all was emitted (no thinking, no text, no tools), open an
+	// empty text block so the client sees a valid single-block message.
+	if !w.thinkingOpen && !w.textOpen && len(w.toolBlocks) == 0 {
 		w.ensureTextBlock()
 	}
 	w.stopped = true
 
-	// Close text block first (index 0), then any tool blocks in creation order.
+	// Close blocks in Anthropic order: thinking (index 0) → text → tools.
+	w.closeThinkingBlock()
 	w.closeTextBlock()
 	// Iterate tool blocks in ascending anthropicIdx order for deterministic output.
 	// (Range over map is unordered — collect + sort by index.)
@@ -972,11 +1061,10 @@ func HandleMessages(grokAM *upstream.GrokAccountManager, cbKM *upstream.CBKeyMan
 		// the reduction, but be defensive: prefer c.Get("output_text") +
 		// c.Get("tokens_in/out") which the proxy populates in BOTH modes).
 		var (
-			outputText string
-			inputToks  int
-			outputToks int
-			finish     string
-			upstreamErr = cap.status >= 400
+			outputText  string
+			inputToks   int
+			outputToks  int
+			finish      string
 		)
 		if v, ok := c.Get("output_text"); ok {
 			outputText, _ = v.(string)
@@ -988,15 +1076,21 @@ func HandleMessages(grokAM *upstream.GrokAccountManager, cbKM *upstream.CBKeyMan
 			outputToks = anyToInt(v)
 		}
 
-		// Parse the captured body: for a normal JSON response we can read
-		// choices[0].message.content directly (more reliable than the
-		// truncated output_text set by the proxy). For SSE, fall back to
-		// scanning `data:` lines.
-		bodyBytes := cap.buf.Bytes()
-		if upstreamErr {
-			// Parse upstream error body and extract a human-readable message
-			// (P3 fix: avoid double-escaped JSON-in-JSON-in-JSON error envelope).
-			// Anthropic spec: error.message should be a short string.
+		// Prefer the proxy's stored response_body (set via c.Set in both
+		// stream and non-stream paths) — it has full-fidelity JSON. Fall
+		// back to the captured writer buffer.
+		var bodyBytes []byte
+		if rb, ok := c.Get("response_body"); ok {
+			if rm, ok := rb.(json.RawMessage); ok {
+				bodyBytes = []byte(rm)
+			}
+		}
+		if len(bodyBytes) == 0 {
+			bodyBytes = cap.buf.Bytes()
+		}
+
+		// Upstream error — surface to client as Anthropic error envelope.
+		if cap.status >= 400 {
 			status := cap.status
 			c.Writer.Header().Set("Content-Type", "application/json")
 			c.Writer.WriteHeader(status)
@@ -1011,26 +1105,23 @@ func HandleMessages(grokAM *upstream.GrokAccountManager, cbKM *upstream.CBKeyMan
 			return
 		}
 
-		if outputText == "" || strings.HasSuffix(outputText, "…") {
-			// Try structured parse of the captured body for a full-fidelity string.
-			text, finReason, _ := extractFromCapturedBody(bodyBytes)
-			if text != "" {
-				outputText = text
-			}
-			if finish == "" {
-				finish = finReason
-			}
+		parsedText, parsedFinish, reasoningText, toolCalls := extractFromCapturedBody(bodyBytes)
+		if outputText == "" || (strings.HasSuffix(outputText, "…") && parsedText != "") {
+			outputText = parsedText
 		}
-
-		// Always parse the captured body for tool_calls — even if
-		// output_text was populated by the proxy, tool_calls aren't.
-		_, finReasonTC, toolCalls := extractFromCapturedBody(bodyBytes)
 		if finish == "" {
-			finish = finReasonTC
+			finish = parsedFinish
 		}
 
-		// Build content blocks: text (if any) first, then tool_use blocks.
+		// Build content blocks in Anthropic order: thinking → text → tool_use.
 		blocks := make([]anthropicContentBlockOut, 0, 1+len(toolCalls))
+		if reasoningText != "" {
+			blocks = append(blocks, anthropicContentBlockOut{
+				Type:      "thinking",
+				Thinking:  reasoningText,
+				Signature: "",
+			})
+		}
 		if outputText != "" {
 			blocks = append(blocks, anthropicContentBlockOut{Type: "text", Text: outputText})
 		}
@@ -1128,9 +1219,9 @@ func extractUpstreamErrorMessage(raw any, bodyBytes []byte) string {
 	return s
 }
 
-func extractFromCapturedBody(b []byte) (string, string, []openAIToolCallOut) {
+func extractFromCapturedBody(b []byte) (text, finishReason, reasoning string, toolCalls []openAIToolCallOut) {
 	if len(b) == 0 {
-		return "", "", nil
+		return "", "", "", nil
 	}
 	trimmed := bytes.TrimSpace(b)
 	// JSON?
@@ -1138,14 +1229,18 @@ func extractFromCapturedBody(b []byte) (string, string, []openAIToolCallOut) {
 		var r struct {
 			Choices []struct {
 				Message struct {
-					Content   string              `json:"content"`
-					ToolCalls []openAIToolCallOut `json:"tool_calls,omitempty"`
+					Content          string              `json:"content"`
+					ReasoningContent string              `json:"reasoning_content"`
+					ToolCalls        []openAIToolCallOut `json:"tool_calls,omitempty"`
 				} `json:"message"`
 				FinishReason string `json:"finish_reason"`
 			} `json:"choices"`
 		}
 		if err := json.Unmarshal(trimmed, &r); err == nil && len(r.Choices) > 0 {
-			return r.Choices[0].Message.Content, r.Choices[0].FinishReason, r.Choices[0].Message.ToolCalls
+			return r.Choices[0].Message.Content,
+				r.Choices[0].FinishReason,
+				r.Choices[0].Message.ReasoningContent,
+				r.Choices[0].Message.ToolCalls
 		}
 	}
 	// SSE stream — scan `data: {...}` lines. Tool calls in SSE arrive as
@@ -1157,6 +1252,7 @@ func extractFromCapturedBody(b []byte) (string, string, []openAIToolCallOut) {
 	tcMap := map[int]*tcAcc{}
 	var tcOrder []int
 	var sb strings.Builder
+	var rcb strings.Builder
 	var finish string
 	scanner := bufio.NewScanner(bytes.NewReader(b))
 	scanner.Buffer(make([]byte, 64*1024), 4*1024*1024)
@@ -1172,7 +1268,8 @@ func extractFromCapturedBody(b []byte) (string, string, []openAIToolCallOut) {
 		var oc struct {
 			Choices []struct {
 				Delta struct {
-					Content   string `json:"content"`
+					Content          string `json:"content"`
+					ReasoningContent string `json:"reasoning_content"`
 					ToolCalls []struct {
 						Index    int    `json:"index"`
 						ID       string `json:"id,omitempty"`
@@ -1183,8 +1280,9 @@ func extractFromCapturedBody(b []byte) (string, string, []openAIToolCallOut) {
 					} `json:"tool_calls,omitempty"`
 				} `json:"delta"`
 				Message *struct {
-					Content   string              `json:"content"`
-					ToolCalls []openAIToolCallOut `json:"tool_calls,omitempty"`
+					Content          string              `json:"content"`
+					ReasoningContent string              `json:"reasoning_content"`
+					ToolCalls        []openAIToolCallOut `json:"tool_calls,omitempty"`
 				} `json:"message,omitempty"`
 				FinishReason *string `json:"finish_reason"`
 			} `json:"choices"`
@@ -1195,10 +1293,16 @@ func extractFromCapturedBody(b []byte) (string, string, []openAIToolCallOut) {
 		if len(oc.Choices) == 0 {
 			continue
 		}
+		if oc.Choices[0].Delta.ReasoningContent != "" {
+			rcb.WriteString(oc.Choices[0].Delta.ReasoningContent)
+		}
 		if oc.Choices[0].Delta.Content != "" {
 			sb.WriteString(oc.Choices[0].Delta.Content)
 		} else if oc.Choices[0].Message != nil {
 			sb.WriteString(oc.Choices[0].Message.Content)
+			if oc.Choices[0].Message.ReasoningContent != "" {
+				rcb.WriteString(oc.Choices[0].Message.ReasoningContent)
+			}
 			// A full message block may also carry final tool_calls.
 			for _, tc := range oc.Choices[0].Message.ToolCalls {
 				idx := len(tcOrder)
@@ -1242,7 +1346,7 @@ func extractFromCapturedBody(b []byte) (string, string, []openAIToolCallOut) {
 		t.Function.Arguments = acc.args.String()
 		tcs = append(tcs, t)
 	}
-	return sb.String(), finish, tcs
+	return sb.String(), finish, rcb.String(), tcs
 }
 
 func anyToInt(v any) int {
