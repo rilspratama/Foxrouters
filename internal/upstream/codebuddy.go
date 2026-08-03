@@ -1672,6 +1672,7 @@ func ProxyCodeBuddy(c *gin.Context, body []byte, bodyMap map[string]any, km *CBK
 		// promptly so we don't keep pulling from upstream forever.
 		ctx := c.Request.Context()
 		var streamContent strings.Builder
+		var streamReasoning strings.Builder
 		var streamTokensIn, streamTokensOut int
 		var streamUsage map[string]any // last chunk's full usage (has cache fields)
 		for scanner.Scan() {
@@ -1712,6 +1713,7 @@ func ProxyCodeBuddy(c *gin.Context, body []byte, bodyMap map[string]any, km *CBK
 						}
 						if len(sc.Choices) > 0 {
 							streamContent.WriteString(sc.Choices[0].Delta.Content)
+							streamReasoning.WriteString(sc.Choices[0].Delta.ReasoningContent)
 						}
 					}
 				}
@@ -1739,9 +1741,13 @@ func ProxyCodeBuddy(c *gin.Context, body []byte, bodyMap map[string]any, km *CBK
 				"total_tokens":      streamTokensIn + streamTokensOut,
 			}
 		}
+		msg := gin.H{"role": "assistant", "content": streamContent.String()}
+		if r := streamReasoning.String(); r != "" {
+			msg["reasoning_content"] = r
+		}
 		respJSON, _ := json.Marshal(gin.H{
 			"choices": []gin.H{{
-				"message":       gin.H{"role": "assistant", "content": streamContent.String()},
+				"message":       msg,
 				"finish_reason": "stop",
 			}},
 			"usage":  respUsage,

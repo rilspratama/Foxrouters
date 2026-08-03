@@ -920,7 +920,8 @@ type sseChunk struct {
 	Error   any `json:"error"`
 	Choices []struct {
 		Delta struct {
-			Content string `json:"content"`
+			Content          string `json:"content"`
+			ReasoningContent string `json:"reasoning_content"`
 		} `json:"delta"`
 	} `json:"choices"`
 	Usage map[string]any `json:"usage"`
