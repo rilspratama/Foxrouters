@@ -1188,6 +1188,11 @@ func cbCollectStream(resp *http.Response, model string, key *CBKey) gin.H {
 			"finish_reason": finish,
 		}},
 	}
+	// Surface reasoning_content when the upstream emitted it (thinking enabled
+	// via reasoning_effort/enable_thinking) — clients like Hermes display it.
+	if r := reasoning.String(); r != "" {
+		resp2["choices"].([]gin.H)[0]["message"].(gin.H)["reasoning_content"] = r
+	}
 	if usage != nil {
 		resp2["usage"] = usage
 	}
