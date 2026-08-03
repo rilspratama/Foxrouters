@@ -1634,6 +1634,7 @@ func ProxyCodeBuddy(c *gin.Context, body []byte, bodyMap map[string]any, km *CBK
 		ctx := c.Request.Context()
 		var streamContent strings.Builder
 		var streamTokensIn, streamTokensOut int
+		var streamUsage map[string]any // last chunk's full usage (has cache fields)
 		for scanner.Scan() {
 			if err := ctx.Err(); err != nil {
 				slog.Debug("sse loop: client cancelled", "module", "cb", "error", err)
@@ -1656,6 +1657,10 @@ func ProxyCodeBuddy(c *gin.Context, body []byte, bodyMap map[string]any, km *CBK
 							}
 						}
 						if sc.Usage != nil {
+							// Keep the LAST non-nil usage (final chunk has real
+							// token counts + cache hit fields). Intermediate
+							// chunks may have all-zero usage.
+							streamUsage = sc.Usage
 							if cr, ok := sc.Usage["credit"].(float64); ok && cr > 0 {
 								lastKey.AddCredits(cr)
 							}
@@ -1684,16 +1689,23 @@ func ProxyCodeBuddy(c *gin.Context, body []byte, bodyMap map[string]any, km *CBK
 		c.Set("output_text", truncateLog(streamContent.String(), 1000))
 		c.Set("tokens_in", streamTokensIn)
 		c.Set("tokens_out", streamTokensOut)
+		// Build the stored response_body. Use the full upstream usage map (which
+		// contains prompt_cache_hit_tokens etc.) instead of a minimal 3-field
+		// reconstruction — extractCacheHitPct needs the cache fields.
+		respUsage := streamUsage
+		if respUsage == nil {
+			respUsage = gin.H{
+				"prompt_tokens":     streamTokensIn,
+				"completion_tokens": streamTokensOut,
+				"total_tokens":      streamTokensIn + streamTokensOut,
+			}
+		}
 		respJSON, _ := json.Marshal(gin.H{
 			"choices": []gin.H{{
 				"message":       gin.H{"role": "assistant", "content": streamContent.String()},
 				"finish_reason": "stop",
 			}},
-			"usage": gin.H{
-				"prompt_tokens":     streamTokensIn,
-				"completion_tokens": streamTokensOut,
-				"total_tokens":      streamTokensIn + streamTokensOut,
-			},
+			"usage":  respUsage,
 			"model":  originalModel,
 			"stream": true,
 		})
