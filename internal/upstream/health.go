@@ -399,8 +399,10 @@ func (hc *HealthChecker) probeCBKey(h *UpstreamHealth, key *CBKey) bool {
 		}
 		return false
 	}
-	resp.Body.Close()
+	// Note: resp.Body is NOT closed here — it may need to be read below
+	// for the model-not-found check. Each branch closes it explicitly.
 	if HealthStatusOK(resp.StatusCode) {
+		resp.Body.Close()
 		h.lastCheckOK = true
 		h.lastErrorMsg.Store("")
 		if h.state == CircuitHalfOpen {

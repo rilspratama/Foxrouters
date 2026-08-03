@@ -94,7 +94,7 @@ func TestHandleTestCBKey_OK(t *testing.T) {
 	if res["ok"] != true {
 		t.Fatalf("ok=%v full=%v", res["ok"], res)
 	}
-	if res["model"] != "gpt-5.5" {
+	if res["model"] != "glm-5.2" {
 		t.Fatalf("model=%v", res["model"])
 	}
 	if res["content"] != "OK" {
