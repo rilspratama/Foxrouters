@@ -112,7 +112,8 @@ func main() {
 	if err := cbKM.LoadFromRedis(); err != nil {
 		slog.Warn("LoadFromRedis failed, starting empty", "module", "cb", "error", err)
 	}
-	LoadSelectorMode(db) // restore persisted selector mode (rr|sticky|content-hash|hybrid)
+	LoadSelectorMode(db)                  // restore persisted CB selector mode (rr|sticky|content-hash|hybrid)
+	LoadGrokSelectorMode(db)             // restore persisted Grok selector mode
 
 	// Health checker: active + passive monitoring with circuit breaker
 	hc := newHealthChecker(grokAM, cbKM)
@@ -302,6 +303,28 @@ func main() {
 			return
 		}
 		if err := SetSelectorMode(db, CBSelectorMode(body.Mode)); err != nil {
+			c.JSON(400, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(200, gin.H{"mode": body.Mode, "persisted": true})
+	})
+	// Grok selector mode: rr | sticky | content-hash | hybrid (runtime switch, Redis-persisted)
+	r.GET("/grok/selector-mode", adminAuth, func(c *gin.Context) {
+		c.JSON(200, gin.H{
+			"mode":          string(GetGrokSelectorMode()),
+			"valid_modes":   []string{string(GrokSelectorRR), string(GrokSelectorSticky), string(GrokSelectorContentHash), string(GrokSelectorHybrid)},
+			"sticky_active": grokAM.StickyCount(),
+		})
+	})
+	r.PUT("/grok/selector-mode", csrfGuard(), adminAuth, func(c *gin.Context) {
+		var body struct {
+			Mode string `json:"mode"`
+		}
+		if err := c.ShouldBindJSON(&body); err != nil {
+			c.JSON(400, gin.H{"error": "invalid json"})
+			return
+		}
+		if err := SetGrokSelectorMode(db, GrokSelectorMode(body.Mode)); err != nil {
 			c.JSON(400, gin.H{"error": err.Error()})
 			return
 		}

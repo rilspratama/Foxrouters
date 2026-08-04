@@ -440,6 +440,26 @@ func (s *Store) GetCBConfig(field string) (string, error) {
 	return s.rdb.HGet(ctx, "cb:config", field).Result()
 }
 
+// SetGrokConfig writes a scalar Grok config value (selector mode etc.).
+func (s *Store) SetGrokConfig(field, value string) error {
+	if s == nil {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+	return s.rdb.HSet(ctx, "grok:config", field, value).Err()
+}
+
+// GetGrokConfig reads a scalar Grok config value.
+func (s *Store) GetGrokConfig(field string) (string, error) {
+	if s == nil {
+		return "", fmt.Errorf("no store")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+	return s.rdb.HGet(ctx, "grok:config", field).Result()
+}
+
 func (s *Store) LoadCBKeys() (map[string]map[string]string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()

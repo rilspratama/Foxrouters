@@ -5,13 +5,16 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"hash/fnv"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/url"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -311,10 +314,25 @@ type GrokAccountManager struct {
 	mu       sync.RWMutex
 	next     int
 	db       *db.Store
+
+	// sticky sessions: sessionID → bound account (prompt-cache locality)
+	sticky   map[string]*grokStickyBinding
+	stickyMu sync.Mutex
 }
 
+// grokStickyBinding records which account a session is pinned to.
+type grokStickyBinding struct {
+	acc      *GrokAccount
+	lastSeen time.Time
+}
+
+// grokStickyTTL is how long a session binding survives without traffic.
+const grokStickyTTL = 30 * time.Minute
+
 func NewGrokAccountManager(store *db.Store) *GrokAccountManager {
-	return &GrokAccountManager{accounts: make([]*GrokAccount, 0), db: store}
+	am := &GrokAccountManager{accounts: make([]*GrokAccount, 0), db: store, sticky: make(map[string]*grokStickyBinding)}
+	go am.stickyJanitor()
+	return am
 }
 
 // DB returns the persistence handle (nil in test builds).
@@ -531,6 +549,78 @@ func (am *GrokAccountManager) ReenableCooldowns() {
 		}
 		slog.Info("re-enabled cooldown account", "module", "grok", "email", acc.Email)
 	}
+}
+
+// ---------------------------------------------------------------------------
+// Sticky session binding (prompt-cache locality)
+// ---------------------------------------------------------------------------
+
+// stickyJanitor evicts idle bindings so the map doesn't grow unbounded.
+func (am *GrokAccountManager) stickyJanitor() {
+	if am.sticky == nil {
+		return
+	}
+	ticker := time.NewTicker(5 * time.Minute)
+	defer ticker.Stop()
+	for range ticker.C {
+		cutoff := time.Now().Add(-grokStickyTTL)
+		am.stickyMu.Lock()
+		for sid, b := range am.sticky {
+			if b.lastSeen.Before(cutoff) {
+				delete(am.sticky, sid)
+			}
+		}
+		am.stickyMu.Unlock()
+	}
+}
+
+// NextSticky returns the account bound to sessionID. If unbound, or the bound
+// account got disabled, it binds the next round-robin account. All requests
+// with the same sessionID hit the same upstream account → Grok prompt-cache
+// stays hot instead of regenerating per request.
+func (am *GrokAccountManager) NextSticky(sessionID string) (*GrokAccount, error) {
+	if sessionID == "" || am.sticky == nil {
+		return am.Next()
+	}
+	am.stickyMu.Lock()
+	if b, ok := am.sticky[sessionID]; ok {
+		if !b.acc.IsDisabled() {
+			b.lastSeen = time.Now()
+			am.stickyMu.Unlock()
+			return b.acc, nil
+		}
+		delete(am.sticky, sessionID) // bound account died — rebind below
+	}
+	am.stickyMu.Unlock()
+
+	acc, err := am.Next()
+	if err != nil {
+		return nil, err
+	}
+	am.stickyMu.Lock()
+	am.sticky[sessionID] = &grokStickyBinding{acc: acc, lastSeen: time.Now()}
+	am.stickyMu.Unlock()
+	return acc, nil
+}
+
+// UnbindSticky drops a session binding (e.g. after permanent disable so the
+// next request rebinds to a fresh account instead of the dead one).
+func (am *GrokAccountManager) UnbindSticky(sessionID string, acc *GrokAccount) {
+	if sessionID == "" || am.sticky == nil {
+		return
+	}
+	am.stickyMu.Lock()
+	if b, ok := am.sticky[sessionID]; ok && b.acc == acc {
+		delete(am.sticky, sessionID)
+	}
+	am.stickyMu.Unlock()
+}
+
+// StickyCount reports active session bindings (dashboard/debug).
+func (am *GrokAccountManager) StickyCount() int {
+	am.stickyMu.Lock()
+	defer am.stickyMu.Unlock()
+	return len(am.sticky)
 }
 
 // ReenableWorker is the long-lived goroutine that lifts cooldowns.
@@ -983,6 +1073,182 @@ func grokHeaders(token, accept, model, userID, email string) http.Header {
 	return h
 }
 
+// ---------------------------------------------------------------------------
+// Account selection modes (router-level strategy, runtime-configurable)
+// ---------------------------------------------------------------------------
+
+// GrokSelectorMode picks how ProxyGrok chooses the upstream account.
+type GrokSelectorMode string
+
+const (
+	// GrokSelectorRR — classic round-robin over enabled accounts (no cache locality).
+	GrokSelectorRR GrokSelectorMode = "rr"
+	// GrokSelectorSticky — session-id header binds conversation to one account
+	// until it dies (per-conversation cache locality; different sessions may
+	// land on different accounts, re-caching the shared system prompt each time).
+	GrokSelectorSticky GrokSelectorMode = "sticky"
+	// GrokSelectorContentHash — hash(model + first system message) deterministically
+	// maps to one account: every session sharing the same system prompt lands on
+	// the same account → giant shared prefix cached once.
+	GrokSelectorContentHash GrokSelectorMode = "content-hash"
+	// GrokSelectorHybrid — content-hash picks a small bucket (~3 accounts);
+	// session-id sticks to one account inside the bucket. Dead accounts rebind
+	// within the bucket, keeping the shared system-prompt cache warm.
+	GrokSelectorHybrid GrokSelectorMode = "hybrid"
+)
+
+// grokHybridBucketSize is how many enabled accounts form one hybrid bucket.
+const grokHybridBucketSize = 3
+
+// grokSelectorMode holds the active mode (atomic for lock-free hot-path reads).
+var grokSelectorMode atomic.Value // stores GrokSelectorMode
+
+func init() {
+	m := GrokSelectorMode(os.Getenv("GROK_SELECTOR_MODE"))
+	if !validGrokSelectorMode(m) {
+		m = GrokSelectorSticky // default: sticky sessions (prompt-cache locality)
+	}
+	grokSelectorMode.Store(m)
+}
+
+func validGrokSelectorMode(m GrokSelectorMode) bool {
+	switch m {
+	case GrokSelectorRR, GrokSelectorSticky, GrokSelectorContentHash, GrokSelectorHybrid:
+		return true
+	}
+	return false
+}
+
+// GetGrokSelectorMode returns the active Grok account selection mode.
+func GetGrokSelectorMode() GrokSelectorMode { return grokSelectorMode.Load().(GrokSelectorMode) }
+
+// SetGrokSelectorMode validates + stores the mode and persists it to Redis
+// (grok:config hash) so restarts keep the operator's choice.
+func SetGrokSelectorMode(store *db.Store, m GrokSelectorMode) error {
+	if !validGrokSelectorMode(m) {
+		return fmt.Errorf("invalid selector mode %q (valid: rr|sticky|content-hash|hybrid)", m)
+	}
+	grokSelectorMode.Store(m)
+	if store != nil {
+		if err := store.SetGrokConfig("selector_mode", string(m)); err != nil {
+			slog.Warn("selector mode persist failed", "module", "grok", "error", err)
+		}
+	}
+	slog.Info("grok selector mode changed", "module", "grok", "mode", m)
+	return nil
+}
+
+// LoadGrokSelectorMode restores the persisted mode from Redis (called at startup).
+func LoadGrokSelectorMode(store *db.Store) {
+	if store == nil {
+		return
+	}
+	if v, err := store.GetGrokConfig("selector_mode"); err == nil && validGrokSelectorMode(GrokSelectorMode(v)) {
+		grokSelectorMode.Store(GrokSelectorMode(v))
+		slog.Info("grok selector mode restored", "module", "grok", "mode", v)
+	}
+}
+
+// NextForMode selects an account according to the active mode.
+//   - sessionID: from x-session-id/x-conversation-id/x-chat-id header (may be "")
+//   - sysHash:   hash of model + first system message content (may be "")
+func (am *GrokAccountManager) NextForMode(mode GrokSelectorMode, sessionID, sysHash string) (*GrokAccount, error) {
+	switch mode {
+	case GrokSelectorRR:
+		return am.Next()
+	case GrokSelectorContentHash:
+		return am.nextByHash(sysHash)
+	case GrokSelectorHybrid:
+		return am.nextHybrid(sessionID, sysHash)
+	case GrokSelectorSticky:
+		fallthrough
+	default:
+		if sessionID != "" {
+			return am.NextSticky(sessionID)
+		}
+		return am.Next()
+	}
+}
+
+// nextByHash: deterministic account from sysHash (FNV-1a over enabled accounts).
+// All sessions with the same system prompt land on the same account.
+func (am *GrokAccountManager) nextByHash(sysHash string) (*GrokAccount, error) {
+	am.mu.RLock()
+	enabled := make([]*GrokAccount, 0, len(am.accounts))
+	for _, acc := range am.accounts {
+		if !acc.IsDisabled() {
+			enabled = append(enabled, acc)
+		}
+	}
+	am.mu.RUnlock()
+	if len(enabled) == 0 {
+		return nil, fmt.Errorf("all grok accounts disabled")
+	}
+	if sysHash == "" {
+		return am.Next()
+	}
+	h := fnv.New64a()
+	h.Write([]byte(sysHash))
+	return enabled[h.Sum64()%uint64(len(enabled))], nil
+}
+
+// nextHybrid: content-hash selects a bucket of grokHybridBucketSize enabled
+// accounts; session-id sticks to one account inside the bucket (rebinding
+// within the bucket when the account dies → shared system-prompt cache stays
+// warm).
+func (am *GrokAccountManager) nextHybrid(sessionID, sysHash string) (*GrokAccount, error) {
+	am.mu.RLock()
+	enabled := make([]*GrokAccount, 0, len(am.accounts))
+	for _, acc := range am.accounts {
+		if !acc.IsDisabled() {
+			enabled = append(enabled, acc)
+		}
+	}
+	am.mu.RUnlock()
+	if len(enabled) == 0 {
+		return nil, fmt.Errorf("all grok accounts disabled")
+	}
+	if sysHash == "" {
+		if sessionID != "" {
+			return am.NextSticky(sessionID)
+		}
+		return am.Next()
+	}
+
+	// Bucket = consecutive slice of enabled accounts starting at hash position.
+	h := fnv.New64a()
+	h.Write([]byte(sysHash))
+	start := int(h.Sum64() % uint64(len(enabled)))
+	bucket := make([]*GrokAccount, 0, grokHybridBucketSize)
+	for i := 0; i < grokHybridBucketSize && i < len(enabled); i++ {
+		bucket = append(bucket, enabled[(start+i)%len(enabled)])
+	}
+
+	// Session binding within bucket (reuse sticky map — but only accept the
+	// bound account if it is in THIS bucket; otherwise rebind into the bucket).
+	if sessionID != "" {
+		am.stickyMu.Lock()
+		if b, ok := am.sticky[sessionID]; ok && !b.acc.IsDisabled() {
+			for _, acc := range bucket {
+				if acc == b.acc {
+					b.lastSeen = time.Now()
+					am.stickyMu.Unlock()
+					return acc, nil
+				}
+			}
+		}
+		delete(am.sticky, sessionID)
+		// bind first bucket account (deterministic per session: hash sessionID)
+		sh := fnv.New64a()
+		sh.Write([]byte(sessionID))
+		pick := bucket[sh.Sum64()%uint64(len(bucket))]
+		am.sticky[sessionID] = &grokStickyBinding{acc: pick, lastSeen: time.Now()}
+		am.stickyMu.Unlock()
+		return pick, nil
+	}
+	return bucket[0], nil
+}
+
 // ProxyGrok forwards a chat/completions (or /v1/*) request to Grok, retrying
 // per-account on 401/402/403/5xx.
 func ProxyGrok(c *gin.Context, body []byte, am *GrokAccountManager, clientStream bool, hc *HealthChecker, model string) {
@@ -1010,18 +1276,65 @@ func ProxyGrok(c *gin.Context, body []byte, am *GrokAccountManager, clientStream
 	client, proxyID := getClient(upstreamClient, "grok")
 	total := am.Len()
 
+	// Sticky session: client may pin all requests in a conversation to the
+	// same upstream account via header (prompt-cache locality). First header
+	// wins: x-session-id, x-conversation-id, x-chat-id.
+	sessionID := c.GetHeader("x-session-id")
+	if sessionID == "" {
+		sessionID = c.GetHeader("x-conversation-id")
+	}
+	if sessionID == "" {
+		sessionID = c.GetHeader("x-chat-id")
+	}
+	if len(sessionID) > 128 {
+		sessionID = sessionID[:128]
+	}
+
+	// sysHash: identifies the shared prompt prefix (model + first system
+	// message) for content-hash / hybrid selection modes.
+	sysHash := ""
+	{
+		var tm map[string]any
+		if json.Unmarshal(body, &tm) == nil {
+			if model, _ := tm["model"].(string); model != "" {
+				sysHash = model
+			}
+			if msgs, ok := tm["messages"].([]any); ok && len(msgs) > 0 {
+				if first, ok := msgs[0].(map[string]any); ok && first["role"] == "system" {
+					if sc, ok := first["content"].(string); ok {
+						sysHash += "|" + sc
+					}
+				}
+			}
+		}
+	}
+	mode := GetGrokSelectorMode()
+
 	var lastResp *http.Response
 	var lastAcc *GrokAccount
 	reqStart := time.Now()
 
-	for attempt := 0; attempt < total; attempt++ {
+	// Mode-selected account gets the first attempts before falling back to RR.
+	// RR mode: no preference — every attempt is plain round-robin.
+	stickyAttempts := 0
+	if mode != GrokSelectorRR {
+		stickyAttempts = 2
+	}
+
+	for attempt := 0; attempt < total+stickyAttempts; attempt++ {
 		// C10: bail out if the client already went away so we don't burn
 		// upstream tokens walking the account list for a dead request.
 		if err := c.Request.Context().Err(); err != nil {
 			slog.Debug("client cancelled before attempt", "module", "grok", "attempt", attempt+1, "error", err)
 			return
 		}
-		acc, err := am.Next()
+		var acc *GrokAccount
+		var err error
+		if attempt < stickyAttempts {
+			acc, err = am.NextForMode(mode, sessionID, sysHash)
+		} else {
+			acc, err = am.Next()
+		}
 		if err != nil {
 			break
 		}
@@ -1052,6 +1365,7 @@ func ProxyGrok(c *gin.Context, body []byte, am *GrokAccountManager, clientStream
 					if acc.db != nil {
 						saveGrokAccount(acc.db, acc.toDTO())
 					}
+					am.UnbindSticky(sessionID, acc)
 					slog.Warn("401 refresh invalid_grant, permanent disable", "module", "grok", "email", acc.Email)
 				} else {
 					slog.Warn("401 refresh failed", "module", "grok", "email", acc.Email, "error", refreshErr)
@@ -1080,6 +1394,7 @@ func ProxyGrok(c *gin.Context, body []byte, am *GrokAccountManager, clientStream
 				if acc.db != nil {
 					saveGrokAccount(acc.db, acc.toDTO())
 				}
+				am.UnbindSticky(sessionID, acc)
 				slog.Warn("401 after refresh, permanent disable", "module", "grok", "email", acc.Email)
 				continue
 			}
@@ -1104,6 +1419,7 @@ func ProxyGrok(c *gin.Context, body []byte, am *GrokAccountManager, clientStream
 				strings.Contains(bodyStr, "suspended") ||
 				strings.Contains(bodyStr, "permanently") {
 				acc.disabledAt = time.Time{}
+				am.UnbindSticky(sessionID, acc)
 				slog.Warn("upstream permanent disable", "module", "grok", "status", resp.StatusCode, "email", acc.Email, "body", truncateLog(bodyStr, 200))
 			} else {
 				acc.disabledAt = time.Now()

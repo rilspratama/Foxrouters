@@ -1130,6 +1130,17 @@ body {
           </table>
         </div>
         <div id="cbPager" style="display:flex;align-items:center;gap:8px;padding:10px 16px;border-top:1px solid var(--border);font-size:13px;color:var(--text-tertiary)"></div>
+        <!-- Grok selector mode (routing strategy for prompt-cache locality) -->
+        <div id="grokSelectorBar" style="display:none;align-items:center;gap:10px;padding:8px 16px;border-bottom:1px solid var(--border);font-size:12px;color:var(--text-tertiary)">
+          <span style="font-weight:600;color:var(--text-secondary)">Account Selection:</span>
+          <select id="grokSelectorMode" onchange="changeGrokSelectorMode(this.value)" style="background:var(--bg-input);color:var(--text-primary);border:1px solid var(--border);border-radius:6px;padding:3px 8px;font-size:12px">
+            <option value="rr">Round Robin</option>
+            <option value="sticky">Sticky Session</option>
+            <option value="content-hash">Content Hash</option>
+            <option value="hybrid">Hybrid (bucket)</option>
+          </select>
+          <span id="grokSelectorSticky" style="opacity:0.6"></span>
+        </div>
         <div id="grokPanel" style="display:none">
           <div class="tbl-scroll" style="max-height:500px">
             <table class="tbl">
@@ -2301,6 +2312,10 @@ function showTab(e, tab) {
   var selBar = document.getElementById('cbSelectorBar');
   if (selBar) selBar.style.display = tab === 'cb' ? '' : 'none';
   if (tab === 'cb') loadCBSelectorMode();
+  // Grok selector mode bar
+  var grokSelBar = document.getElementById('grokSelectorBar');
+  if (grokSelBar) grokSelBar.style.display = tab === 'grok' ? 'flex' : 'none';
+  if (tab === 'grok') loadGrokSelectorMode();
 }
 
 /* ══════════════════════════════════════════════════════════
@@ -2573,6 +2588,24 @@ async function changeCBSelectorMode(mode) {
     if (r.error) { alert('Failed: ' + r.error); loadCBSelectorMode(); return; }
     loadCBSelectorMode();
   } catch (e) { alert('Error: ' + e.message); loadCBSelectorMode(); }
+}
+
+/* ── Grok selector mode (rr|sticky|content-hash|hybrid) ── */
+async function loadGrokSelectorMode() {
+  try {
+    var r = await fetchJSON('/grok/selector-mode');
+    var sel = document.getElementById('grokSelectorMode');
+    if (sel && r.mode) sel.value = r.mode;
+    var stickyEl = document.getElementById('grokSelectorSticky');
+    if (stickyEl) stickyEl.textContent = r.sticky_active > 0 ? ('· ' + r.sticky_active + ' active session' + (r.sticky_active !== 1 ? 's' : '')) : '';
+  } catch (e) { /* silent — only visible to admin */ }
+}
+async function changeGrokSelectorMode(mode) {
+  try {
+    var r = await apiFetch('/grok/selector-mode', { method: 'PUT', body: JSON.stringify({ mode: mode }) });
+    if (r.error) { alert('Failed: ' + r.error); loadGrokSelectorMode(); return; }
+    loadGrokSelectorMode();
+  } catch (e) { alert('Error: ' + e.message); loadGrokSelectorMode(); }
 }
 
 /* ══════════════════════════════════════════════════════════

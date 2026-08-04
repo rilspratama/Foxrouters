@@ -199,6 +199,8 @@ func HandleAccounts(grokAM *upstream.GrokAccountManager, cbKM *upstream.CBKeyMan
 		c.JSON(200, gin.H{
 			"grok": grokResult, "codebuddy": cbResult,
 			"grok_total": len(grokResult), "cb_total": len(cbResult),
+			"grok_selector_mode": string(upstream.GetGrokSelectorMode()),
+			"cb_selector_mode":   string(upstream.GetSelectorMode()),
 		})
 	}
 }

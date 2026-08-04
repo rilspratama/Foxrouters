@@ -16,6 +16,7 @@ type GrokAccountManager = upstream.GrokAccountManager
 type CBKey = upstream.CBKey
 type CBKeyManager = upstream.CBKeyManager
 type CBSelectorMode = upstream.CBSelectorMode
+type GrokSelectorMode = upstream.GrokSelectorMode
 type UpstreamHealth = upstream.UpstreamHealth
 type HealthChecker = upstream.HealthChecker
 type CircuitState = upstream.CircuitState
@@ -46,6 +47,12 @@ const (
 	SelectorSticky      = upstream.SelectorSticky
 	SelectorContentHash = upstream.SelectorContentHash
 	SelectorHybrid      = upstream.SelectorHybrid
+
+	// Grok selector modes
+	GrokSelectorRR          = upstream.GrokSelectorRR
+	GrokSelectorSticky      = upstream.GrokSelectorSticky
+	GrokSelectorContentHash = upstream.GrokSelectorContentHash
+	GrokSelectorHybrid      = upstream.GrokSelectorHybrid
 )
 
 // Function/worker re-exports
@@ -70,6 +77,11 @@ var (
 	GetSelectorMode  = upstream.GetSelectorMode
 	SetSelectorMode  = upstream.SetSelectorMode
 	LoadSelectorMode = upstream.LoadSelectorMode
+
+	// Grok selector mode (rr|sticky|content-hash|hybrid)
+	GetGrokSelectorMode  = upstream.GetGrokSelectorMode
+	SetGrokSelectorMode  = upstream.SetGrokSelectorMode
+	LoadGrokSelectorMode = upstream.LoadGrokSelectorMode
 
 	truncateLog = upstream.TruncateLog
 )
