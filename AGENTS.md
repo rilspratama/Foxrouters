@@ -98,6 +98,10 @@ Log backend choices (`LOG_BACKEND` env, default `sqlite`):
 | `internal/upstream/codebuddy_credit_sync_test.go` | Meter sync tests (API key + OAuth, Status==3 disable) |
 | `internal/upstream/credential_probe.go` | Direct upstream Test for CB key/OAuth + Grok account |
 | `internal/handlers/credential_probe.go` | `POST /cb/keys/test`, `POST /accounts/test` |
+| `internal/proxy/filters.go` | Pudidil content filter — strips Claude/Anthropic identity + billing headers before upstream |
+| `internal/proxy/filters_test.go` | Filter tests (billing, identities, tool_result nested, end-to-end) |
+| `docs/OPENCODE.md` | OpenCode CLI integration guide (custom provider, reasoningEffort, tool calling) |
+| `docs/HERMES.md` | Hermes reasoning_content display fix reference |
 | `CHANGELOG.md` | Version history (v1.4.0 → v1.6.2) |
 | `.gateway.env` | Secrets (chmod 600, gitignored) |
 

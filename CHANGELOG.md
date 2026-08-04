@@ -8,6 +8,33 @@ Policy: **test (`go test -race`) before build/restart**. Secrets only via `.gate
 
 ---
 
+## v1.6.3+ (working tree, not released) — Content filter + OpenCode docs (2026-08-04)
+
+### Added
+- **Pudidil content filter system** (`internal/proxy/filters.go`) — ported from
+  etteum-pool (TS). 20 default rules (16 active): strips Claude/Anthropic agent
+  identity sentences, billing headers (`x-anthropic-billing-header`,
+  `cc_version`, `cc_entrypoint`, `cch`/`ch`), Cursor/Windsurf/Cline identities,
+  "powered by" lines, GitHub claude-code URLs; rewrites `Claude agent` →
+  `AI coding assistant`, `Built on Anthropic's Claude Agent SDK` → `Built on AI
+  Labs`, `Claude Code` → `the assistant`. Applied in `ProxyRequest` via
+  upgraded `rewriteAgentIdentity()` — messages (string + array blocks +
+  tool_result) + `tools[].function.description`. `remove_ai_coding_agent_pattern`
+  shipped disabled (too aggressive — eats legit user content).
+- **Tests** (`internal/proxy/filters_test.go`) — 9 test funcs / ~35 cases
+  (billing, identities, tool_result nested, end-to-end, case-insensitive,
+  normal-content preservation). `go test -race` green.
+- **Docs: `docs/OPENCODE.md`** — OpenCode CLI integration guide (custom
+  `@ai-sdk/openai-compatible` provider → FoxRouters, model list,
+  `options.reasoningEffort` requirement, tool calling, usage, pitfalls).
+
+### Verified
+- Claude Code: no more content-filter errors with rewritten identity.
+- OpenCode v1.18.12: chat + tool calling (10 tools, multi-turn) + reasoning
+  (`reasoning_content` present when `reasoningEffort` set).
+
+---
+
 ## v1.6.3 — Circuit breaker fixes + model cleanup + reasoning normalization (2026-08-03)
 
 ### Fixed
