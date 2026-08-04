@@ -290,6 +290,34 @@ func saveCBKey(s *db.Store, dto db.CBKeyDTO) {
 	s.SaveCBKey(dto)
 }
 
+// upstreamHeaderDenylist strips security-sensitive headers from upstream
+// responses before forwarding them to gateway clients. Prevents upstream
+// Set-Cookie / Server / Via / X-Powered-By from leaking to callers.
+var upstreamHeaderDenylist = map[string]bool{
+	"Set-Cookie":       true,
+	"Server":           true,
+	"Via":              true,
+	"X-Powered-By":     true,
+	"Transfer-Encoding": true,
+}
+
+// copyUpstreamHeaders copies response headers from upstream to the gin
+// response writer, skipping Content-Encoding, Content-Length (Go handles
+// these), and security-sensitive headers in the denylist.
+func copyUpstreamHeaders(dst http.Header, src http.Header) {
+	for k, v := range src {
+		if strings.EqualFold(k, "Content-Encoding") || strings.EqualFold(k, "Content-Length") {
+			continue
+		}
+		if upstreamHeaderDenylist[http.CanonicalHeaderKey(k)] {
+			continue
+		}
+		for _, vv := range v {
+			dst.Add(k, vv)
+		}
+	}
+}
+
 // silence unused warnings in leaf builds
 var _ = slog.LevelInfo
 var _ = strings.TrimSpace

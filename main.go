@@ -116,7 +116,13 @@ func main() {
 
 	// Health checker: active + passive monitoring with circuit breaker
 	hc := newHealthChecker(grokAM, cbKM)
-	hc.Start()
+	// Worker context — cancelled on SIGTERM so all background goroutines
+	// (health checks, token refresh, credit sync, cooldown re-enable, pool
+	// gauges) exit cleanly during the drain window instead of running until
+	// the process is force-killed.
+	workerCtx, workerCancel := context.WithCancel(context.Background())
+	defer workerCancel()
+	hc.Start(workerCtx)
 
 	// Auth + rate limiter
 	authMgr := newAuthManager(db)
@@ -163,11 +169,11 @@ func main() {
 	// cloudflared is missing or Cloudflare API is unreachable.
 	go tunnelMgr.AutoStart()
 
-	go autoRefreshWorker(grokAM)
-	go reenableWorker(grokAM)
-	go reenableCBWorker(cbKM)
-	go cbOAuthRefreshWorker(cbKM)
-	go cbCreditSyncWorker(cbKM)
+	go autoRefreshWorker(workerCtx, grokAM)
+	go reenableWorker(workerCtx, grokAM)
+	go reenableCBWorker(workerCtx, cbKM)
+	go cbOAuthRefreshWorker(workerCtx, cbKM)
+	go cbCreditSyncWorker(workerCtx, cbKM)
 	// Snapshot pool sizes into Prometheus gauges every 10s. Cheap RLock walk;
 	// keeps activeKeys/disabledKeys eventually consistent without touching the
 	// hot path. Circuit-state gauges are updated inline from health.go.
@@ -175,8 +181,13 @@ func main() {
 		t := time.NewTicker(10 * time.Second)
 		defer t.Stop()
 		updatePoolGauges(grokAM, cbKM, authMgr) // prime once
-		for range t.C {
-			updatePoolGauges(grokAM, cbKM, authMgr)
+		for {
+			select {
+			case <-workerCtx.Done():
+				return
+			case <-t.C:
+				updatePoolGauges(grokAM, cbKM, authMgr)
+			}
 		}
 	}()
 
@@ -212,12 +223,13 @@ func main() {
 	// P3 #6: rate limit /login POST by client IP (5/min, 20/hour) to prevent brute-force.
 	loginLimiter := newLoginLimiter()
 	r.POST("/login", loginLimiter.middleware(), handleLogin(authMgr, sessions))
-	r.GET("/logout", handleLogout(sessions))
+	r.POST("/logout", handleLogout(sessions))
 	r.GET("/health", handleHealth(grokAM, cbKM, hc, authMgr, sessions))
 	r.HEAD("/health", handleHealthMinimal())
-	// Prometheus scrape endpoint — public, no auth (scraper isolation is
-	// upstream's responsibility, e.g. a firewall / private network scrape).
-	r.GET("/metrics", gin.WrapH(promhttp.Handler()))
+	// Prometheus scrape endpoint — admin only (exposes pool sizes, traffic
+	// patterns, circuit state). External scrapers should authenticate via
+	// Bearer token or run on a private network.
+	r.GET("/metrics", adminAuth, gin.WrapH(promhttp.Handler()))
 	// Accounts/keys/history — admin only (inference keys must not see other tenants' data)
 	r.GET("/accounts", adminAuth, handleAccounts(grokAM, cbKM))
 	r.GET("/cb-stats", adminAuth, func(c *gin.Context) {
@@ -412,6 +424,10 @@ func main() {
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	sig := <-quit
 	slog.Info("shutdown signal received, draining", "module", "server", "signal", sig.String())
+
+	// Cancel background workers first so they stop making upstream calls
+	// during the drain window (prevents wasted API credits + partial writes).
+	workerCancel()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()

@@ -44,10 +44,13 @@ func csrfGuard() gin.HandlerFunc {
 		origin := c.GetHeader("Origin")
 		referer := c.GetHeader("Referer")
 
-		// If neither header is present, the request is same-origin (browsers
-		// always send Origin for cross-site fetches). Allow it.
+		// If neither header is present on a state-changing request,
+		// reject — modern browsers always send Origin for cross-site
+		// fetches, and same-origin navigations that omit it are GET.
+		// Non-browser clients (curl) can trivially omit both headers,
+		// so this closes the defense-in-depth gap.
 		if origin == "" && referer == "" {
-			c.Next()
+			c.AbortWithStatusJSON(403, gin.H{"error": "missing Origin/Referer header"})
 			return
 		}
 

@@ -1,6 +1,7 @@
 package upstream
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"log/slog"
@@ -203,27 +204,38 @@ func NewHealthChecker(grokAM *GrokAccountManager, cbKM *CBKeyManager) *HealthChe
 }
 
 // Start launches periodic active health checks.
-func (hc *HealthChecker) Start() {
-	go hc.grokCheckLoop()
-	go hc.cbCheckLoop()
+// Pass a context cancelled on SIGTERM for clean shutdown.
+func (hc *HealthChecker) Start(ctx context.Context) {
+	go hc.grokCheckLoop(ctx)
+	go hc.cbCheckLoop(ctx)
 	slog.Info("active health checker started", "module", "health", "interval", HEALTH_CHECK_INTERVAL.String())
 }
 
-func (hc *HealthChecker) grokCheckLoop() {
+func (hc *HealthChecker) grokCheckLoop(ctx context.Context) {
 	hc.checkGrok()
 	ticker := time.NewTicker(HEALTH_CHECK_INTERVAL)
 	defer ticker.Stop()
-	for range ticker.C {
-		hc.checkGrok()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			hc.checkGrok()
+		}
 	}
 }
 
-func (hc *HealthChecker) cbCheckLoop() {
+func (hc *HealthChecker) cbCheckLoop(ctx context.Context) {
 	hc.checkCB()
 	ticker := time.NewTicker(HEALTH_CHECK_INTERVAL)
 	defer ticker.Stop()
-	for range ticker.C {
-		hc.checkCB()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			hc.checkCB()
+		}
 	}
 }
 

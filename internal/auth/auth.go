@@ -622,7 +622,7 @@ func AuthMiddleware(am *Manager, sessionLookup ...func(string) string) gin.Handl
 	return func(c *gin.Context) {
 		// Skip auth for public endpoints
 		path := c.Request.URL.Path
-		if path == "/health" || path == "/" || path == "/dashboard" || path == "/login" || path == "/logout" || path == "/metrics" {
+		if path == "/health" || path == "/" || path == "/dashboard" || path == "/login" || path == "/logout" {
 			c.Next()
 			return
 		}

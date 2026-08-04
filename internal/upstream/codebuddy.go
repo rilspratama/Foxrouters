@@ -3,6 +3,7 @@ package upstream
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -849,6 +850,10 @@ func (km *CBKeyManager) LoadFromRedis() error {
 	}
 
 	if len(redisState) > 0 {
+		// Build all keys into a local slice, then swap under lock — avoids
+		// data race with hot-path readers (Next, ResolveKey, nextByHash…)
+		// that hold km.mu.RLock while iterating km.keys.
+		loaded := make([]*CBKey, 0, len(redisState))
 		for apiKey, state := range redisState {
 			key := &CBKey{Key: apiKey, db: km.db, CredType: CBAuthAPIKey}
 			// cred_type defaults to api_key for legacy entries
@@ -911,9 +916,12 @@ func (km *CBKeyManager) LoadFromRedis() error {
 					key.meterSyncedAt = time.Unix(n, 0)
 				}
 			}
-			km.keys = append(km.keys, key)
+			loaded = append(loaded, key)
 		}
-		slog.Info("loaded keys from Redis", "module", "cb", "count", len(km.keys))
+		km.mu.Lock()
+		km.keys = loaded
+		km.mu.Unlock()
+		slog.Info("loaded keys from Redis", "module", "cb", "count", len(loaded))
 		return nil
 	}
 
@@ -998,18 +1006,26 @@ func (km *CBKeyManager) ResolveKey(maskedOrFull string) string {
 	km.mu.RLock()
 	defer km.mu.RUnlock()
 	for _, k := range km.keys {
-		if k.Key == maskedOrFull {
-			return k.Key
+		// Snapshot mutable fields under k.mu to avoid race with
+		// AddOAuthAccount which writes CredType/Email under k.mu only.
+		k.mu.RLock()
+		keyVal := k.Key
+		ct := k.CredType
+		email := k.Email
+		k.mu.RUnlock()
+
+		if keyVal == maskedOrFull {
+			return keyVal
 		}
 		// OAuth: also match by Email field
-		if k.CredType == CBAuthOAuth && k.Email == maskedOrFull {
-			return k.Key
+		if ct == CBAuthOAuth && email == maskedOrFull {
+			return keyVal
 		}
 		// Check masked form: first 8 + "..." + last 4 (API keys)
-		if len(k.Key) > 12 {
-			masked := k.Key[:8] + "..." + k.Key[len(k.Key)-4:]
+		if len(keyVal) > 12 {
+			masked := keyVal[:8] + "..." + keyVal[len(keyVal)-4:]
 			if masked == maskedOrFull {
-				return k.Key
+				return keyVal
 			}
 		}
 	}
@@ -1159,22 +1175,34 @@ func (km *CBKeyManager) ReenableCooldowns() {
 }
 
 // ReenableCBWorker is the long-lived goroutine that lifts cooldowns.
-func ReenableCBWorker(km *CBKeyManager) {
+// Pass a context cancelled on SIGTERM for clean shutdown.
+func ReenableCBWorker(ctx context.Context, km *CBKeyManager) {
 	km.ReenableCooldowns()
 	ticker := time.NewTicker(REENABLE_TICK)
 	defer ticker.Stop()
-	for range ticker.C {
-		km.ReenableCooldowns()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			km.ReenableCooldowns()
+		}
 	}
 }
 
 // CBOAuthRefreshWorker pre-warms OAuth access tokens before they expire.
 // Mirrors Grok's AutoRefreshWorker: every PRE_WARM_TICK, scan OAuth keys
 // within PRE_WARM_WINDOW of expiry, refresh with MAX_CONCURRENT_REFRESH cap.
-func CBOAuthRefreshWorker(km *CBKeyManager) {
+// Pass a context cancelled on SIGTERM for clean shutdown.
+func CBOAuthRefreshWorker(ctx context.Context, km *CBKeyManager) {
 	ticker := time.NewTicker(PRE_WARM_TICK)
 	defer ticker.Stop()
-	for range ticker.C {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
 		keys := km.GetAll()
 		var wg sync.WaitGroup
 		sem := make(chan struct{}, MAX_CONCURRENT_REFRESH)
@@ -1214,14 +1242,20 @@ func CBOAuthRefreshWorker(km *CBKeyManager) {
 // API for all non-permanently-disabled keys. Runs once immediately at start
 // (with small stagger), then every CB_CREDIT_SYNC_TICK with concurrency
 // CB_CREDIT_SYNC_CONCURRENCY.
-func CBCreditSyncWorker(km *CBKeyManager) {
+// Pass a context cancelled on SIGTERM for clean shutdown.
+func CBCreditSyncWorker(ctx context.Context, km *CBKeyManager) {
 	// Immediate first pass with small stagger so we don't stampede on boot.
 	syncAllCBCredits(km, true)
 
 	ticker := time.NewTicker(CB_CREDIT_SYNC_TICK)
 	defer ticker.Stop()
-	for range ticker.C {
-		syncAllCBCredits(km, false)
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			syncAllCBCredits(km, false)
+		}
 	}
 }
 
@@ -1656,14 +1690,7 @@ func ProxyCodeBuddy(c *gin.Context, body []byte, bodyMap map[string]any, km *CBK
 
 	if clientStream {
 		defer lastResp.Body.Close()
-		for k, v := range lastResp.Header {
-			if strings.EqualFold(k, "Content-Encoding") || strings.EqualFold(k, "Content-Length") {
-				continue
-			}
-			for _, vv := range v {
-				c.Writer.Header().Add(k, vv)
-			}
-		}
+		copyUpstreamHeaders(c.Writer.Header(), lastResp.Header)
 		c.Writer.WriteHeader(lastResp.StatusCode)
 		flusher, _ := c.Writer.(http.Flusher)
 		scanner := bufio.NewScanner(lastResp.Body)

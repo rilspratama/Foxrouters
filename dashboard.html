@@ -953,7 +953,7 @@ body {
     </div>
     <div style="margin-top:4px;display:flex;align-items:center;justify-content:space-between">
       <span id="lastUpdate">—</span>
-      <a href="/logout" style="color:var(--text-tertiary);font-size:11px;text-decoration:none" onmouseover="this.style.color='var(--red)'" onmouseout="this.style.color='var(--text-tertiary)'">Logout</a>
+      <a href="#" onclick="doLogout();return false" style="color:var(--text-tertiary);font-size:11px;text-decoration:none" onmouseover="this.style.color='var(--red)'" onmouseout="this.style.color='var(--text-tertiary)'">Logout</a>
     </div>
   </div>
 </aside>
@@ -1179,7 +1179,7 @@ body {
           </p>
           <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
             <button class="btn-ghost" onclick="window.location.href='/login'">New Session</button>
-            <button class="btn-ghost" onclick="window.location.href='/logout'">Logout</button>
+            <button class="btn-ghost" onclick="doLogout()">Logout</button>
             <span style="font-size:12px;color:var(--text-tertiary);font-family:var(--mono)" id="currentKeyDisplay"></span>
           </div>
         </div>
@@ -1763,8 +1763,15 @@ function updateAuthKey() {
 }
 
 function clearAuthKey() {
-  // Logout: clear cookie via /logout endpoint
-  window.location.href = '/logout';
+  doLogout();
+}
+
+// Logout: POST to /logout (not GET — prevents CSRF via <img> tag)
+async function doLogout() {
+  try {
+    await fetch('/logout', { method: 'POST', credentials: 'same-origin' });
+  } catch(e) {}
+  window.location.href = '/login';
 }
 
 function showCurrentKey() {

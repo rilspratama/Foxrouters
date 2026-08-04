@@ -91,7 +91,13 @@ func HandleAddProxy(pool *proxy.ProxyPool) gin.HandlerFunc {
 			c.JSON(400, gin.H{"error": err.Error()})
 			return
 		}
-		c.JSON(200, gin.H{"ok": true, "proxy": created})
+		// Mask password in response — it's already stored in Redis,
+		// no need to echo plaintext back (prevents log/CDN leakage).
+		resp := created
+		if resp.Password != "" {
+			resp.Password = "***"
+		}
+		c.JSON(200, gin.H{"ok": true, "proxy": resp})
 	}
 }
 

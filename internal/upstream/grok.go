@@ -2,6 +2,7 @@ package upstream
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -421,20 +422,32 @@ func (am *GrokAccountManager) ReenableCooldowns() {
 }
 
 // ReenableWorker is the long-lived goroutine that lifts cooldowns.
-func ReenableWorker(am *GrokAccountManager) {
+// Pass a context cancelled on SIGTERM for clean shutdown.
+func ReenableWorker(ctx context.Context, am *GrokAccountManager) {
 	am.ReenableCooldowns()
 	ticker := time.NewTicker(REENABLE_TICK)
 	defer ticker.Stop()
-	for range ticker.C {
-		am.ReenableCooldowns()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			am.ReenableCooldowns()
+		}
 	}
 }
 
 // AutoRefreshWorker pre-warms tokens concurrently before they expire.
-func AutoRefreshWorker(am *GrokAccountManager) {
+// Pass a context cancelled on SIGTERM for clean shutdown.
+func AutoRefreshWorker(ctx context.Context, am *GrokAccountManager) {
 	ticker := time.NewTicker(PRE_WARM_TICK)
 	defer ticker.Stop()
-	for range ticker.C {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
 		accounts := am.GetAll()
 		var wg sync.WaitGroup
 		sem := make(chan struct{}, MAX_CONCURRENT_REFRESH)
@@ -789,14 +802,7 @@ func ProxyGrok(c *gin.Context, body []byte, am *GrokAccountManager, clientStream
 
 	defer lastResp.Body.Close()
 
-	for k, v := range lastResp.Header {
-		if strings.EqualFold(k, "Content-Encoding") || strings.EqualFold(k, "Content-Length") {
-			continue
-		}
-		for _, vv := range v {
-			c.Writer.Header().Add(k, vv)
-		}
-	}
+	copyUpstreamHeaders(c.Writer.Header(), lastResp.Header)
 	c.Writer.WriteHeader(lastResp.StatusCode)
 
 	if strings.Contains(lastResp.Header.Get("Content-Type"), "text/event-stream") {
