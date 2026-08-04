@@ -285,7 +285,7 @@ body {
 .content {
   padding: 24px 28px;
   flex: 1;
-  max-width: 1200px;
+  max-width: 1600px;
   width: 100%;
 }
 
@@ -2293,6 +2293,9 @@ function showTab(e, tab) {
   e.target.classList.add('active');
   document.getElementById('cbPanel').style.display = tab === 'cb' ? '' : 'none';
   document.getElementById('grokPanel').style.display = tab === 'grok' ? '' : 'none';
+  // Hide pager of inactive tab (cbPager sits outside grokPanel)
+  var cbPagerEl = document.getElementById('cbPager');
+  if (cbPagerEl) cbPagerEl.style.display = tab === 'cb' ? 'flex' : 'none';
   // Toggle add/bulk/cleanup buttons to match active tab
   document.getElementById('cbAddBtn').style.display = tab === 'cb' ? '' : 'none';
   var oauthBtn = document.getElementById('cbOAuthBtn');
