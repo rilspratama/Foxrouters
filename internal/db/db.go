@@ -159,6 +159,12 @@ type GrokAccountDTO struct {
 	OnDemandUsed    int64
 	PrepaidBalance  int64
 	UnifiedBilling  bool
+
+	// Per-account cumulative token usage (accumulated from response usage)
+	TokensUsed       int64
+	PromptTokens     int64
+	CompletionTokens int64
+	UsageResetAt     time.Time
 }
 
 // GatewayKeyDTO carries the persisted shape of an auth key.
@@ -334,6 +340,10 @@ func (s *Store) SaveGrokAccount(dto GrokAccountDTO) {
 		"on_demand_used":    dto.OnDemandUsed,
 		"prepaid_balance":   dto.PrepaidBalance,
 		"unified_billing":   dto.UnifiedBilling,
+		"tokens_used":       dto.TokensUsed,
+		"prompt_tokens":     dto.PromptTokens,
+		"completion_tokens": dto.CompletionTokens,
+		"usage_reset_at":    dto.UsageResetAt.Unix(),
 	}
 	key := RK_GROK_ACCOUNT + dto.Email
 	if err := s.rdb.HSet(ctx, key, data).Err(); err != nil {

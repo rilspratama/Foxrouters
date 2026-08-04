@@ -51,6 +51,13 @@ type GrokAccount struct {
 	onDemandUsed    int64  // PAYG used in cents
 	prepaidBalance  int64  // purchased credits in cents
 	unifiedBilling  bool   // isUnifiedBillingUser
+
+	// Per-account cumulative token usage (accumulated from response usage field)
+	// Free-tier quota = 1,000,000 tokens (down from 2M as of Aug 2026).
+	tokensUsed   int64 // cumulative total_tokens (prompt + completion + reasoning)
+	promptTokens int64 // cumulative prompt_tokens (includes cached)
+	completionTokens int64 // cumulative completion_tokens
+	usageResetAt time.Time // when the weekly period last reset (from billing sync)
 }
 
 // NewGrokAccountForTest returns a bare GrokAccount for whitebox tests.
@@ -108,6 +115,12 @@ type GrokAccountSnapshot struct {
 	OnDemandUsed    int64
 	PrepaidBalance  int64
 	UnifiedBilling  bool
+
+	// Per-account cumulative token usage
+	TokensUsed       int64
+	PromptTokens     int64
+	CompletionTokens int64
+	UsageResetAt     time.Time
 }
 
 // Snapshot returns a mutex-safe copy of the account's current state.
@@ -135,6 +148,11 @@ func (a *GrokAccount) Snapshot() GrokAccountSnapshot {
 		OnDemandUsed:    a.onDemandUsed,
 		PrepaidBalance:  a.prepaidBalance,
 		UnifiedBilling:  a.unifiedBilling,
+
+		TokensUsed:       a.tokensUsed,
+		PromptTokens:     a.promptTokens,
+		CompletionTokens: a.completionTokens,
+		UsageResetAt:     a.usageResetAt,
 	}
 	switch {
 	case a.disabled && a.disabledAt.IsZero():
@@ -176,6 +194,11 @@ func (a *GrokAccount) toDTO() db.GrokAccountDTO {
 		OnDemandUsed:    a.onDemandUsed,
 		PrepaidBalance:  a.prepaidBalance,
 		UnifiedBilling:  a.unifiedBilling,
+
+		TokensUsed:       a.tokensUsed,
+		PromptTokens:     a.promptTokens,
+		CompletionTokens: a.completionTokens,
+		UsageResetAt:     a.usageResetAt,
 	}
 }
 
@@ -402,6 +425,27 @@ func (am *GrokAccountManager) LoadFromRedis() error {
 		}
 		if v := state["unified_billing"]; v == "true" || v == "1" {
 			acc.unifiedBilling = true
+		}
+		// Per-account token usage
+		if v := state["tokens_used"]; v != "" {
+			if n, err := strconv.ParseInt(v, 10, 64); err == nil {
+				acc.tokensUsed = n
+			}
+		}
+		if v := state["prompt_tokens"]; v != "" {
+			if n, err := strconv.ParseInt(v, 10, 64); err == nil {
+				acc.promptTokens = n
+			}
+		}
+		if v := state["completion_tokens"]; v != "" {
+			if n, err := strconv.ParseInt(v, 10, 64); err == nil {
+				acc.completionTokens = n
+			}
+		}
+		if v := state["usage_reset_at"]; v != "" {
+			if n, err := strconv.ParseInt(v, 10, 64); err == nil && n > 0 {
+				acc.usageResetAt = time.Unix(n, 0)
+			}
 		}
 		am.accounts = append(am.accounts, acc)
 	}
@@ -644,16 +688,33 @@ func (a *GrokAccount) syncBillingLocked() error {
 		prepaid = billing.Config.PrepaidBalance.Val
 	}
 
+	// Detect weekly period rollover — if periodEnd changed, reset usage counters
+	newPeriodEnd := billing.Config.CurrentPeriod.End
 	a.mu.Lock()
+	periodChanged := newPeriodEnd != "" && a.periodEnd != "" && newPeriodEnd != a.periodEnd
 	a.billingSyncedAt = time.Now()
 	a.periodStart = billing.Config.CurrentPeriod.Start
-	a.periodEnd = billing.Config.CurrentPeriod.End
+	a.periodEnd = newPeriodEnd
 	a.periodType = billing.Config.CurrentPeriod.Type
 	a.onDemandCap = cap
 	a.onDemandUsed = used
 	a.prepaidBalance = prepaid
 	a.unifiedBilling = billing.Config.IsUnifiedBilling
+	if periodChanged {
+		a.tokensUsed = 0
+		a.promptTokens = 0
+		a.completionTokens = 0
+		a.usageResetAt = time.Now()
+	}
 	a.mu.Unlock()
+
+	if periodChanged {
+		slog.Info("grok billing period rolled over, usage reset",
+			"module", "grok-billing",
+			"email", a.Email,
+			"old_period_end", a.periodEnd,
+			"new_period_end", newPeriodEnd)
+	}
 
 	if a.db != nil {
 		saveGrokAccount(a.db, a.toDTO())
@@ -667,6 +728,45 @@ func (a *GrokAccount) syncBillingLocked() error {
 		"prepaid", prepaid,
 		"unified", billing.Config.IsUnifiedBilling)
 	return nil
+}
+
+// GROK_FREE_TIER_QUOTA is the free-tier weekly token quota (1M as of Aug 2026,
+// down from 2M). Used for dashboard display only — enforcement is server-side.
+const GROK_FREE_TIER_QUOTA = 1_000_000
+
+// RecordUsage accumulates per-account token usage from a completed request's
+// usage fields. Called after ProxyGrok finishes reading the upstream response.
+// Non-blocking: persists to Redis best-effort. Does NOT return an error —
+// usage tracking is telemetry, not critical path.
+func (a *GrokAccount) RecordUsage(promptTokens, completionTokens int) {
+	if promptTokens <= 0 && completionTokens <= 0 {
+		return
+	}
+	total := int64(promptTokens + completionTokens)
+	a.mu.Lock()
+	a.promptTokens += int64(promptTokens)
+	a.completionTokens += int64(completionTokens)
+	a.tokensUsed += total
+	a.mu.Unlock()
+
+	// Persist best-effort (fire-and-forget — don't block the response path).
+	if a.db != nil {
+		go saveGrokAccount(a.db, a.toDTO())
+	}
+}
+
+// ResetUsage zeroes the per-account usage counters. Called by SyncBilling
+// when it detects a new billing period (periodEnd changed).
+func (a *GrokAccount) ResetUsage(resetAt time.Time) {
+	a.mu.Lock()
+	a.tokensUsed = 0
+	a.promptTokens = 0
+	a.completionTokens = 0
+	a.usageResetAt = resetAt
+	a.mu.Unlock()
+	if a.db != nil {
+		go saveGrokAccount(a.db, a.toDTO())
+	}
 }
 
 // GrokBillingSyncWorker periodically syncs billing data for all non-banned
@@ -1119,6 +1219,10 @@ func ProxyGrok(c *gin.Context, body []byte, am *GrokAccountManager, clientStream
 		c.Set("output_text", truncateLog(streamContent.String(), 1000))
 		c.Set("tokens_in", streamTokensIn)
 		c.Set("tokens_out", streamTokensOut)
+		// Accumulate per-account usage (telemetry, non-blocking)
+		if lastAcc != nil {
+			lastAcc.RecordUsage(streamTokensIn, streamTokensOut)
+		}
 		respJSON, _ := json.Marshal(gin.H{
 			"choices": []gin.H{{
 				"message":       gin.H{"role": "assistant", "content": streamContent.String()},
@@ -1149,11 +1253,13 @@ func ProxyGrok(c *gin.Context, body []byte, am *GrokAccountManager, clientStream
 				}
 			}
 			if usage, ok := result["usage"].(map[string]any); ok {
-				if pt, ok := usage["prompt_tokens"].(float64); ok {
-					c.Set("tokens_in", int(pt))
-				}
-				if ct, ok := usage["completion_tokens"].(float64); ok {
-					c.Set("tokens_out", int(ct))
+				pt, _ := usage["prompt_tokens"].(float64)
+				ct, _ := usage["completion_tokens"].(float64)
+				c.Set("tokens_in", int(pt))
+				c.Set("tokens_out", int(ct))
+				// Accumulate per-account usage (telemetry, non-blocking)
+				if lastAcc != nil {
+					lastAcc.RecordUsage(int(pt), int(ct))
 				}
 			}
 		}

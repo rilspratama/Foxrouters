@@ -2120,13 +2120,18 @@ function renderGrokPage() {
     var disAt = a.disabled_at && a.disabled_at !== '0001-01-01T00:00:00Z' ? new Date(a.disabled_at).toLocaleString('en-GB', {month:'short',day:'2-digit',hour:'2-digit',minute:'2-digit',timeZone:'UTC'}) + ' UTC' : '—';
     var periodEnd = a.period_end ? new Date(a.period_end).toLocaleString('en-GB', {month:'short',day:'2-digit',hour:'2-digit',minute:'2-digit',timeZone:'UTC'}) + ' UTC' : '—';
     var usageStr;
+    var tokensUsed = a.tokens_used || 0;
+    var quota = a.quota || 1000000;
+    var usagePct = quota > 0 ? Math.min(100, Math.round(tokensUsed / quota * 100)) : 0;
+    var tokensStr = tokensUsed >= 1000 ? (tokensUsed / 1000).toFixed(1) + 'K' : tokensUsed;
+    var quotaStr = quota >= 1000000 ? (quota / 1000000) + 'M' : quota;
     if (a.on_demand_cap > 0) {
-      var pct = Math.round(a.on_demand_used / a.on_demand_cap * 100);
-      usageStr = '$' + (a.on_demand_used / 100).toFixed(2) + ' / $' + (a.on_demand_cap / 100).toFixed(2) + ' (' + pct + '%)';
-    } else if (a.prepaid_balance > 0) {
-      usageStr = 'Prepaid: $' + (a.prepaid_balance / 100).toFixed(2);
+      usageStr = '$' + (a.on_demand_used / 100).toFixed(2) + ' / $' + (a.on_demand_cap / 100).toFixed(2) + ' PAYG';
+    } else if (tokensUsed > 0) {
+      var pctColor = usagePct >= 80 ? 'err' : (usagePct >= 50 ? 'warn' : 'ok');
+      usageStr = '<span class="' + pctColor + '">' + tokensStr + ' / ' + quotaStr + ' (' + usagePct + '%)</span>';
     } else {
-      usageStr = '<span class="ok">Free</span>';
+      usageStr = '<span class="ok">0 / ' + quotaStr + '</span>';
     }
     gRows += '<tr>' +
       '<td class="mono">' + escHtml(a.email) + '</td>' +

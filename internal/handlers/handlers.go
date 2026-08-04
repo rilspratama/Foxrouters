@@ -153,6 +153,11 @@ func HandleAccounts(grokAM *upstream.GrokAccountManager, cbKM *upstream.CBKeyMan
 				"on_demand_used":     s.OnDemandUsed,
 				"prepaid_balance":    s.PrepaidBalance,
 				"unified_billing":    s.UnifiedBilling,
+				"tokens_used":        s.TokensUsed,
+				"prompt_tokens":      s.PromptTokens,
+				"completion_tokens":  s.CompletionTokens,
+				"usage_reset_at":     s.UsageResetAt,
+				"quota":              upstream.GROK_FREE_TIER_QUOTA,
 			})
 		}
 		cbKeys := cbKM.GetAll()
