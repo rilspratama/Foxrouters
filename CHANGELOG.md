@@ -8,6 +8,43 @@ Policy: **test (`go test -race`) before build/restart**. Secrets only via `.gate
 
 ---
 
+## v1.6.3+ (working tree, not released) — Grok billing, usage, selector, error handling (2026-08-04)
+
+### Added
+- **Grok billing sync** — `SyncBilling()` fetches `GET /v1/billing?format=credits` from
+  cli-chat-proxy.grok.com every 5min. 8 billing fields persisted to Redis (periodStart/End/Type,
+  onDemandCap/Used, prepaidBalance, unifiedBilling, billingSyncedAt). `POST /accounts/billing/sync`
+  manual trigger. Dashboard: Period End + Usage columns, Sync Billing button. (commit 40f4fb4)
+- **Grok header update** — `grokHeaders()` now sends `x-userid` (JWT sub) + `x-email` on all
+  upstream requests, matching real grok-cli behavior. (commit 40f4fb4)
+- **Per-account token usage tracking** — `RecordUsage(prompt, completion)` accumulates from
+  response `usage` field on both stream + non-stream paths. 4 fields persisted (tokensUsed,
+  promptTokens, completionTokens, usageResetAt). Weekly period rollover auto-resets counters.
+  `GROK_FREE_TIER_QUOTA=1M` (down from 2M). Dashboard: 'tokens_used / 1M (pct%)' with color
+  thresholds. (commit 9da3299)
+- **Grok selector modes** — 4 modes (rr | sticky | content-hash | hybrid), default sticky.
+  `GROK_SELECTOR_MODE` env, `GET/PUT /grok/selector-mode` (Redis `grok:config`). `NextForMode()`
+  dispatches by mode. Sticky map + 30min TTL janitor. Content-hash = FNV-1a(model + system msg).
+  Hybrid = 3-key bucket + sticky within bucket. `UnbindSticky` on permanent disable.
+  Dashboard: Grok selector bar (4 buttons). (commit 42992e7)
+- **429 rate-limit handler** — cooldown disable (not permanent), parses `Retry-After` header
+  (default 60s, capped 600s). Auto-re-enabled by ReenableWorker. (commit ae035f5)
+- **400 bad-request handler** — pass through to client immediately (no disable, no retry).
+  Covers: invalid model, context_length_exceeded, image processing, encrypted_content. (commit ae035f5)
+
+### Changed
+- `grokHeaders()` signature: now accepts `userID, email string` params (2 call sites updated)
+- `GrokAccountSnapshot` + `GrokAccountDTO` + `Snapshot()` + `toDTO()`: +12 fields (billing + usage)
+- `LoadFromRedis`: parses billing + usage fields from Redis hash
+- `SaveGrokAccount`: writes billing + usage fields to Redis hash
+- `ProxyGrok`: extracts sessionID + sysHash, uses `NextForMode` for first 2 attempts if mode != RR
+
+### Fixed
+- 429 previously fell through to generic path (no explicit handler) — now proper cooldown
+- 400 previously fell through to generic path — now immediate passthrough
+
+---
+
 ## v1.6.3+ (working tree, not released) — Content filter + OpenCode docs (2026-08-04)
 
 ### Added

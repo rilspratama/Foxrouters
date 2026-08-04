@@ -18,7 +18,7 @@ Client → AuthMiddleware (Bearer) → RateLimitMiddleware
        → /v1/chat/completions
             ↓
        proxyRequest (model routing + expandGrokAlias)
-       ├── grok-* → proxyGrok (O(k) RR, 401 retry, 403 ban/cooldown + Redis persist)
+       ├── grok-* → proxyGrok (selector modes, 401 retry, 402/403 ban, 429 cooldown, 400 passthrough, billing sync, usage tracking)
        └── cb/*   → proxyCodeBuddy (stream-only transform, credit/14018 disable + Redis)
             ↓
        async LogRequest → ClickHouse (full body, ZSTD, unlimited)
@@ -54,6 +54,10 @@ Log backend choices (`LOG_BACKEND` env, default `sqlite`):
 - `Next()` Pass1 valid token; Pass2 least-expired + async refresh  
 - 401 rebuild request body + retry  
 - **CB OAuth:** Pre-warm worker (30s tick, 30m window) + `EnsureValid` before chat + 401 refresh-retry. Singleflight + lock-split. Refresh via `POST /v2/plugin/auth/token/refresh` (`X-Refresh-Token`). Eager refresh on import when AT is expired/near-expiry and RT is valid.
+- **Grok selector modes:** rr | sticky | content-hash | hybrid (default sticky). `GROK_SELECTOR_MODE` env, `GET/PUT /grok/selector-mode` (Redis `grok:config`). `NextForMode()` dispatches by mode. Sticky map + 30min TTL janitor. `x-session-id`/`x-conversation-id`/`x-chat-id` header pins conversation. Content-hash = FNV-1a(model + first system message). Hybrid = 3-key bucket + sticky within bucket.
+- **Grok billing sync:** `GET /v1/billing?format=credits` every 5min (`GrokBillingSyncWorker`). 8 fields persisted (periodStart/End/Type, onDemandCap/Used, prepaidBalance, unifiedBilling). `POST /accounts/billing/sync` manual trigger. Weekly period rollover auto-resets usage counters.
+- **Grok usage tracking:** Per-account cumulative tokens from response `usage` field. `RecordUsage()` non-blocking Redis persist. `GROK_FREE_TIER_QUOTA=1M`. Dashboard: 'tokens_used / 1M (pct%)'.
+- **Grok error handling:** 401→refresh+retry (invalid_grant=permanent), 402/403+banned/spending-limit→permanent, 403 other→cooldown, 429→cooldown+Retry-After, 400→passthrough, 5xx→retry next.
 
 ### CB dual pool (`api_key` + `oauth`)
 - Same chat endpoint: `www.codebuddy.ai/v2/chat/completions`
@@ -114,6 +118,7 @@ CLICKHOUSE_ADDR=127.0.0.1:9000   # only used when LOG_BACKEND=clickhouse
 CLICKHOUSE_DB=gateway
 GATEWAY_KEY_FILE / CB_KEY_FILE
 CB_SELECTOR_MODE=sticky          # rr | sticky (default) | content-hash | hybrid
+GROK_SELECTOR_MODE=sticky        # rr | sticky (default) | content-hash | hybrid
 PORT=20130
 COOKIE_SECURE=0  # dev HTTP; omit for prod (defaults to HTTPS-only)
 ```
@@ -148,6 +153,9 @@ curl -s http://127.0.0.1:20130/health
 | `POST /cb/keys/test` | Probe one CB credential upstream (`{key}` or `{email}`) |
 | `POST /accounts/test` | Probe one Grok account upstream (`{email}`) |
 | `POST /cb/credits/sync` | Realtime meter sync (all `{}` or one by `email`/`key`) |
+| `GET /grok/selector-mode` | Current Grok account selection mode + sticky count |
+| `PUT /grok/selector-mode` | `{"mode":"hybrid"}` → switch + Redis-persist |
+| `POST /accounts/billing/sync` | Manual billing sync (all `{}` or one by email) |
 | `GET /cb-stats` | CB credits + `cred_type` / remain / package / meter_* |
 | `GET/POST /api/keys` … | Gateway key CRUD |
 | `GET/POST /api/proxies` … | Proxy pool CRUD + test + toggle |
@@ -160,7 +168,7 @@ curl -s http://127.0.0.1:20130/health
 - Grok table: client-side pagination  
 - **CB tab buttons (6):** `+ Add Key`, `+ Add OAuth`, `Bulk OAuth`, `Bulk Import`, `Sync credits`, `Cleanup Disabled`  
 - **CB table:** Type badge (OAuth purple / API Key blue), Expires column, meter remain, **Test** + Delete per row  
-- **Grok table:** **Test** + Delete per row  
+- **Grok table:** Period End + Usage (tokens/1M) + **Test** + Delete per row, **Sync Billing** button  
 - **Add OAuth modal:** segmented **Manual | Login URL** (generate auth URL → auto-poll → import)  
 
 
