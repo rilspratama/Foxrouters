@@ -1400,6 +1400,49 @@ func ProxyGrok(c *gin.Context, body []byte, am *GrokAccountManager, clientStream
 			}
 		}
 
+		// 429 = rate limited. Cooldown the account (not permanent) and rotate.
+		// Parse Retry-After header for backoff (Grok sends this on 429).
+		if resp.StatusCode == 429 {
+			bodyBytes, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+			resp.Body.Close()
+			bodyStr := string(bodyBytes)
+			retryAfter := resp.Header.Get("Retry-After")
+			cooldownDur := GROK_RATE_LIMIT_COOLDOWN // default 60s
+			if retryAfter != "" {
+				if secs, err := strconv.Atoi(retryAfter); err == nil && secs > 0 && secs < 600 {
+					cooldownDur = time.Duration(secs) * time.Second
+				}
+			}
+			acc.mu.Lock()
+			acc.disabled = true
+			acc.disabledAt = time.Now().Add(cooldownDur)
+			acc.mu.Unlock()
+			if acc.db != nil {
+				saveGrokAccount(acc.db, acc.toDTO())
+			}
+			slog.Warn("upstream rate limited, cooldown",
+				"module", "grok",
+				"email", acc.Email,
+				"status", 429,
+				"retry_after", retryAfter,
+				"cooldown_secs", int(cooldownDur.Seconds()),
+				"body", truncateLog(bodyStr, 200))
+			continue
+		}
+
+		// 400 = bad request (invalid model, context_length_exceeded, image error,
+		// encrypted_content). NOT an account problem — pass through to client
+		// immediately without disabling or retrying.
+		if resp.StatusCode == 400 {
+			lastResp = resp
+			lastAcc = acc
+			slog.Debug("upstream 400 bad request, pass through",
+				"module", "grok",
+				"email", acc.Email,
+				"status", 400)
+			break
+		}
+
 		// 402 = payment required (xAI free-tier spending-limit / personal-team-blocked)
 		// 403 = forbidden (ban / temp block). Both must rotate to next account —
 		// otherwise a single exhausted free account short-circuits the whole RR pool.

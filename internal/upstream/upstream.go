@@ -190,6 +190,9 @@ const (
 	GROK_BILLING_SYNC_TICK        = 5 * time.Minute
 	GROK_BILLING_SYNC_CONCURRENCY = 5
 
+	// Grok rate-limit cooldown (429 response). Overridden by Retry-After header.
+	GROK_RATE_LIMIT_COOLDOWN = 60 * time.Second
+
 	// MAX_REQUEST_BODY caps incoming request bodies — kept here (upstream is
 	// the primary consumer via chat/completions handler).
 	MAX_REQUEST_BODY = 10 * 1024 * 1024 // 10MB
