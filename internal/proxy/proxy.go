@@ -235,6 +235,10 @@ func ProxyRequest(grokAM *upstream.GrokAccountManager, cbKM *upstream.CBKeyManag
 			return
 		}
 
+		// Rewrite agent identity strings before forwarding to upstream.
+		rewriteAgentIdentity(bodyMap)
+		body, _ = json.Marshal(bodyMap)
+
 		model, _ := bodyMap["model"].(string)
 		if model == "" {
 			model = "grok-4.5"
@@ -520,4 +524,89 @@ func ProxyRequest(grokAM *upstream.GrokAccountManager, cbKM *upstream.CBKeyManag
 			grokAM.DB().LogRequest(rl)
 		}
 	}
+}
+
+// rewriteAgentIdentity replaces agent identity strings in message content
+// before forwarding to upstream. Walks all messages (system/user/assistant)
+// and applies string replacement to both plain-string and array-of-blocks
+// content formats, plus tool_result nested blocks and tool descriptions.
+// Mirrors etteum-pool's sanitizeRequest.
+func rewriteAgentIdentity(bm map[string]any) {
+	if msgs, ok := bm["messages"].([]any); ok {
+		for _, msg := range msgs {
+			m, ok := msg.(map[string]any)
+			if !ok {
+				continue
+			}
+			rewriteMessageContent(m)
+		}
+	}
+	// Sanitize tool definitions: tools[].function.description
+	if tools, ok := bm["tools"].([]any); ok {
+		for _, tool := range tools {
+			t, ok := tool.(map[string]any)
+			if !ok {
+				continue
+			}
+			fn, ok := t["function"].(map[string]any)
+			if !ok {
+				continue
+			}
+			if desc, ok := fn["description"].(string); ok {
+				fn["description"] = rewriteAgentStrings(desc)
+			}
+		}
+	}
+}
+
+// rewriteMessageContent rewrites the "content" field of a single message.
+// Handles: plain string, array of content blocks (text), and tool_result
+// blocks whose content is either a string or an array of text blocks.
+func rewriteMessageContent(m map[string]any) {
+	switch v := m["content"].(type) {
+	case string:
+		m["content"] = rewriteAgentStrings(v)
+	case []any:
+		for _, block := range v {
+			b, ok := block.(map[string]any)
+			if !ok {
+				continue
+			}
+			switch t := b["type"].(type) {
+			case string:
+				if t == "tool_result" {
+					rewriteToolResultContent(b)
+					continue
+				}
+			}
+			if text, ok := b["text"].(string); ok {
+				b["text"] = rewriteAgentStrings(text)
+			}
+		}
+	}
+}
+
+// rewriteToolResultContent sanitizes a tool_result content block, which can
+// carry either a plain string or an array of text blocks.
+func rewriteToolResultContent(b map[string]any) {
+	switch v := b["content"].(type) {
+	case string:
+		b["content"] = rewriteAgentStrings(v)
+	case []any:
+		for _, inner := range v {
+			ib, ok := inner.(map[string]any)
+			if !ok {
+				continue
+			}
+			if text, ok := ib["text"].(string); ok {
+				ib["text"] = rewriteAgentStrings(text)
+			}
+		}
+	}
+}
+
+// rewriteAgentStrings applies the full sanitization pipeline to a text string.
+// Delegates to ApplyFilters (the pudidil filter rule set).
+func rewriteAgentStrings(s string) string {
+	return ApplyFilters(s)
 }
