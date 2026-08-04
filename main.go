@@ -174,6 +174,7 @@ func main() {
 	go reenableCBWorker(workerCtx, cbKM)
 	go cbOAuthRefreshWorker(workerCtx, cbKM)
 	go cbCreditSyncWorker(workerCtx, cbKM)
+	go grokBillingSyncWorker(workerCtx, grokAM)
 	// Snapshot pool sizes into Prometheus gauges every 10s. Cheap RLock walk;
 	// keeps activeKeys/disabledKeys eventually consistent without touching the
 	// hot path. Circuit-state gauges are updated inline from health.go.
@@ -283,6 +284,7 @@ func main() {
 	r.POST("/cb/oauth/device/start", csrfGuard(), adminAuth, handleCBOAuthDeviceStart())
 	r.GET("/cb/oauth/device/poll", csrfGuard(), adminAuth, handleCBOAuthDevicePoll())
 	r.POST("/cb/credits/sync", csrfGuard(), adminAuth, handleSyncCBCredits(cbKM))
+	r.POST("/accounts/billing/sync", csrfGuard(), adminAuth, handleSyncGrokBilling(grokAM))
 	// CB selector mode: rr | sticky | content-hash | hybrid (runtime switch, Redis-persisted)
 	r.GET("/cb/selector-mode", adminAuth, func(c *gin.Context) {
 		c.JSON(200, gin.H{

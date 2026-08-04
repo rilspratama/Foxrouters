@@ -149,6 +149,16 @@ type GrokAccountDTO struct {
 	Sub          string
 	Disabled     bool
 	DisabledAt   time.Time
+
+	// Billing fields (from GET /v1/billing?format=credits)
+	BillingSyncedAt time.Time
+	PeriodStart     string
+	PeriodEnd       string
+	PeriodType      string
+	OnDemandCap     int64
+	OnDemandUsed    int64
+	PrepaidBalance  int64
+	UnifiedBilling  bool
 }
 
 // GatewayKeyDTO carries the persisted shape of an auth key.
@@ -305,17 +315,25 @@ func (s *Store) SaveGrokAccount(dto GrokAccountDTO) {
 	defer cancel()
 
 	data := map[string]interface{}{
-		"email":         dto.Email,
-		"access_token":  dto.AccessToken,
-		"refresh_token": dto.RefreshToken,
-		"id_token":      dto.IDToken,
-		"expires_at":    dto.ExpiresAt.Unix(),
-		"expires_in":    dto.ExpiresIn,
-		"expired":       dto.Expired,
-		"last_refresh":  dto.LastRefresh,
-		"sub":           dto.Sub,
-		"disabled":      dto.Disabled,
-		"disabled_at":   dto.DisabledAt.Unix(),
+		"email":            dto.Email,
+		"access_token":     dto.AccessToken,
+		"refresh_token":    dto.RefreshToken,
+		"id_token":         dto.IDToken,
+		"expires_at":       dto.ExpiresAt.Unix(),
+		"expires_in":       dto.ExpiresIn,
+		"expired":          dto.Expired,
+		"last_refresh":     dto.LastRefresh,
+		"sub":              dto.Sub,
+		"disabled":         dto.Disabled,
+		"disabled_at":      dto.DisabledAt.Unix(),
+		"billing_synced_at": dto.BillingSyncedAt.Unix(),
+		"period_start":      dto.PeriodStart,
+		"period_end":        dto.PeriodEnd,
+		"period_type":       dto.PeriodType,
+		"on_demand_cap":     dto.OnDemandCap,
+		"on_demand_used":    dto.OnDemandUsed,
+		"prepaid_balance":   dto.PrepaidBalance,
+		"unified_billing":   dto.UnifiedBilling,
 	}
 	key := RK_GROK_ACCOUNT + dto.Email
 	if err := s.rdb.HSet(ctx, key, data).Err(); err != nil {

@@ -23,6 +23,9 @@ import (
 // refreshSF collapses concurrent Refresh() for the same account email.
 var refreshSF singleflight.Group
 
+// billingSF collapses concurrent SyncBilling() for the same account email.
+var billingSF singleflight.Group
+
 // GrokAccount holds one OAuth session against auth.x.ai.
 type GrokAccount struct {
 	Email        string `json:"email"`
@@ -38,6 +41,16 @@ type GrokAccount struct {
 	disabled     bool
 	disabledAt   time.Time
 	db           *db.Store
+
+	// Billing fields (populated by SyncBilling, persisted to Redis)
+	billingSyncedAt time.Time
+	periodStart     string // currentPeriod.start
+	periodEnd       string // currentPeriod.end (weekly reset)
+	periodType      string // "USAGE_PERIOD_TYPE_WEEKLY"
+	onDemandCap     int64  // PAYG cap in cents (0 = not enabled / free tier)
+	onDemandUsed    int64  // PAYG used in cents
+	prepaidBalance  int64  // purchased credits in cents
+	unifiedBilling  bool   // isUnifiedBillingUser
 }
 
 // NewGrokAccountForTest returns a bare GrokAccount for whitebox tests.
@@ -85,6 +98,16 @@ type GrokAccountSnapshot struct {
 	DisabledAt   time.Time
 	// TokenStatus is a convenience: "active" | "banned" | "cooldown" | "expired"
 	TokenStatus string
+
+	// Billing fields
+	BillingSyncedAt time.Time
+	PeriodStart     string
+	PeriodEnd       string
+	PeriodType      string
+	OnDemandCap     int64
+	OnDemandUsed    int64
+	PrepaidBalance  int64
+	UnifiedBilling  bool
 }
 
 // Snapshot returns a mutex-safe copy of the account's current state.
@@ -103,6 +126,15 @@ func (a *GrokAccount) Snapshot() GrokAccountSnapshot {
 		LastRefresh:  a.LastRefresh,
 		Disabled:     a.disabled,
 		DisabledAt:   a.disabledAt,
+
+		BillingSyncedAt: a.billingSyncedAt,
+		PeriodStart:     a.periodStart,
+		PeriodEnd:       a.periodEnd,
+		PeriodType:      a.periodType,
+		OnDemandCap:     a.onDemandCap,
+		OnDemandUsed:    a.onDemandUsed,
+		PrepaidBalance:  a.prepaidBalance,
+		UnifiedBilling:  a.unifiedBilling,
 	}
 	switch {
 	case a.disabled && a.disabledAt.IsZero():
@@ -135,6 +167,15 @@ func (a *GrokAccount) toDTO() db.GrokAccountDTO {
 		Sub:          a.Sub,
 		Disabled:     a.disabled,
 		DisabledAt:   a.disabledAt,
+
+		BillingSyncedAt: a.billingSyncedAt,
+		PeriodStart:     a.periodStart,
+		PeriodEnd:       a.periodEnd,
+		PeriodType:      a.periodType,
+		OnDemandCap:     a.onDemandCap,
+		OnDemandUsed:    a.onDemandUsed,
+		PrepaidBalance:  a.prepaidBalance,
+		UnifiedBilling:  a.unifiedBilling,
 	}
 }
 
@@ -335,6 +376,33 @@ func (am *GrokAccountManager) LoadFromRedis() error {
 				}
 			}
 		}
+		// Billing fields
+		if v := state["billing_synced_at"]; v != "" {
+			if n, err := strconv.ParseInt(v, 10, 64); err == nil && n > 0 {
+				acc.billingSyncedAt = time.Unix(n, 0)
+			}
+		}
+		acc.periodStart = state["period_start"]
+		acc.periodEnd = state["period_end"]
+		acc.periodType = state["period_type"]
+		if v := state["on_demand_cap"]; v != "" {
+			if n, err := strconv.ParseInt(v, 10, 64); err == nil {
+				acc.onDemandCap = n
+			}
+		}
+		if v := state["on_demand_used"]; v != "" {
+			if n, err := strconv.ParseInt(v, 10, 64); err == nil {
+				acc.onDemandUsed = n
+			}
+		}
+		if v := state["prepaid_balance"]; v != "" {
+			if n, err := strconv.ParseInt(v, 10, 64); err == nil {
+				acc.prepaidBalance = n
+			}
+		}
+		if v := state["unified_billing"]; v == "true" || v == "1" {
+			acc.unifiedBilling = true
+		}
 		am.accounts = append(am.accounts, acc)
 	}
 	slog.Info("loaded accounts from Redis", "module", "grok", "count", len(am.accounts))
@@ -488,6 +556,171 @@ func AutoRefreshWorker(ctx context.Context, am *GrokAccountManager) {
 	}
 }
 
+// ─── Billing sync ────────────────────────────────────────────────────────────
+
+// grokBillingResponse is the JSON shape from GET /v1/billing?format=credits.
+type grokBillingResponse struct {
+	Config struct {
+		CurrentPeriod struct {
+			Type  string `json:"type"`
+			Start string `json:"start"`
+			End   string `json:"end"`
+		} `json:"currentPeriod"`
+		OnDemandCap       *grokCent `json:"onDemandCap"`
+		OnDemandUsed      *grokCent `json:"onDemandUsed"`
+		PrepaidBalance    *grokCent `json:"prepaidBalance"`
+		IsUnifiedBilling  bool      `json:"isUnifiedBillingUser"`
+		BillingPeriodEnd  string    `json:"billingPeriodEnd"`
+	} `json:"config"`
+}
+
+// grokCent is the { "val": <cents> } wrapper used by the billing API.
+type grokCent struct {
+	Val int64 `json:"val"`
+}
+
+// SyncBilling fetches the current billing/usage state from cli-chat-proxy
+// and persists it to the account + Redis. Singleflight per email.
+func (a *GrokAccount) SyncBilling() error {
+	_, err, _ := billingSF.Do(a.Email, func() (any, error) {
+		return nil, a.syncBillingLocked()
+	})
+	return err
+}
+
+func (a *GrokAccount) syncBillingLocked() error {
+	// Ensure token is fresh before the billing call.
+	if err := a.EnsureValid(); err != nil {
+		return fmt.Errorf("grok billing ensure valid: %w", err)
+	}
+
+	token := a.GetAccessToken()
+
+	req, err := http.NewRequest("GET", GROK_BILLING_URL, nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("X-XAI-Token-Auth", "xai-grok-cli")
+	req.Header.Set("x-authenticateresponse", "authenticate-response")
+	req.Header.Set("x-grok-client-version", GROK_CLIENT_VERSION)
+	req.Header.Set("x-grok-client-identifier", GROK_CLIENT_IDENTIFIER)
+	req.Header.Set("x-grok-client-mode", "tui")
+	req.Header.Set("User-Agent", fmt.Sprintf("grok-shell/%s (linux; x86_64)", GROK_CLIENT_VERSION))
+	if a.Sub != "" {
+		req.Header.Set("x-userid", a.Sub)
+	}
+	if a.Email != "" {
+		req.Header.Set("x-email", a.Email)
+	}
+
+	client, proxyID := getClient(upstreamClient, "grok")
+	resp, err := client.Do(req)
+	if err != nil {
+		markProxyResult(proxyID, err, 0)
+		return fmt.Errorf("grok billing: %w", err)
+	}
+	markProxyResult(proxyID, nil, resp.StatusCode)
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if resp.StatusCode != 200 {
+		return fmt.Errorf("grok billing [%d]: %s", resp.StatusCode, truncateLog(string(body), 200))
+	}
+
+	var billing grokBillingResponse
+	if err := json.Unmarshal(body, &billing); err != nil {
+		return fmt.Errorf("grok billing parse: %w", err)
+	}
+
+	var cap, used, prepaid int64
+	if billing.Config.OnDemandCap != nil {
+		cap = billing.Config.OnDemandCap.Val
+	}
+	if billing.Config.OnDemandUsed != nil {
+		used = billing.Config.OnDemandUsed.Val
+	}
+	if billing.Config.PrepaidBalance != nil {
+		prepaid = billing.Config.PrepaidBalance.Val
+	}
+
+	a.mu.Lock()
+	a.billingSyncedAt = time.Now()
+	a.periodStart = billing.Config.CurrentPeriod.Start
+	a.periodEnd = billing.Config.CurrentPeriod.End
+	a.periodType = billing.Config.CurrentPeriod.Type
+	a.onDemandCap = cap
+	a.onDemandUsed = used
+	a.prepaidBalance = prepaid
+	a.unifiedBilling = billing.Config.IsUnifiedBilling
+	a.mu.Unlock()
+
+	if a.db != nil {
+		saveGrokAccount(a.db, a.toDTO())
+	}
+	slog.Debug("grok billing sync ok",
+		"module", "grok-billing",
+		"email", a.Email,
+		"period_end", a.periodEnd,
+		"on_demand_cap", cap,
+		"on_demand_used", used,
+		"prepaid", prepaid,
+		"unified", billing.Config.IsUnifiedBilling)
+	return nil
+}
+
+// GrokBillingSyncWorker periodically syncs billing data for all non-banned
+// Grok accounts. Mirrors CBCreditSyncWorker. Pass a context cancelled on
+// SIGTERM for clean shutdown.
+func GrokBillingSyncWorker(ctx context.Context, am *GrokAccountManager) {
+	syncAllGrokBilling(am, true)
+
+	ticker := time.NewTicker(GROK_BILLING_SYNC_TICK)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			syncAllGrokBilling(am, false)
+		}
+	}
+}
+
+func syncAllGrokBilling(am *GrokAccountManager, stagger bool) {
+	accounts := am.GetAll()
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, GROK_BILLING_SYNC_CONCURRENCY)
+	idx := 0
+	for _, a := range accounts {
+		a.mu.RLock()
+		perm := a.disabled && a.disabledAt.IsZero() // banned — skip
+		a.mu.RUnlock()
+		if perm {
+			continue
+		}
+
+		if stagger && idx > 0 {
+			time.Sleep(200 * time.Millisecond)
+		}
+		idx++
+
+		wg.Add(1)
+		sem <- struct{}{}
+		go func(acc *GrokAccount) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			if err := acc.SyncBilling(); err != nil {
+				slog.Warn("grok billing sync error",
+					"module", "grok-billing",
+					"email", acc.Email,
+					"error", err)
+			}
+		}(a)
+	}
+	wg.Wait()
+}
+
 // ImportAccountRaw adds an account with raw token material (used by /accounts/import).
 // db handle is inherited from the manager. Returns the created account and true
 // if new, existing account and false if the email already exists (caller may
@@ -621,7 +854,7 @@ func IsGrokModel(model string) bool {
 	return strings.HasPrefix(model, "grok-")
 }
 
-func grokHeaders(token, accept, model string) http.Header {
+func grokHeaders(token, accept, model, userID, email string) http.Header {
 	h := http.Header{}
 	h.Set("Authorization", "Bearer "+token)
 	h.Set("Content-Type", "application/json")
@@ -632,6 +865,12 @@ func grokHeaders(token, accept, model string) http.Header {
 	h.Set("x-grok-client-identifier", GROK_CLIENT_IDENTIFIER)
 	h.Set("x-grok-client-mode", "tui")
 	h.Set("User-Agent", fmt.Sprintf("grok-shell/%s (linux; x86_64)", GROK_CLIENT_VERSION))
+	if userID != "" {
+		h.Set("x-userid", userID)
+	}
+	if email != "" {
+		h.Set("x-email", email)
+	}
 	convID := fmt.Sprintf("conv-%d", time.Now().UnixNano())
 	reqID := fmt.Sprintf("req-%d", time.Now().UnixNano())
 	sessionID := fmt.Sprintf("sess-%d", time.Now().UnixNano())
@@ -687,7 +926,7 @@ func ProxyGrok(c *gin.Context, body []byte, am *GrokAccountManager, clientStream
 			break
 		}
 		token := acc.GetAccessToken()
-		headers := grokHeaders(token, accept, model)
+		headers := grokHeaders(token, accept, model, acc.Sub, acc.Email)
 
 		req, _ := http.NewRequestWithContext(c.Request.Context(), c.Request.Method, upstreamURL, bytes.NewReader(body))
 		req.Header = headers
@@ -720,7 +959,7 @@ func ProxyGrok(c *gin.Context, body []byte, am *GrokAccountManager, clientStream
 				continue
 			}
 			req, _ = http.NewRequestWithContext(c.Request.Context(), c.Request.Method, upstreamURL, bytes.NewReader(body))
-			req.Header = grokHeaders(acc.GetAccessToken(), accept, model)
+			req.Header = grokHeaders(acc.GetAccessToken(), accept, model, acc.Sub, acc.Email)
 			resp, err = client.Do(req)
 			if err != nil {
 				markProxyResult(proxyID, err, 0)

@@ -58,6 +58,7 @@ var (
 	reenableCBWorker    = upstream.ReenableCBWorker
 	cbOAuthRefreshWorker = upstream.CBOAuthRefreshWorker
 	cbCreditSyncWorker  = upstream.CBCreditSyncWorker
+	grokBillingSyncWorker = upstream.GrokBillingSyncWorker
 
 	isGrokModel     = upstream.IsGrokModel
 	expandGrokAlias = upstream.ExpandGrokAlias

@@ -30,6 +30,7 @@ var (
 	handleImportCBKeyBulk  = handlers.HandleImportCBKeyBulk
 	handleImportAccountBulk = handlers.HandleImportAccountBulk
 	handleSyncCBCredits    = handlers.HandleSyncCBCredits
+	handleSyncGrokBilling  = handlers.HandleSyncGrokBilling
 	handleDeleteAccount    = handlers.HandleDeleteAccount
 	handleDeleteCBKey      = handlers.HandleDeleteCBKey
 	handleTestCBKey        = handlers.HandleTestCBKey

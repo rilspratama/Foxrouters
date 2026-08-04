@@ -142,6 +142,7 @@ const (
 	XAI_CLIENT_ID    = "b1a00492-073a-47ea-816f-4c329264a828"
 	XAI_TOKEN_URL    = "https://auth.x.ai/oauth2/token"
 	XAI_UPSTREAM_URL = "https://cli-chat-proxy.grok.com/v1"
+	GROK_BILLING_URL = XAI_UPSTREAM_URL + "/billing?format=credits"
 	CB_UPSTREAM_URL  = "https://www.codebuddy.ai/v2/chat/completions"
 	// CB_OAUTH_STATE_URL starts the CodeBuddy CLI/device OAuth flow
 	// (POST ?platform=CLI → state + authUrl).
@@ -184,6 +185,10 @@ const (
 	// CB credit sync worker cadence + concurrency.
 	CB_CREDIT_SYNC_TICK        = 5 * time.Minute
 	CB_CREDIT_SYNC_CONCURRENCY = 5
+
+	// Grok billing sync (GET /v1/billing?format=credits)
+	GROK_BILLING_SYNC_TICK        = 5 * time.Minute
+	GROK_BILLING_SYNC_CONCURRENCY = 5
 
 	// MAX_REQUEST_BODY caps incoming request bodies — kept here (upstream is
 	// the primary consumer via chat/completions handler).

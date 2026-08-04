@@ -1107,6 +1107,7 @@ body {
             <button class="btn-ghost" id="grokBulkBtn" onclick="showBulkGrokModal()" style="padding:5px 12px;font-size:12px;display:none">Bulk Import</button>
             <button class="btn-ghost" id="grokCleanupBtn" onclick="cleanupDisabled('grok')" style="padding:5px 12px;font-size:12px;color:var(--danger);display:none">Cleanup Disabled</button>
             <button class="btn-ghost" id="grokCleanupBannedBtn" onclick="cleanupBanned('grok')" style="padding:5px 12px;font-size:12px;color:var(--danger);display:none">Cleanup Banned</button>
+            <button class="btn-ghost" id="grokSyncBillingBtn" onclick="syncGrokBilling()" style="padding:5px 12px;font-size:12px;display:none">Sync Billing</button>
           </div>
         </div>
         <!-- CB selector mode (routing strategy for prompt-cache locality) -->
@@ -1133,7 +1134,7 @@ body {
           <div class="tbl-scroll" style="max-height:500px">
             <table class="tbl">
               <thead><tr>
-                <th>Email</th><th>Token Status</th><th>Expires At</th><th>Last Refresh</th><th>Disabled At</th><th>Actions</th>
+                <th>Email</th><th>Token Status</th><th>Period End</th><th>Usage</th><th>Expires At</th><th>Last Refresh</th><th>Actions</th>
               </tr></thead>
               <tbody id="grokBody"></tbody>
             </table>
@@ -2117,19 +2118,30 @@ function renderGrokPage() {
     var expAt = a.expires_at && a.expires_at !== '0001-01-01T00:00:00Z' ? new Date(a.expires_at).toLocaleString('en-GB', {month:'short',day:'2-digit',hour:'2-digit',minute:'2-digit',timeZone:'UTC'}) + ' UTC' : '—';
     var lastRef = a.last_refresh && a.last_refresh !== '0001-01-01T00:00:00Z' ? new Date(a.last_refresh).toLocaleString('en-GB', {month:'short',day:'2-digit',hour:'2-digit',minute:'2-digit',timeZone:'UTC'}) + ' UTC' : '—';
     var disAt = a.disabled_at && a.disabled_at !== '0001-01-01T00:00:00Z' ? new Date(a.disabled_at).toLocaleString('en-GB', {month:'short',day:'2-digit',hour:'2-digit',minute:'2-digit',timeZone:'UTC'}) + ' UTC' : '—';
+    var periodEnd = a.period_end ? new Date(a.period_end).toLocaleString('en-GB', {month:'short',day:'2-digit',hour:'2-digit',minute:'2-digit',timeZone:'UTC'}) + ' UTC' : '—';
+    var usageStr;
+    if (a.on_demand_cap > 0) {
+      var pct = Math.round(a.on_demand_used / a.on_demand_cap * 100);
+      usageStr = '$' + (a.on_demand_used / 100).toFixed(2) + ' / $' + (a.on_demand_cap / 100).toFixed(2) + ' (' + pct + '%)';
+    } else if (a.prepaid_balance > 0) {
+      usageStr = 'Prepaid: $' + (a.prepaid_balance / 100).toFixed(2);
+    } else {
+      usageStr = '<span class="ok">Free</span>';
+    }
     gRows += '<tr>' +
       '<td class="mono">' + escHtml(a.email) + '</td>' +
       '<td><span class="' + tsColor + '">' + tsLabel + '</span></td>' +
+      '<td class="muted" style="font-size:11px">' + periodEnd + '</td>' +
+      '<td class="muted" style="font-size:11px">' + usageStr + '</td>' +
       '<td class="muted" style="font-size:11px">' + expAt + '</td>' +
       '<td class="muted" style="font-size:11px">' + lastRef + '</td>' +
-      '<td class="muted" style="font-size:11px">' + disAt + '</td>' +
       '<td style="white-space:nowrap">' +
         '<button class="btn-ghost test-grok-btn" data-email="' + escHtml(a.email) + '" style="padding:3px 8px;font-size:12px;color:var(--brand);margin-right:4px">Test</button>' +
         '<button class="btn-ghost delete-grok-btn" data-email="' + escHtml(a.email) + '" style="padding:3px 8px;font-size:12px;color:var(--red)">Delete</button>' +
       '</td>' +
     '</tr>';
   }
-  document.getElementById('grokBody').innerHTML = gRows || '<tr><td colspan="6" class="history-empty">No Grok accounts loaded</td></tr>';
+  document.getElementById('grokBody').innerHTML = gRows || '<tr><td colspan="7" class="history-empty">No Grok accounts loaded</td></tr>';
 
   // Pager
   var pager = document.getElementById('grokPager');
@@ -2279,6 +2291,7 @@ function showTab(e, tab) {
   document.getElementById('grokBulkBtn').style.display = tab === 'grok' ? '' : 'none';
   document.getElementById('grokCleanupBtn').style.display = tab === 'grok' ? '' : 'none';
   document.getElementById('grokCleanupBannedBtn').style.display = tab === 'grok' ? '' : 'none';
+  document.getElementById('grokSyncBillingBtn').style.display = tab === 'grok' ? '' : 'none';
   // Selector mode bar only relevant for CodeBuddy tab
   var selBar = document.getElementById('cbSelectorBar');
   if (selBar) selBar.style.display = tab === 'cb' ? '' : 'none';
@@ -2600,6 +2613,24 @@ async function syncCBCredits() {
     alert('Credit sync error: ' + e.message);
   } finally {
     if (btn) { btn.disabled = false; btn.textContent = 'Sync credits'; }
+  }
+}
+
+async function syncGrokBilling() {
+  var btn = document.getElementById('grokSyncBillingBtn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Syncing…'; }
+  try {
+    var res = await apiFetch('/accounts/billing/sync', { method: 'POST', body: '{}' });
+    var synced = (res && res.synced) || 0;
+    var failed = (res && res.failed) || 0;
+    if (failed > 0) {
+      alert('Billing sync: ' + synced + ' ok, ' + failed + ' failed');
+    }
+    refresh();
+  } catch (e) {
+    alert('Billing sync error: ' + e.message);
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = 'Sync Billing'; }
   }
 }
 

@@ -146,6 +146,13 @@ func HandleAccounts(grokAM *upstream.GrokAccountManager, cbKM *upstream.CBKeyMan
 				"expires_at": s.Expired, "expires_in": s.ExpiresIn,
 				"last_refresh": s.LastRefresh, "disabled": s.Disabled,
 				"disabled_at": s.DisabledAt, "token_status": s.TokenStatus,
+				"billing_synced_at":  s.BillingSyncedAt,
+				"period_end":         s.PeriodEnd,
+				"period_type":        s.PeriodType,
+				"on_demand_cap":      s.OnDemandCap,
+				"on_demand_used":     s.OnDemandUsed,
+				"prepaid_balance":    s.PrepaidBalance,
+				"unified_billing":    s.UnifiedBilling,
 			})
 		}
 		cbKeys := cbKM.GetAll()
@@ -1098,5 +1105,69 @@ func HandleCleanupBanned(grokAM *upstream.GrokAccountManager) gin.HandlerFunc {
 		slog.Info("cleanup banned", "module", "admin", "type", typ,
 			"grok_removed", result["grok_removed"])
 		c.JSON(200, result)
+	}
+}
+
+// HandleSyncGrokBilling triggers a billing sync for one or all Grok accounts.
+// Body optional: {"email": "..."} to sync one; empty = all non-banned accounts.
+func HandleSyncGrokBilling(grokAM *upstream.GrokAccountManager) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var req struct {
+			Email string `json:"email"`
+		}
+		_ = c.ShouldBindJSON(&req)
+		target := strings.TrimSpace(req.Email)
+
+		type result struct {
+			Email          string `json:"email"`
+			PeriodEnd      string `json:"period_end,omitempty"`
+			OnDemandCap    int64  `json:"on_demand_cap"`
+			OnDemandUsed   int64  `json:"on_demand_used"`
+			PrepaidBalance int64  `json:"prepaid_balance"`
+			UnifiedBilling bool   `json:"unified_billing"`
+			Error          string `json:"error,omitempty"`
+		}
+
+		var accounts []*upstream.GrokAccount
+		if target != "" {
+			found := false
+			for _, a := range grokAM.GetAll() {
+				if a.Email == target {
+					accounts = append(accounts, a)
+					found = true
+					break
+				}
+			}
+			if !found {
+				c.JSON(404, gin.H{"error": "account not found"})
+				return
+			}
+		} else {
+			accounts = grokAM.GetAll()
+		}
+
+		results := make([]result, 0, len(accounts))
+		synced, failed := 0, 0
+		for _, a := range accounts {
+			r := result{Email: a.Email}
+			if err := a.SyncBilling(); err != nil {
+				failed++
+				r.Error = err.Error()
+			} else {
+				synced++
+				s := a.Snapshot()
+				r.PeriodEnd = s.PeriodEnd
+				r.OnDemandCap = s.OnDemandCap
+				r.OnDemandUsed = s.OnDemandUsed
+				r.PrepaidBalance = s.PrepaidBalance
+				r.UnifiedBilling = s.UnifiedBilling
+			}
+			results = append(results, r)
+		}
+		c.JSON(200, gin.H{
+			"synced":  synced,
+			"failed":  failed,
+			"results": results,
+		})
 	}
 }
