@@ -604,6 +604,31 @@ async LogRequest → ClickHouse (full request + response, ZSTD, TTL 90d)
 
 ## Development
 
+### Isolated Dev Stack (Recommended)
+
+`dev.sh` runs a fully isolated development environment that never touches production:
+
+```bash
+./dev.sh build    # build foxrouters:dev image
+./dev.sh up       # start dev gateway (:20131) + dev redis (:6381)
+./dev.sh seed     # copy credentials from prod Redis (read-only)
+./dev.sh logs     # tail dev gateway logs
+./dev.sh down     # stop dev stack (add -v to wipe volumes)
+./dev.sh test     # go vet + go test -race
+```
+
+**Safety gates (auto-set by `dev.sh up`):**
+
+| Env Var | Effect |
+|---------|--------|
+| `WORKERS_DISABLED=1` | Skip background workers (token refresh, credit sync, billing sync) |
+| `HEALTH_PROBES_DISABLED=1` | Skip health-check probes to upstream |
+| `TOKEN_REFRESH_DISABLED=1` | Gate ALL refresh paths (on-demand + 401-retry) |
+
+When `TOKEN_REFRESH_DISABLED=1`, `toDTO()` zeroes `AccessToken/RefreshToken/IDToken` so credentials never persist to dev Redis. Dev can test inference with seeded tokens, but near-expiry accounts will 401 (by design — protects prod refresh tokens).
+
+### Local Build
+
 ```bash
 export PATH=$PATH:/usr/local/go/bin
 
@@ -637,6 +662,7 @@ curl -s http://127.0.0.1:20130/health
 | `handlers.go` | Account, key, history, dashboard handlers. |
 | `db.go` | Redis + LogStore clients and schema. |
 | `dashboard.html` | Embedded SPA (`go:embed`) — Type badge, OAuth/Bulk OAuth, Sync credits. |
+| `dev.sh` | Isolated dev stack (own Redis, port 20131, safety gates). |
 
 **Patch order (please follow):** `test → build → restart → smoke`.
 

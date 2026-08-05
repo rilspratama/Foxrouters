@@ -19,6 +19,10 @@
 #   Set LOG_BACKEND=sqlite     (default) or LOG_BACKEND=clickhouse before piping to bash.
 #     curl -fsSL … | LOG_BACKEND=clickhouse bash
 #
+# Development mode (isolated stack, own Redis, port 20131):
+#   curl -fsSL … | DEV_MODE=1 bash
+#   — or after install: ./dev.sh up && ./dev.sh seed
+#
 # Manage after install:
 #   docker logs foxrouters -f
 #   docker restart foxrouters
@@ -423,6 +427,21 @@ fi
 echo ""
 echo "  Config:       ${ENV_FILE}"
 echo ""
+
+# ── Development mode notice ─────────────────────────────────────────────────
+if [[ "${DEV_MODE:-0}" == "1" ]]; then
+    yellow "  DEV MODE enabled — isolated dev stack available:"
+    echo "    ./dev.sh build    # build foxrouters:dev image"
+    echo "    ./dev.sh up       # start dev gateway (:20131) + dev redis (:6381)"
+    echo "    ./dev.sh seed     # copy credentials from prod Redis (read-only)"
+    echo "    ./dev.sh logs     # tail dev gateway logs"
+    echo "    ./dev.sh down     # stop dev stack (add -v to wipe)"
+    echo ""
+    yellow "  Safety gates auto-enabled: WORKERS_DISABLED, HEALTH_PROBES_DISABLED,"
+    yellow "  TOKEN_REFRESH_DISABLED (tokens zeroed in dev Redis — leak prevention)"
+    echo ""
+fi
+
 echo "  Manage:"
 echo "    docker logs foxrouters -f           # tail logs"
 echo "    docker restart foxrouters           # restart gateway"
