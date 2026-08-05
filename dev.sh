@@ -114,6 +114,7 @@ up() {
     -e "GATEWAY_AUTH_DISABLE=1" \
     -e "WORKERS_DISABLED=1" \
     -e "HEALTH_PROBES_DISABLED=1" \
+    -e "TOKEN_REFRESH_DISABLED=1" \
     -e "CB_SELECTOR_MODE=sticky" \
     "$DEV_IMAGE" >/dev/null
 
@@ -152,12 +153,82 @@ test_all() {
   green "✓ tests pass"
 }
 
+# seed copies credential keys from PROD redis into dev redis (one-shot,
+# non-destructive to prod). Only copies credential state — usage counters,
+# sticky maps, selector config are dev-local. Requires TOKEN_REFRESH_DISABLED=1
+# in the dev container (already set in up()) so seeded tokens are never
+# refreshed from dev (rotation would invalidate prod's RT → permanent disable).
+seed() {
+  local PROD_REDIS="foxrouters-redis"
+  local PROD_PASS
+  PROD_PASS="$(grep -E '^REDIS_PASSWORD=' .env | cut -d= -f2-)"
+  if [[ -z "$PROD_PASS" ]]; then
+    red "✗ REDIS_PASSWORD not found in .env"; return 1
+  fi
+  if ! docker ps --format '{{.Names}}' | grep -qx "$PROD_REDIS"; then
+    red "✗ prod redis container '$PROD_REDIS' not running"; return 1
+  fi
+  if ! docker ps --format '{{.Names}}' | grep -qx "$DEV_REDIS_NAME"; then
+    red "✗ dev redis not running — ./dev.sh up first"; return 1
+  fi
+
+  cyan "═══ Seeding dev redis from prod (credential keys only) ═══"
+  # Binary-safe DUMP/RESTORE via python (shell args corrupt binary payloads)
+  PROD_PASS="$PROD_PASS" DEV_REDIS_NAME="$DEV_REDIS_NAME" DEV_REDIS_PASS="$DEV_REDIS_PASS" \
+  python3 - <<'PYEOF'
+import os, subprocess, sys
+
+prod_pass = os.environ['PROD_PASS']
+dev_name  = os.environ['DEV_REDIS_NAME']
+dev_pass  = os.environ['DEV_REDIS_PASS']
+
+def prod_cli(*args, binary=False):
+    r = subprocess.run(['docker','exec','foxrouters-redis','redis-cli','-a',prod_pass,
+                        '--no-auth-warning',*args], capture_output=True)
+    return r.stdout if binary else r.stdout.decode(errors='replace')
+
+def dev_cli(*args, binary=False, stdin=None):
+    r = subprocess.run(['docker','exec','-i',dev_name,'redis-cli','-a',dev_pass,
+                        '--no-auth-warning',*args], input=stdin, capture_output=True)
+    return r
+
+copied = skipped = 0
+for pat in ('grok:account:*','cb:key:*','gw:key:*'):
+    keys = [k for k in prod_cli('KEYS',pat).splitlines() if k]
+    for key in keys:
+        payload = prod_cli('DUMP', key, binary=True)
+        # redis-cli appends exactly one trailing \n — strip only that one byte
+        if payload.endswith(b'\n'):
+            payload = payload[:-1]
+        # -x reads last arg from stdin (binary-safe). REPLACE can't be used
+        # with -x (it must be last), so DEL first then RESTORE.
+        subprocess.run(['docker','exec',dev_name,'redis-cli','-a',dev_pass,
+                        '--no-auth-warning','DEL',key], capture_output=True)
+        r = subprocess.run(['docker','exec','-i',dev_name,'redis-cli','-a',dev_pass,
+                            '--no-auth-warning','-x','RESTORE',key,'0'],
+                           input=payload, capture_output=True)
+        if b'OK' in r.stdout:
+            copied += 1
+        else:
+            skipped += 1
+            if skipped <= 3:
+                sys.stderr.write(f"  skip {key}: {r.stdout.decode(errors='replace').strip()}\n")
+
+print(f"copied={copied} skipped={skipped}")
+PYEOF
+  green "✓ seed done"
+  yellow "  NOTE: dev has TOKEN_REFRESH_DISABLED=1 — seeded tokens are read-only."
+  yellow "  Near-expiry accounts will 401 in dev (by design, protects prod RTs)."
+  yellow "  Restart dev gateway to load: docker restart foxrouters-dev"
+}
+
 case "${1:-all}" in
   build)  build ;;
   up)     up ;;
   down)   down ;;
   logs)   logs ;;
+  seed)   seed ;;
   test)   test_all ;;
   all)    build && up ;;
-  *)      echo "usage: $0 [build|up|down|logs|test]"; exit 1 ;;
+  *)      echo "usage: $0 [build|up|down|logs|seed|test]"; exit 1 ;;
 esac

@@ -26,6 +26,12 @@ import (
 // refreshSF collapses concurrent Refresh() for the same account email.
 var refreshSF singleflight.Group
 
+// TokenRefreshDisabled gates ALL token refresh paths (background workers,
+// on-demand EnsureValid, 401-retry refresh). Set TOKEN_REFRESH_DISABLED=1 in
+// dev: dev Redis is seeded from prod, so any dev-side refresh rotates the RT
+// upstream and invalidates prod's copy → invalid_grant → permanent disable.
+var TokenRefreshDisabled = os.Getenv("TOKEN_REFRESH_DISABLED") == "1"
+
 // billingSF collapses concurrent SyncBilling() for the same account email.
 var billingSF singleflight.Group
 
@@ -220,6 +226,9 @@ func (a *GrokAccount) GetAccessToken() string {
 // Refresh refreshes the access token. Concurrent calls for the same email
 // are collapsed via singleflight. Mutex is NOT held during the HTTP round-trip.
 func (a *GrokAccount) Refresh() error {
+	if TokenRefreshDisabled {
+		return fmt.Errorf("token refresh disabled (TOKEN_REFRESH_DISABLED=1)")
+	}
 	_, err, _ := refreshSF.Do(a.Email, func() (any, error) {
 		return nil, a.refreshLocked()
 	})

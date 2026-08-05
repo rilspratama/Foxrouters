@@ -282,6 +282,9 @@ func (k *CBKey) Refresh() error {
 	if k.GetCredType() != CBAuthOAuth {
 		return nil
 	}
+	if TokenRefreshDisabled {
+		return fmt.Errorf("token refresh disabled (TOKEN_REFRESH_DISABLED=1)")
+	}
 	_, err, _ := k.refreshSF.Do(k.Key, func() (any, error) {
 		return nil, k.refreshLocked()
 	})
