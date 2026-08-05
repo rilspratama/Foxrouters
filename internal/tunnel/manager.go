@@ -20,12 +20,16 @@ package tunnel
 
 import (
 	"bufio"
+	"bytes"
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"log/slog"
+	"net/http"
 	"os"
 	"os/exec"
 	"regexp"
@@ -474,7 +478,9 @@ func (m *Manager) startNamed(cfg *Config) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	// Cloudflare-go v7 client.
+	// Cloudflare-go v7 client. Uses http.DefaultTransport which has
+	// ForceAttemptHTTP2=true — required for CF API (HTTP/1.1 hangs).
+	// Do NOT override DialContext — it breaks HTTP/2 ALPN negotiation.
 	client := cloudflare.NewClient(option.WithAPIToken(cfg.CloudflareAPIToken))
 
 	// 1. Create tunnel (or reuse existing by ID if we already have one).
@@ -533,41 +539,103 @@ func (m *Manager) startNamed(cfg *Config) error {
 	return nil
 }
 
-func (m *Manager) createOrReuseTunnel(ctx context.Context, client *cloudflare.Client, cfg *Config) (tunnelID, token string, err error) {
-	// If we already have a tunnel_id in Redis, fetch a fresh token for
-	// it — this survives credential rotation and repeated Enable()s.
+func (m *Manager) createOrReuseTunnel(ctx context.Context, _ *cloudflare.Client, cfg *Config) (tunnelID, token string, err error) {
+	// Raw HTTP implementation — bypasses cloudflare-go SDK which hangs
+	// in the gateway runtime (HTTP/2 ALPN issue with SDK's transport setup).
+	baseURL := "https://api.cloudflare.com/client/v4"
+	authHeader := "Bearer " + cfg.CloudflareAPIToken
+
+	// If we already have a tunnel_id, fetch a fresh token for it.
 	if cfg.TunnelID != "" {
-		tok, gerr := client.ZeroTrust.Tunnels.Cloudflared.Token.Get(ctx, cfg.TunnelID, zero_trust.TunnelCloudflaredTokenGetParams{
-			AccountID: cloudflare.F(cfg.CloudflareAccountID),
-		})
-		if gerr == nil && tok != nil && *tok != "" {
-			return cfg.TunnelID, *tok, nil
+		tokenURL := fmt.Sprintf("%s/accounts/%s/cfd_tunnel/%s/token", baseURL, cfg.CloudflareAccountID, cfg.TunnelID)
+		req, _ := http.NewRequestWithContext(ctx, "GET", tokenURL, nil)
+		req.Header.Set("Authorization", authHeader)
+		resp, gerr := http.DefaultClient.Do(req)
+		if gerr == nil {
+			body, _ := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			if resp.StatusCode == 200 {
+				var tokResp struct {
+					Success bool   `json:"success"`
+					Result  string `json:"result"`
+				}
+				if json.Unmarshal(body, &tokResp) == nil && tokResp.Success && tokResp.Result != "" {
+					slog.Info("reusing existing tunnel", "module", "tunnel", "id", cfg.TunnelID)
+					return cfg.TunnelID, tokResp.Result, nil
+				}
+			}
 		}
-		slog.Warn("existing tunnel token fetch failed, recreating", "module", "tunnel", "tunnel_id", cfg.TunnelID, "error", gerr)
+		slog.Warn("existing tunnel token fetch failed, recreating", "module", "tunnel", "tunnel_id", cfg.TunnelID)
 	}
 
-	// Create fresh tunnel (cloudflared-managed, config_src=cloudflare so
-	// we can drive ingress via the API instead of a YAML file).
-	created, err := client.ZeroTrust.Tunnels.Cloudflared.New(ctx, zero_trust.TunnelCloudflaredNewParams{
-		AccountID: cloudflare.F(cfg.CloudflareAccountID),
-		Name:      cloudflare.F(tunnelName),
-		ConfigSrc: cloudflare.F(zero_trust.TunnelCloudflaredNewParamsConfigSrcCloudflare),
+	// Create fresh tunnel.
+	slog.Info("creating tunnel via raw HTTP", "module", "tunnel", "account_id", cfg.CloudflareAccountID, "name", tunnelName)
+	createBody, _ := json.Marshal(map[string]string{
+		"name":        tunnelName,
+		"config_src":  "cloudflare",
+		"tunnel_secret": randomHex(32),
 	})
+	createURL := fmt.Sprintf("%s/accounts/%s/cfd_tunnel", baseURL, cfg.CloudflareAccountID)
+	req, _ := http.NewRequestWithContext(ctx, "POST", createURL, bytes.NewReader(createBody))
+	req.Header.Set("Authorization", authHeader)
+	req.Header.Set("Content-Type", "application/json")
+	start := time.Now()
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return "", "", fmt.Errorf("Tunnels.Cloudflared.New: %w", err)
+		slog.Error("tunnel creation HTTP failed", "module", "tunnel", "error", err, "elapsed", time.Since(start))
+		return "", "", fmt.Errorf("create tunnel HTTP: %w", err)
 	}
-	if created == nil || created.ID == "" {
-		return "", "", errors.New("empty tunnel ID from API")
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	slog.Info("tunnel creation response", "module", "tunnel", "status", resp.StatusCode, "elapsed", time.Since(start))
+	if resp.StatusCode != 200 {
+		// Truncate CF error body — may contain account metadata, never log raw
+		bodySnippet := string(body)
+		if len(bodySnippet) > 200 {
+			bodySnippet = bodySnippet[:200] + "..."
+		}
+		return "", "", fmt.Errorf("create tunnel: HTTP %d: %s", resp.StatusCode, bodySnippet)
 	}
+	var createResp struct {
+		Success bool `json:"success"`
+		Errors  []struct {
+			Code    int    `json:"code"`
+			Message string `json:"message"`
+		} `json:"errors"`
+		Result struct {
+			ID string `json:"id"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(body, &createResp); err != nil {
+		return "", "", fmt.Errorf("create tunnel: parse: %w", err)
+	}
+	if !createResp.Success || createResp.Result.ID == "" {
+		return "", "", fmt.Errorf("create tunnel: API error: %v", createResp.Errors)
+	}
+	tunnelID = createResp.Result.ID
+	slog.Info("tunnel created", "module", "tunnel", "id", tunnelID)
 
-	// Fetch connector token separately (New() does not return it).
-	tok, err := client.ZeroTrust.Tunnels.Cloudflared.Token.Get(ctx, created.ID, zero_trust.TunnelCloudflaredTokenGetParams{
-		AccountID: cloudflare.F(cfg.CloudflareAccountID),
-	})
-	if err != nil || tok == nil || *tok == "" {
-		return "", "", fmt.Errorf("Tunnels.Cloudflared.Token.Get: %w", err)
+	// Fetch connector token.
+	tokenURL := fmt.Sprintf("%s/accounts/%s/cfd_tunnel/%s/token", baseURL, cfg.CloudflareAccountID, tunnelID)
+	tokenReq, _ := http.NewRequestWithContext(ctx, "GET", tokenURL, nil)
+	tokenReq.Header.Set("Authorization", authHeader)
+	tokenResp, err := http.DefaultClient.Do(tokenReq)
+	if err != nil {
+		return "", "", fmt.Errorf("get token: %w", err)
 	}
-	return created.ID, *tok, nil
+	tokenBody, _ := io.ReadAll(tokenResp.Body)
+	tokenResp.Body.Close()
+	if tokenResp.StatusCode != 200 {
+		return "", "", fmt.Errorf("get token: HTTP %d: %s", tokenResp.StatusCode, string(tokenBody))
+	}
+	var tokResp struct {
+		Success bool   `json:"success"`
+		Result  string `json:"result"`
+	}
+	if json.Unmarshal(tokenBody, &tokResp) != nil || !tokResp.Success || tokResp.Result == "" {
+		return "", "", fmt.Errorf("get token: parse error")
+	}
+	return tunnelID, tokResp.Result, nil
 }
 
 func (m *Manager) configureIngress(ctx context.Context, client *cloudflare.Client, cfg *Config, tunnelID, upstream string) error {
@@ -744,4 +812,11 @@ func MaskToken(tok string) string {
 		return "***"
 	}
 	return tok[:6] + "…" + tok[len(tok)-4:]
+}
+
+// randomHex generates n random bytes as a hex string (2n chars).
+func randomHex(n int) string {
+	b := make([]byte, n)
+	rand.Read(b)
+	return hex.EncodeToString(b)
 }
