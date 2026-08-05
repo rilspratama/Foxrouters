@@ -237,6 +237,9 @@ func (k *CBKey) IsExpired() bool {
 }
 
 // toDTO returns a db.CBKeyDTO snapshot under RLock. Use before saveCBKey.
+// When TokenRefreshDisabled=1 (dev), AccessToken/RefreshToken are zeroed
+// so OAuth credentials never persist to dev Redis (leak prevention).
+// API keys (Key field) are kept — they don't rotate and are needed for dev.
 func (k *CBKey) toDTO() db.CBKeyDTO {
 	k.mu.RLock()
 	defer k.mu.RUnlock()
@@ -244,11 +247,15 @@ func (k *CBKey) toDTO() db.CBKeyDTO {
 	if credType == "" {
 		credType = string(CBAuthAPIKey)
 	}
+	at, rt := k.AccessToken, k.RefreshToken
+	if TokenRefreshDisabled {
+		at, rt = "", ""
+	}
 	return db.CBKeyDTO{
 		Key:           k.Key,
 		CredType:      credType,
-		AccessToken:   k.AccessToken,
-		RefreshToken:  k.RefreshToken,
+		AccessToken:   at,
+		RefreshToken:  rt,
 		ExpiresAt:     k.ExpiresAt,
 		Email:         k.Email,
 		CreditsUsed:   k.creditsUsed,

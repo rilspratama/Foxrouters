@@ -589,7 +589,12 @@ func (m *Manager) createOrReuseTunnel(ctx context.Context, _ *cloudflare.Client,
 	resp.Body.Close()
 	slog.Info("tunnel creation response", "module", "tunnel", "status", resp.StatusCode, "elapsed", time.Since(start))
 	if resp.StatusCode != 200 {
-		return "", "", fmt.Errorf("create tunnel: HTTP %d: %s", resp.StatusCode, string(body))
+		// Truncate CF error body — may contain account metadata, never log raw
+		bodySnippet := string(body)
+		if len(bodySnippet) > 200 {
+			bodySnippet = bodySnippet[:200] + "..."
+		}
+		return "", "", fmt.Errorf("create tunnel: HTTP %d: %s", resp.StatusCode, bodySnippet)
 	}
 	var createResp struct {
 		Success bool `json:"success"`

@@ -179,14 +179,20 @@ func (a *GrokAccount) Snapshot() GrokAccountSnapshot {
 // toDTO returns a db.GrokAccountDTO snapshot of the account under RLock.
 // Use this before calling saveGrokAccount — it guarantees the persisted
 // payload is a consistent snapshot, never a partial mid-write mix.
+// When TokenRefreshDisabled=1 (dev), AccessToken/RefreshToken/IDToken are
+// zeroed so credentials never persist to dev Redis (leak prevention).
 func (a *GrokAccount) toDTO() db.GrokAccountDTO {
 	a.mu.RLock()
 	defer a.mu.RUnlock()
+	at, rt, idt := a.AccessToken, a.RefreshToken, a.IDToken
+	if TokenRefreshDisabled {
+		at, rt, idt = "", "", ""
+	}
 	return db.GrokAccountDTO{
 		Email:        a.Email,
-		AccessToken:  a.AccessToken,
-		RefreshToken: a.RefreshToken,
-		IDToken:      a.IDToken,
+		AccessToken:  at,
+		RefreshToken: rt,
+		IDToken:      idt,
 		ExpiresAt:    a.expiresAt,
 		ExpiresIn:    a.ExpiresIn,
 		Expired:      a.Expired,
