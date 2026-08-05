@@ -143,6 +143,15 @@ docker rm -f foxrouters foxrouters-redis foxrouters-clickhouse  # remove (keeps 
 docker volume rm foxrouters-redis-data foxrouters-clickhouse-data  # wipe data
 ```
 
+**Update to a new version:**
+```bash
+curl -fsSL -o update.sh https://raw.githubusercontent.com/rilspratama/Foxrouters/master/update.sh
+bash update.sh              # pull latest + recreate gateway (state persists in Redis)
+bash update.sh --check      # check for update without pulling
+bash update.sh --tag=v1.6.4 # pin to a specific tag (also works for downgrade/rollback)
+```
+Only the gateway container is recreated — Redis/ClickHouse/SQLite volumes are untouched.
+
 ---
 
 ## Quick Start (Docker Compose — For Development)

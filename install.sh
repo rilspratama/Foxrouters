@@ -23,6 +23,12 @@
 #   curl -fsSL … | DEV_MODE=1 bash
 #   — or after install: ./dev.sh up && ./dev.sh seed
 #
+# Update an existing install:
+#   curl -fsSL -o update.sh https://raw.githubusercontent.com/rilspratama/Foxrouters/master/update.sh
+#   bash update.sh            # update to latest
+#   bash update.sh --check    # check only (no pull)
+#   bash update.sh --tag=vX.Y.Z  # specific version
+#
 # Manage after install:
 #   docker logs foxrouters -f
 #   docker restart foxrouters
