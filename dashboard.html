@@ -297,15 +297,27 @@ body {
 .stats-grid {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
-  gap: 10px;
-  margin-bottom: 20px;
+  gap: 8px;
+  margin-bottom: 8px;
 }
+
+.stats-section {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin: 14px 0 6px;
+  grid-column: 1 / -1;
+}
+
+.stats-section:first-child { margin-top: 0; }
 
 .stat-card {
   background: var(--bg-panel);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  padding: 16px 18px;
+  padding: 10px 14px;
   transition: border-color var(--tc), box-shadow var(--tc), transform var(--tt);
   box-shadow: var(--shadow-card);
 }
@@ -317,16 +329,16 @@ body {
 }
 
 .stat-card .stat-label {
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 500;
   color: var(--text-tertiary);
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  margin-bottom: 8px;
+  margin-bottom: 4px;
 }
 
 .stat-card .stat-value {
-  font-size: 24px;
+  font-size: 19px;
   font-weight: 590;
   letter-spacing: -0.02em;
   font-feature-settings: "tnum";
@@ -335,9 +347,9 @@ body {
 }
 
 .stat-card .stat-sub {
-  font-size: 11.5px;
+  font-size: 11px;
   color: var(--text-tertiary);
-  margin-top: 4px;
+  margin-top: 2px;
 }
 
 .stat-card .stat-sub .ok { color: var(--green); }
@@ -975,6 +987,7 @@ body {
     <div class="page active" id="page-dashboard">
       <!-- Stats Grid -->
       <div class="stats-grid" id="statsGrid">
+        <div class="stats-section">Pool</div>
         <div class="stat-card">
           <div class="stat-label">Grok Accounts</div>
           <div class="stat-value" id="grokCount">—</div>
@@ -991,24 +1004,43 @@ body {
           <div class="stat-sub">available</div>
         </div>
         <div class="stat-card">
-          <div class="stat-label">Total Tokens (24h)</div>
-          <div class="stat-value" id="totalTokens">—</div>
-          <div class="stat-sub" id="totalTokensSub">24h usage</div>
-        </div>
-        <div class="stat-card">
           <div class="stat-label">Cache Hit (24h)</div>
           <div class="stat-value" id="cacheHitAvg">—</div>
           <div class="stat-sub" id="cacheHitSub">prompt cache</div>
         </div>
+
+        <div class="stats-section">Performance (24h)</div>
         <div class="stat-card">
-          <div class="stat-label">Grok Circuit</div>
-          <div class="stat-value" id="grokCircuit" style="font-size:15px;padding-top:4px">—</div>
+          <div class="stat-label">Total Tokens</div>
+          <div class="stat-value" id="totalTokens">—</div>
+          <div class="stat-sub" id="totalTokensSub">24h usage</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Grok Latency</div>
+          <div class="stat-value" id="grokLatencyVal" style="font-size:15px;padding-top:2px">—</div>
           <div class="stat-sub" id="grokLatency"></div>
         </div>
         <div class="stat-card">
-          <div class="stat-label">CB Circuit</div>
-          <div class="stat-value" id="cbCircuit" style="font-size:15px;padding-top:4px">—</div>
+          <div class="stat-label">CB Latency</div>
+          <div class="stat-value" id="cbLatencyVal" style="font-size:15px;padding-top:2px">—</div>
           <div class="stat-sub" id="cbLatency"></div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Avg Latency</div>
+          <div class="stat-value" id="avgLatencyVal">—</div>
+          <div class="stat-sub">all requests</div>
+        </div>
+
+        <div class="stats-section">Health</div>
+        <div class="stat-card">
+          <div class="stat-label">Grok Circuit</div>
+          <div class="stat-value" id="grokCircuit" style="font-size:15px;padding-top:2px">—</div>
+          <div class="stat-sub" id="grokCircuitSub"></div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">CB Circuit</div>
+          <div class="stat-value" id="cbCircuit" style="font-size:15px;padding-top:2px">—</div>
+          <div class="stat-sub" id="cbCircuitSub"></div>
         </div>
         <div class="stat-card">
           <div class="stat-label">Grok Errors</div>
@@ -1716,6 +1748,7 @@ body {
             then runs <code>cloudflared</code> as a child process. Empty fields keep the current
             Redis value, so you can flip modes without re-entering credentials.
           </div>
+          <div id="tunSavedCreds" style="display:none;padding:8px 12px;background:rgba(52,211,153,0.06);border:1px solid rgba(52,211,153,0.15);border-radius:var(--radius-sm)"></div>
           <div>
             <label style="font-size:11px;color:var(--text-tertiary);display:block;margin-bottom:4px">API Token <span style="color:var(--red)">*</span></label>
             <input type="password" id="tunAPIToken" placeholder="Tunnel:Edit + DNS:Edit scope" style="width:100%;padding:8px 10px;background:var(--bg);border:1px solid var(--border-strong);border-radius:var(--radius-sm);color:var(--text-primary);font-size:13px;font-family:var(--mono)" />
@@ -2043,8 +2076,12 @@ async function refresh() {
     // Circuit cards
     document.getElementById('grokCircuit').innerHTML = circuitBadge(g.circuit_state);
     document.getElementById('cbCircuit').innerHTML = circuitBadge(cb.circuit_state);
-    document.getElementById('grokLatency').innerHTML = g.last_check_ok ? '<span class="ok">' + g.last_check_ms + 'ms</span>' : '<span class="err">down</span>';
-    document.getElementById('cbLatency').innerHTML = cb.last_check_ok ? '<span class="ok">' + cb.last_check_ms + 'ms</span>' : '<span class="err">down</span>';
+    document.getElementById('grokLatencyVal').innerHTML = g.last_check_ok ? '<span class="ok">' + g.last_check_ms + 'ms</span>' : '<span class="err">down</span>';
+    document.getElementById('cbLatencyVal').innerHTML = cb.last_check_ok ? '<span class="ok">' + cb.last_check_ms + 'ms</span>' : '<span class="err">down</span>';
+    document.getElementById('grokLatency').textContent = 'health check';
+    document.getElementById('cbLatency').textContent = 'health check';
+    document.getElementById('grokCircuitSub').textContent = g.total_errors + ' errors';
+    document.getElementById('cbCircuitSub').textContent = cb.total_errors + ' errors';
     document.getElementById('grokErrors').textContent = g.total_errors;
     document.getElementById('cbErrors').textContent = cb.total_errors;
     document.getElementById('grokErrRate').textContent = g.error_rate_pct.toFixed(1) + '% rate';
@@ -2400,6 +2437,12 @@ async function loadHistory() {
       '<div class="history-stat"><div class="label">Errors</div><div class="value ' + errClass + '">' + s.total_errors + '</div></div>' +
       '<div class="history-stat"><div class="label">Error Rate</div><div class="value ' + errClass + '">' + s.error_rate_pct.toFixed(1) + '%</div></div>' +
       '<div class="history-stat"><div class="label">Avg Latency</div><div class="value">' + Math.round(s.avg_latency_ms) + 'ms</div></div>';
+    var avgLatCard = document.getElementById('avgLatencyVal');
+    if (avgLatCard) {
+      var avgMs = Math.round(s.avg_latency_ms);
+      var latClass = avgMs > 10000 ? 'err' : avgMs > 5000 ? 'warn' : 'ok';
+      avgLatCard.innerHTML = '<span class="' + latClass + '">' + avgMs + 'ms</span>';
+    }
 
     // Recent table
     var body = document.getElementById('historyBody');
@@ -4609,6 +4652,26 @@ function showTunnelNamedModal(hybrid) {
   document.getElementById('tunZoneID').value = '';
   document.getElementById('tunDomain').value = '';
   document.getElementById('tunModalError').style.display = 'none';
+
+  // Show which credentials are already saved in Redis
+  var savedEl = document.getElementById('tunSavedCreds');
+  if (savedEl) {
+    apiFetch('/api/tunnel/status').then(function(r) { return r.json(); }).then(function(st) {
+      var badges = [];
+      if (st.has_api_token) badges.push('<span style="color:var(--emerald)">● API Token</span>');
+      if (st.has_account_id) badges.push('<span style="color:var(--emerald)">● Account ID</span>');
+      if (st.has_zone_id) badges.push('<span style="color:var(--emerald)">● Zone ID</span>');
+      if (st.tunnel_domain) badges.push('<span style="color:var(--emerald)">● Hostname: ' + escHtml(st.tunnel_domain) + '</span>');
+      if (badges.length) {
+        savedEl.innerHTML = '<div style="font-size:11px;color:var(--text-tertiary);margin-bottom:6px">Saved credentials (leave blank to keep):</div>' +
+          '<div style="display:flex;gap:12px;flex-wrap:wrap;font-size:12px">' + badges.join('') + '</div>';
+        savedEl.style.display = 'block';
+      } else {
+        savedEl.style.display = 'none';
+      }
+    }).catch(function() { savedEl.style.display = 'none'; });
+  }
+
   document.getElementById('tunnelNamedModal').classList.add('active');
 }
 function closeTunnelNamedModal() {

@@ -8,7 +8,26 @@ Multi-account/key round-robin, auto-refresh (singleflight + pre-warm), circuit b
 API key auth, per-key RPM/quota, Redis hot-state, **ClickHouse** full-body history, web dashboard.
 
 **Version:** v1.6.2 (`-X main.Version` build flag)
-**Port:** 20130 · **Deploy:** Docker Compose (`docker compose up -d --build foxrouters`)  
+**Port:** 20130 · **Deploy:** Docker Compose (`docker compose up -d --build foxrouters`)
+
+> **⚠️ DEV MUST NOT TOUCH PROD.** `docker compose up --build` from a dev
+> session REPLACES the running prod container; if the build/start gets
+> interrupted the new container is left stuck in `Created` and prod goes
+> down. Use `./dev.sh` for dev work — it runs a FULLY ISOLATED stack with
+> its **own Redis** (`foxrouters-dev-redis`, port 6381, own volume), its own
+> sqlite volume, and container `foxrouters-dev` on **port 20131**. No shared
+> Redis → no token-refresh/credit-sync races with prod. Prod (`:20130`) is
+> never touched. Dev Redis starts empty (seed accounts manually if needed).
+> `./dev.sh build|up|down|logs|test`.
+>
+> **Dev background workers + health probes are OFF.** `dev.sh` passes
+> `WORKERS_DISABLED=1` + `HEALTH_PROBES_DISABLED=1`. Dev runs request-path
+> only — no token refresh, credit sync, billing sync, re-enable, or upstream
+> probes. This prevents rotating-refresh-token races with prod (Grok/CB RT
+> rotation → `invalid_grant` → permanent disable in BOTH environments if two
+> instances refresh the same account). To test worker behavior in dev,
+> explicitly unset these env vars AND seed dev Redis with disposable test
+> accounts — never prod credentials.  
 **Path:** `/root/nexus-workspace/foxrouters/`
 
 ## Architecture / Flow
