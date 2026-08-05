@@ -115,15 +115,23 @@ func main() {
 	LoadSelectorMode(db)                  // restore persisted CB selector mode (rr|sticky|content-hash|hybrid)
 	LoadGrokSelectorMode(db)             // restore persisted Grok selector mode
 
-	// Health checker: active + passive monitoring with circuit breaker
+	// Health checker: active + passive monitoring with circuit breaker.
+	// Gated by HEALTH_PROBES_DISABLED=1 — dev containers must NOT probe
+	// upstream: probes burn credits and can flip circuit state on shared
+	// pool credentials.
 	hc := newHealthChecker(grokAM, cbKM)
+	healthProbesDisabled := os.Getenv("HEALTH_PROBES_DISABLED") == "1"
 	// Worker context — cancelled on SIGTERM so all background goroutines
 	// (health checks, token refresh, credit sync, cooldown re-enable, pool
 	// gauges) exit cleanly during the drain window instead of running until
 	// the process is force-killed.
 	workerCtx, workerCancel := context.WithCancel(context.Background())
 	defer workerCancel()
-	hc.Start(workerCtx)
+	if healthProbesDisabled {
+		slog.Warn("health probes DISABLED via HEALTH_PROBES_DISABLED=1", "module", "main")
+	} else {
+		hc.Start(workerCtx)
+	}
 
 	// Auth + rate limiter
 	authMgr := newAuthManager(db)
@@ -170,12 +178,22 @@ func main() {
 	// cloudflared is missing or Cloudflare API is unreachable.
 	go tunnelMgr.AutoStart()
 
-	go autoRefreshWorker(workerCtx, grokAM)
-	go reenableWorker(workerCtx, grokAM)
-	go reenableCBWorker(workerCtx, cbKM)
-	go cbOAuthRefreshWorker(workerCtx, cbKM)
-	go cbCreditSyncWorker(workerCtx, cbKM)
-	go grokBillingSyncWorker(workerCtx, grokAM)
+	// Background workers that hit upstream (token refresh, credit sync,
+	// billing sync, re-enable). Gated by WORKERS_DISABLED=1 — dev containers
+	// must NOT run these: Grok/CB use rotating refresh tokens, so two
+	// instances racing on the same account triggers invalid_grant and
+	// permanently disables the credential in BOTH environments.
+	workersDisabled := os.Getenv("WORKERS_DISABLED") == "1"
+	if workersDisabled {
+		slog.Warn("background workers DISABLED via WORKERS_DISABLED=1", "module", "main")
+	} else {
+		go autoRefreshWorker(workerCtx, grokAM)
+		go reenableWorker(workerCtx, grokAM)
+		go reenableCBWorker(workerCtx, cbKM)
+		go cbOAuthRefreshWorker(workerCtx, cbKM)
+		go cbCreditSyncWorker(workerCtx, cbKM)
+		go grokBillingSyncWorker(workerCtx, grokAM)
+	}
 	// Snapshot pool sizes into Prometheus gauges every 10s. Cheap RLock walk;
 	// keeps activeKeys/disabledKeys eventually consistent without touching the
 	// hot path. Circuit-state gauges are updated inline from health.go.
