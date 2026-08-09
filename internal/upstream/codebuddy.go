@@ -1343,6 +1343,39 @@ func cbTransform(body []byte) ([]byte, error) {
 			m["messages"] = append([]any{sys}, msgs...)
 		}
 	}
+	// CodeBuddy rejects assistant messages with empty content ("" or null)
+	// AND empty/absent tool_calls — error 11133 "invalid parameter value".
+	// Hermes (and other clients) can persist such turns from dead streams or
+	// thinking-only responses. Sanitize: drop empty tool_calls arrays, then
+	// replace empty content with a placeholder when the turn has no payload.
+	// Non-empty tool_calls turns (content="" + tool_calls=[{...}]) are valid
+	// and left untouched.
+	if msgs, ok := m["messages"].([]any); ok {
+		for i, msg := range msgs {
+			mm, ok := msg.(map[string]any)
+			if !ok || mm["role"] != "assistant" {
+				continue
+			}
+			// Drop empty tool_calls array — it's semantically identical to
+			// absent but CodeBuddy rejects the explicit empty array.
+			if tc, exists := mm["tool_calls"]; exists {
+				if tcArr, isArr := tc.([]any); isArr && len(tcArr) == 0 {
+					delete(mm, "tool_calls")
+				}
+			}
+			// After dropping empty tool_calls, check if the turn is truly
+			// empty (no content AND no tool_calls). If so, substitute a
+			// placeholder so CodeBuddy doesn't 400.
+			content, _ := mm["content"].(string)
+			_, hasTC := mm["tool_calls"]
+			if content == "" && !hasTC {
+				mm["content"] = "[response interrupted]"
+				msgs[i] = mm
+			}
+		}
+		m["messages"] = msgs
+	}
+
 	// Normalize reasoning params. CodeBuddy upstream only accepts
 	// `reasoning_effort` (flat string: low/medium/high/xhigh). Clients send
 	// different shapes:
