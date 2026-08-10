@@ -33,6 +33,13 @@ var (
 	handleSyncGrokBilling  = handlers.HandleSyncGrokBilling
 	handleDeleteAccount    = handlers.HandleDeleteAccount
 	handleDeleteCBKey      = handlers.HandleDeleteCBKey
+	handleFBImport         = handlers.HandleFBImport
+	handleFBImportBulk     = handlers.HandleFBImportBulk
+	handleFBQuotaSync      = handlers.HandleFBQuotaSync
+	handleFBAccounts       = handlers.HandleFBAccounts
+	handleFBDeleteAccount  = handlers.HandleFBDeleteAccount
+	handleFBDeviceStart    = handlers.HandleFBDeviceStart
+	handleFBDevicePoll     = handlers.HandleFBDevicePoll
 	handleTestCBKey        = handlers.HandleTestCBKey
 	handleTestGrokAccount  = handlers.HandleTestGrokAccount
 	handleCleanupDisabled  = handlers.HandleCleanupDisabled
@@ -81,8 +88,8 @@ var (
 // Function wrappers for handlers whose signature changed to accept
 // the session store (P3-3). Var aliases don't work because the
 // function type no longer matches the package-main call site.
-func handleHealth(grokAM *upstream.GrokAccountManager, cbKM *upstream.CBKeyManager, hc *upstream.HealthChecker, am *auth.Manager, sessions *auth.SessionStore) gin.HandlerFunc {
-	return handlers.HandleHealth(grokAM, cbKM, hc, am, sessions)
+func handleHealth(grokAM *upstream.GrokAccountManager, cbKM *upstream.CBKeyManager, fbAM *upstream.FreebuffAccountManager, hc *upstream.HealthChecker, am *auth.Manager, sessions *auth.SessionStore) gin.HandlerFunc {
+	return handlers.HandleHealth(grokAM, cbKM, fbAM, hc, am, sessions)
 }
 func handleLogin(am *auth.Manager, sessions *auth.SessionStore) gin.HandlerFunc {
 	return handlers.HandleLogin(am, sessions)

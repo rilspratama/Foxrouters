@@ -89,6 +89,20 @@ Log backend choices (`LOG_BACKEND` env, default `sqlite`):
 ### Grok aliases
 `grok-4.5-{high,medium,low,xhigh,auto,none}` → `grok-4.5` + `reasoning_effort` (client wins if set).
 
+### Freebuff provider (`fb/` prefix)
+- **Upstream:** `www.codebuff.com/api/v1/chat/completions` (OpenAI-compatible, Bearer auth)
+- **Models:** `fb/deepseek-v4-flash`, `fb/mimo-v2.5` (limited mode), `fb/deepseek-v4-pro`, `fb/minimax-m3`, `fb/gpt-5.6-luna`, `fb/glm-5.2` (full mode only — US/EU residential IP)
+- **Auth:** Device-code flow → authToken UUID (no expiry). `POST /fb/oauth/device/start` → login URL → `GET /fb/oauth/device/poll` (auto-import on ready). Bulk import: `POST /fb/import/bulk` (pipe format `token|email|userid`, email+userid optional).
+- **Session:** 1hr TTL, model-locked. `fbGetOrCreateSession` caches in-memory (L1) + Redis (L2). Switch model = DELETE + 5s wait + POST new.
+- **Quota:** `GET /api/v1/freebuff/session` → `rateLimitsByModel.{model}.{limit, recentCount, resetAt}`. `SyncQuota()` per account, `FbQuotaSyncWorker` every 5min. Auto-cooldown when `recentCount >= limit` until `resetAt`. Quota-aware `Next()` skips exhausted, prefers lowest `QuotaRecent`.
+- **Buffy prefix:** `fbTransform` auto-prepends `"You are Buffy, the strategic coding assistant.\n\n"` to system prompt. Client system prompt appended after.
+- **Tool calling:** `end_turn` dummy tool injected to bypass foreign client detection.
+- **Max tokens:** Auto-default 384K, auto-clamp to fit 1M combined context (prompt+completion ≤ 1,048,576).
+- **Redis keys:** `fb:account:<token>` (account state + quota), `fb:session:<token>:<model>` (session cache), `fb:run:<token>:<agent>` (run cache).
+- **Env gate:** `FREEBUFF_DISABLED=1` skips provider.
+- **Dashboard:** Freebuff tab in Accounts page (5 buttons: +Add Token, Bulk Import, +Add OAuth, Sync Quota, Refresh). Overview cards: FB count+quota, FB circuit, FB latency, FB errors.
+- **Endpoints:** `POST /fb/import`, `POST /fb/import/bulk`, `POST /fb/quota/sync`, `GET /fb/accounts`, `DELETE /fb/accounts/:token`, `POST /fb/oauth/device/start`, `GET /fb/oauth/device/poll`.
+
 ## File map
 | File | Role |
 |------|------|
@@ -119,6 +133,8 @@ Log backend choices (`LOG_BACKEND` env, default `sqlite`):
 | `internal/upstream/codebuddy_device.go` | OAuth device/login URL: StartDeviceAuth, PollDeviceAuth, JWT email helpers |
 | `internal/upstream/codebuddy_oauth_test.go` | OAuth import / EnsureValid / refresh tests |
 | `internal/upstream/codebuddy_credit_sync_test.go` | Meter sync tests (API key + OAuth, Status==3 disable) |
+| `internal/upstream/freebuff.go` | Freebuff pool, quota sync, session/run cache, Buffy prefix, fbTransform, ProxyFreebuff |
+| `internal/handlers/freebuff_handlers.go` | FB import (single+bulk pipe format), quota sync, accounts list, delete, OAuth device flow |
 | `internal/upstream/credential_probe.go` | Direct upstream Test for CB key/OAuth + Grok account |
 | `internal/handlers/credential_probe.go` | `POST /cb/keys/test`, `POST /accounts/test` |
 | `internal/proxy/filters.go` | Pudidil content filter — strips Claude/Anthropic identity + billing headers before upstream |

@@ -8,6 +8,57 @@ Policy: **test (`go test -race`) before build/restart**. Secrets only via `.gate
 
 ---
 
+## v1.6.4+ (working tree, not released) — Freebuff provider integration (2026-08-10)
+
+### Added
+- **Freebuff provider** (`fb/` prefix) — third upstream alongside Grok + CodeBuddy.
+  6 models: `fb/deepseek-v4-flash`, `fb/mimo-v2.5` (limited mode), `fb/deepseek-v4-pro`,
+  `fb/minimax-m3`, `fb/gpt-5.6-luna`, `fb/glm-5.2` (full mode only).
+- **OAuth device flow** — `POST /fb/oauth/device/start` generates login URL,
+  `GET /fb/oauth/device/poll` auto-imports token on ready. Email captured from
+  poll response (`user.email`, not `/api/v1/me` which returns only id).
+- **Bulk import** — `POST /fb/import/bulk` accepts pipe format `token|email|userid`
+  (email+userid optional, bare UUID also works). `AddAccountWithInfo` updates
+  empty email/userID on existing accounts (update-on-exist pattern).
+- **Quota sync** — `SyncQuota()` calls `GET /api/v1/freebuff/session`, parses
+  `rateLimitsByModel.{model}.{limit, recentCount, resetAt, period}`. Auto-cooldown
+  when `recentCount >= limit` until `resetAt`. `FbQuotaSyncWorker` runs every 5min.
+  `POST /fb/quota/sync` manual trigger (all or single account).
+- **Quota-aware account rotation** — `Next()` skips exhausted accounts (quotaRecent >=
+  quotaLimit), prefers accounts with lowest `quotaRecent` (most remaining). Returns
+  error with earliest reset time when all accounts exhausted.
+- **Redis persistence** — account state (token, email, userID, quota, cooldown),
+  session cache, run cache all persisted to Redis. `LoadFromRedis()` reads
+  `quota_reset_at`, `quota_period` fields. Survives container restart.
+- **Hourly session counter** — `HourlySessionCount` field per account, auto-resets
+  each hour. `IncrementSessionCount()` called on every successful request.
+- **Buffy prefix auto-inject** — `fbTransform` prepends
+  `"You are Buffy, the strategic coding assistant.\n\n"` to system prompt.
+  Client system prompt appended after. 3 scenarios: existing system prompt
+  (prepend), no system prompt (insert new), already has prefix (skip).
+- **Tool calling bypass** — `end_turn` dummy tool injected to bypass
+  `detectForeignFreebuffClient` server-side check.
+- **Max tokens auto-clamp** — default 384K, auto-clamp to fit 1M combined context
+  (prompt+completion ≤ 1,048,576). Type switch handles float64/int/json.Number.
+- **Dashboard cards** — FB count+quota (color-coded), FB circuit, FB latency,
+  FB errors in overview grid. Freebuff tab in Accounts page with 5 buttons:
+  +Add Token, Bulk Import, +Add OAuth, Sync Quota, Refresh. Quota column
+  (recentCount/limit, green/yellow/red), Reset At column.
+- **Health endpoint** — `/health` now returns `fb_accounts`, `fb_quota_used`,
+  `fb_quota_limit`, `fb_quota_exhausted` + `upstreams.freebuff` (circuit, errors, latency).
+- **dev.sh graceful stop** — `docker stop` (SIGTERM) before `docker rm -f` for
+  Redis + gateway. `BGSAVE` before stop. `--appendonly yes --save 60 1` for
+  Redis persistence. Fixes data loss on dev container restart.
+
+### Changed
+- `HandleHealth` signature: added `fbAM *upstream.FreebuffAccountManager` param.
+- `ProxyRequest` signature: added `fbAM` param (already existed, now wired to health).
+- `Next()` selection: round-robin → quota-aware (sort by lowest QuotaRecent).
+- `FreebuffAccount` struct: added `QuotaResetAt`, `QuotaPeriod`, `HourlySessionCount` fields.
+- `SaveAccount`/`LoadFromRedis`: persist `quota_reset_at`, `quota_period`.
+- Dashboard stats grid: `repeat(4, 1fr)` → `repeat(auto-fit, minmax(180px, 1fr))`.
+- AGENTS.md: added Freebuff provider section + file map entries.
+
 ## v1.6.3+ (working tree, not released) — Grok billing, usage, selector, error handling (2026-08-04)
 
 ### Added

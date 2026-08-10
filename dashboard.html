@@ -296,7 +296,7 @@ body {
 /* ── Stats Grid ── */
 .stats-grid {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   gap: 8px;
   margin-bottom: 8px;
 }
@@ -999,6 +999,11 @@ body {
           <div class="stat-sub" id="cbActive"></div>
         </div>
         <div class="stat-card">
+          <div class="stat-label">Freebuff</div>
+          <div class="stat-value" id="fbCount">—</div>
+          <div class="stat-sub" id="fbQuota"></div>
+        </div>
+        <div class="stat-card">
           <div class="stat-label">Models</div>
           <div class="stat-value" id="models">—</div>
           <div class="stat-sub">available</div>
@@ -1026,6 +1031,11 @@ body {
           <div class="stat-sub" id="cbLatency"></div>
         </div>
         <div class="stat-card">
+          <div class="stat-label">FB Latency</div>
+          <div class="stat-value" id="fbLatencyVal" style="font-size:15px;padding-top:2px">—</div>
+          <div class="stat-sub" id="fbLatency"></div>
+        </div>
+        <div class="stat-card">
           <div class="stat-label">Avg Latency</div>
           <div class="stat-value" id="avgLatencyVal">—</div>
           <div class="stat-sub">all requests</div>
@@ -1043,6 +1053,11 @@ body {
           <div class="stat-sub" id="cbCircuitSub"></div>
         </div>
         <div class="stat-card">
+          <div class="stat-label">FB Circuit</div>
+          <div class="stat-value" id="fbCircuit" style="font-size:15px;padding-top:2px">—</div>
+          <div class="stat-sub" id="fbCircuitSub"></div>
+        </div>
+        <div class="stat-card">
           <div class="stat-label">Grok Errors</div>
           <div class="stat-value" id="grokErrors">—</div>
           <div class="stat-sub" id="grokErrRate"></div>
@@ -1051,6 +1066,11 @@ body {
           <div class="stat-label">CB Errors</div>
           <div class="stat-value" id="cbErrors">—</div>
           <div class="stat-sub" id="cbErrRate"></div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">FB Errors</div>
+          <div class="stat-value" id="fbErrors">—</div>
+          <div class="stat-sub" id="fbErrRate"></div>
         </div>
       </div>
 
@@ -1086,6 +1106,8 @@ body {
             <option value="kimi-k3">kimi-k3</option>
             <option value="gemini-3.1-pro">gemini-3.1-pro</option>
             <option value="grok-4.5">grok-4.5</option>
+            <option value="fb/deepseek-v4-flash">fb/deepseek-v4-flash</option>
+            <option value="fb/mimo-v2.5">fb/mimo-v2.5</option>
           </select>
           <input id="testPrompt" type="text" placeholder="Send a test message..." value="Say hello in one sentence." />
           <button class="btn-primary" onclick="runTest()" id="testBtn">Send</button>
@@ -1128,6 +1150,7 @@ body {
         <div class="subtabs">
           <button class="subtab active" onclick="showTab(event,'cb')">CodeBuddy Keys</button>
           <button class="subtab" onclick="showTab(event,'grok')">Grok Accounts</button>
+          <button class="subtab" onclick="showTab(event,'fb')">Freebuff</button>
           <div style="margin-left:auto;display:flex;gap:6px">
             <button class="btn-ghost" id="cbAddBtn" onclick="showAddCBModal()" style="padding:5px 12px;font-size:12px">+ Add Key</button>
             <button class="btn-ghost" id="cbOAuthBtn" onclick="showAddCBOAuthModal()" style="padding:5px 12px;font-size:12px">+ Add OAuth</button>
@@ -1140,6 +1163,10 @@ body {
             <button class="btn-ghost" id="grokCleanupBtn" onclick="cleanupDisabled('grok')" style="padding:5px 12px;font-size:12px;color:var(--danger);display:none">Cleanup Disabled</button>
             <button class="btn-ghost" id="grokCleanupBannedBtn" onclick="cleanupBanned('grok')" style="padding:5px 12px;font-size:12px;color:var(--danger);display:none">Cleanup Banned</button>
             <button class="btn-ghost" id="grokSyncBillingBtn" onclick="syncGrokBilling()" style="padding:5px 12px;font-size:12px;display:none">Sync Billing</button>
+            <button class="btn-ghost" id="fbAddBtn" onclick="showAddFBModal()" style="padding:5px 12px;font-size:12px;display:none">+ Add Token</button>
+            <button class="btn-ghost" id="fbBulkBtn" onclick="showBulkFBModal()" style="padding:5px 12px;font-size:12px;display:none">Bulk Import</button>
+            <button class="btn-ghost" id="fbOAuthBtn" onclick="showFBOAuthModal()" style="padding:5px 12px;font-size:12px;display:none">+ Add OAuth</button>
+            <button class="btn-ghost" id="fbRefreshBtn" onclick="loadFBAccounts()" style="padding:5px 12px;font-size:12px;display:none">Refresh</button>
           </div>
         </div>
         <!-- CB selector mode (routing strategy for prompt-cache locality) -->
@@ -1183,6 +1210,22 @@ body {
             </table>
           </div>
           <div id="grokPager" style="display:flex;align-items:center;gap:8px;padding:10px 16px;border-top:1px solid var(--border);font-size:13px;color:var(--text-tertiary)"></div>
+        </div>
+        <!-- Freebuff panel -->
+        <div id="fbPanel" style="display:none;padding:16px">
+          <p style="font-size:13px;color:var(--text-tertiary);margin-bottom:12px;line-height:1.6">
+            Freebuff (Codebuff rebrand) free-tier tokens. Models: <code style="font-family:var(--mono);color:var(--text-secondary);background:var(--bg-elevated);padding:1px 5px;border-radius:3px;font-size:12px">fb/deepseek-v4-flash</code>, <code style="font-family:var(--mono);color:var(--text-secondary);background:var(--bg-elevated);padding:1px 5px;border-radius:3px;font-size:12px">fb/mimo-v2.5</code>. Each account: 6 sessions/day, 1hr each.
+          </p>
+          <div class="tbl-scroll" style="max-height:500px">
+            <table class="tbl">
+              <thead><tr>
+                <th>Token</th><th>Email</th><th>User ID</th><th>Quota</th><th>Status</th><th>Actions</th>
+              </tr></thead>
+              <tbody id="fbBody">
+                <tr><td colspan="6" style="text-align:center;padding:24px;color:var(--text-tertiary);font-size:13px">No Freebuff tokens. Click "+ Add Token" to import.</td></tr>
+              </tbody>
+            </table>
+          </div>
         </div>
       </div>
     </div>
@@ -2072,25 +2115,44 @@ async function refresh() {
     document.getElementById('models').textContent = models.data ? models.data.length : '—';
 
     var g = health.upstreams.grok, cb = health.upstreams.codebuddy;
+    var fb = health.upstreams.freebuff || {};
+
+    // FB stats card
+    document.getElementById('fbCount').textContent = health.fb_accounts || 0;
+    var fbUsed = health.fb_quota_used || 0, fbLimit = health.fb_quota_limit || 0;
+    var fbExhausted = health.fb_quota_exhausted || 0;
+    if (fbLimit > 0) {
+      var fbPct = Math.round(fbUsed / fbLimit * 100);
+      var fbClass = fbPct >= 100 ? 'err' : (fbPct >= 80 ? 'warn' : 'ok');
+      document.getElementById('fbQuota').innerHTML = '<span class="' + fbClass + '">' + fbUsed.toFixed(1) + '/' + fbLimit.toFixed(0) + ' (' + fbPct + '%)</span>' + (fbExhausted > 0 ? ' <span class="err">⛔ ' + fbExhausted + ' exhausted</span>' : '');
+    } else {
+      document.getElementById('fbQuota').innerHTML = '<span class="ok">no quota data</span>';
+    }
 
     // Circuit cards
     document.getElementById('grokCircuit').innerHTML = circuitBadge(g.circuit_state);
     document.getElementById('cbCircuit').innerHTML = circuitBadge(cb.circuit_state);
+    document.getElementById('fbCircuit').innerHTML = fb.circuit_state ? circuitBadge(fb.circuit_state) : '—';
     document.getElementById('grokLatencyVal').innerHTML = g.last_check_ok ? '<span class="ok">' + g.last_check_ms + 'ms</span>' : '<span class="err">down</span>';
     document.getElementById('cbLatencyVal').innerHTML = cb.last_check_ok ? '<span class="ok">' + cb.last_check_ms + 'ms</span>' : '<span class="err">down</span>';
+    document.getElementById('fbLatencyVal').innerHTML = fb.last_check_ok ? '<span class="ok">' + fb.last_check_ms + 'ms</span>' : (fb.circuit_state ? '<span class="err">down</span>' : '—');
     document.getElementById('grokLatency').textContent = 'health check';
     document.getElementById('cbLatency').textContent = 'health check';
+    document.getElementById('fbLatency').textContent = fb.circuit_state ? 'health check' : 'no probe';
     document.getElementById('grokCircuitSub').textContent = g.total_errors + ' errors';
     document.getElementById('cbCircuitSub').textContent = cb.total_errors + ' errors';
+    document.getElementById('fbCircuitSub').textContent = (fb.total_errors || 0) + ' errors';
     document.getElementById('grokErrors').textContent = g.total_errors;
     document.getElementById('cbErrors').textContent = cb.total_errors;
+    document.getElementById('fbErrors').textContent = fb.total_errors || 0;
     document.getElementById('grokErrRate').textContent = g.error_rate_pct.toFixed(1) + '% rate';
     document.getElementById('cbErrRate').textContent = cb.error_rate_pct.toFixed(1) + '% rate';
+    document.getElementById('fbErrRate').textContent = fb.error_rate_pct ? fb.error_rate_pct.toFixed(1) + '% rate' : '—';
 
     // Sidebar status
     var dotEl = document.getElementById('sidebarDot');
     var statusEl = document.getElementById('sidebarStatus');
-    var allOK = g.circuit_state !== 'open' && cb.circuit_state !== 'open';
+    var allOK = g.circuit_state !== 'open' && cb.circuit_state !== 'open' && (!fb.circuit_state || fb.circuit_state !== 'open');
     dotEl.className = 'status-dot' + (allOK ? '' : ' err');
     statusEl.textContent = allOK ? 'All systems operational' : 'Circuit open';
 
@@ -2356,6 +2418,235 @@ function showTab(e, tab) {
   var grokSelBar = document.getElementById('grokSelectorBar');
   if (grokSelBar) grokSelBar.style.display = tab === 'grok' ? 'flex' : 'none';
   if (tab === 'grok') loadGrokSelectorMode();
+  // Freebuff panel + buttons
+  var fbPanelEl = document.getElementById('fbPanel');
+  if (fbPanelEl) fbPanelEl.style.display = tab === 'fb' ? 'block' : 'none';
+  document.getElementById('fbAddBtn').style.display = tab === 'fb' ? '' : 'none';
+  document.getElementById('fbBulkBtn').style.display = tab === 'fb' ? '' : 'none';
+  document.getElementById('fbOAuthBtn').style.display = tab === 'fb' ? '' : 'none';
+  document.getElementById('fbRefreshBtn').style.display = tab === 'fb' ? '' : 'none';
+  if (tab === 'fb') loadFBAccounts();
+}
+
+/* ══════════════════════════════════════════════════════════
+   FREEBUFF ACCOUNTS
+   ══════════════════════════════════════════════════════════ */
+async function loadFBAccounts() {
+  try {
+    var data = await fetchJSON('/fb/accounts');
+    var body = document.getElementById('fbBody');
+    if (!data || !data.accounts || data.accounts.length === 0) {
+      body.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:24px;color:var(--text-tertiary);font-size:13px">No Freebuff tokens. Click "+ Add Token" to import.</td></tr>';
+      return;
+    }
+    body.innerHTML = data.accounts.map(function(a) {
+      var statusBadge;
+      if (a.status === 'active') {
+        statusBadge = '<span style="color:var(--success);font-weight:600">● active</span>';
+      } else if (a.status === 'cooldown') {
+        statusBadge = '<span style="color:var(--warning);font-weight:600">● cooldown</span>';
+      } else {
+        statusBadge = '<span style="color:var(--danger);font-weight:600">● disabled</span>';
+      }
+      var quota = a.quota_limit > 0 ? (a.quota_recent + '/' + a.quota_limit) : '—';
+      return '<tr>' +
+        '<td class="mono" style="font-size:12px">' + escHtml(a.token) + '</td>' +
+        '<td>' + escHtml(a.email || '—') + '</td>' +
+        '<td class="mono" style="font-size:11px;color:var(--text-tertiary)">' + escHtml(a.user_id ? a.user_id.substring(0,8) + '…' : '—') + '</td>' +
+        '<td>' + quota + '</td>' +
+        '<td>' + statusBadge + '</td>' +
+        '<td><button class="btn-ghost" style="padding:3px 10px;font-size:11px;color:var(--danger)" onclick="deleteFBAccount(\'' + escHtml(a.token_full) + '\')">Delete</button></td>' +
+        '</tr>';
+    }).join('');
+  } catch (e) {
+    var body = document.getElementById('fbBody');
+    if (body) body.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:24px;color:var(--danger);font-size:13px">Failed to load: ' + escHtml(e.message) + '</td></tr>';
+  }
+}
+
+function showAddFBModal() {
+  var m = document.getElementById('fbModal');
+  if (m) { m.style.display = 'flex'; return; }
+  // Create modal dynamically
+  m = document.createElement('div');
+  m.id = 'fbModal';
+  m.className = 'modal-overlay';
+  m.style.cssText = 'display:flex;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:1000;align-items:center;justify-content:center';
+  m.onclick = function(e) { if (e.target === m) m.style.display = 'none'; };
+  m.innerHTML = '<div style="background:var(--bg-secondary);border:1px solid var(--border);border-radius:var(--radius);width:90%;max-width:480px;padding:24px">' +
+    '<h3 style="margin:0 0 16px;font-size:16px">Add Freebuff Token</h3>' +
+    '<div style="margin-bottom:12px">' +
+    '<label style="display:block;margin-bottom:6px;font-size:13px;color:var(--text-secondary)">Auth Token (UUID)</label>' +
+    '<input id="fbTokenInput" type="text" placeholder="UUID token (e.g. a1b2c3d4-...)" style="width:100%;padding:8px 12px;background:var(--bg-input);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text-primary);font-family:var(--mono);font-size:13px" />' +
+    '<p style="font-size:12px;color:var(--text-tertiary);margin-top:6px;line-height:1.5">Get token from <code style="font-family:var(--mono);color:var(--text-secondary)">extract_freebuff.py login</code></p>' +
+    '</div>' +
+    '<div style="display:flex;gap:8px;justify-content:flex-end">' +
+    '<button class="btn-ghost" onclick="document.getElementById(\'fbModal\').style.display=\'none\'" style="padding:8px 16px;font-size:13px">Cancel</button>' +
+    '<button class="btn-primary" onclick="submitAddFB()" style="padding:8px 16px;border-radius:var(--radius-sm);background:var(--brand);color:#fff;border:none;font-size:13px;font-weight:500;cursor:pointer">Import</button>' +
+    '</div></div>';
+  document.body.appendChild(m);
+}
+
+async function submitAddFB() {
+  var token = document.getElementById('fbTokenInput').value.trim();
+  if (!token) { alert('Token is required'); return; }
+  try {
+    var r = await apiFetch('/fb/import', { method: 'POST', body: JSON.stringify({ token: token }) });
+    if (r.error) { alert('Import failed: ' + r.error); return; }
+    document.getElementById('fbModal').style.display = 'none';
+    loadFBAccounts();
+  } catch (e) {
+    alert('Error: ' + e.message);
+  }
+}
+
+function showBulkFBModal() {
+  var existing = document.getElementById('fbBulkModal');
+  if (existing) { existing.remove(); }
+  var m = document.createElement('div');
+  m.id = 'fbBulkModal';
+  m.className = 'modal-overlay';
+  m.style.cssText = 'display:flex;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:1000;align-items:center;justify-content:center';
+  m.onclick = function(e) { if (e.target === m) m.remove(); };
+  m.innerHTML = '<div style="background:var(--bg-secondary);border:1px solid var(--border);border-radius:var(--radius);width:90%;max-width:560px;padding:24px">' +
+    '<h3 style="margin:0 0 16px;font-size:16px">Bulk Import Freebuff Tokens</h3>' +
+    '<div style="margin-bottom:8px;font-size:12px;color:var(--text-tertiary)">Format: <code style="font-family:var(--mono)">token|email|userid</code> (one per line). Email + userid optional. Also accepts bare UUID.</div>' +
+    '<div style="margin-bottom:16px">' +
+    '<textarea id="fbBulkInput" placeholder="token1|email1@example.com|userid1\ntoken2|email2@example.com|userid2\ntoken3" rows="10" style="width:100%;padding:8px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg-primary);color:var(--text);font-family:var(--mono);font-size:12px;resize:vertical"></textarea>' +
+    '</div>' +
+    '<div id="fbBulkResult" style="margin-bottom:12px;display:none;padding:10px;border-radius:var(--radius-sm);font-size:13px"></div>' +
+    '<div style="display:flex;gap:8px;justify-content:flex-end">' +
+    '<button class="btn-ghost" onclick="document.getElementById(\'fbBulkModal\').remove()" style="padding:8px 16px;font-size:13px">Cancel</button>' +
+    '<button class="btn-primary" onclick="submitBulkFB()" style="padding:8px 16px;border-radius:var(--radius-sm);background:var(--brand);color:#fff;border:none;font-size:13px;font-weight:500;cursor:pointer">Import</button>' +
+    '</div></div>';
+  document.body.appendChild(m);
+}
+
+async function submitBulkFB() {
+  var input = document.getElementById('fbBulkInput').value.trim();
+  if (!input) { alert('Paste at least one token'); return; }
+  var result = document.getElementById('fbBulkResult');
+  var btn = event.target;
+  btn.disabled = true;
+  btn.textContent = 'Importing...';
+  result.style.display = 'block';
+  result.style.color = 'var(--text-tertiary)';
+  result.textContent = 'Importing...';
+
+  try {
+    var r = await apiFetch('/fb/import/bulk', { method: 'POST', body: JSON.stringify({ raw: input }) });
+    if (r.error) {
+      result.style.color = 'var(--danger)';
+      result.textContent = 'Error: ' + r.error;
+    } else {
+      result.style.color = 'var(--success)';
+      result.textContent = '✓ Added: ' + r.added + ' · Failed: ' + r.failed + ' · Total: ' + r.total;
+      if (r.errors && r.errors.length > 0) {
+        result.innerHTML += '<br><span style="color:var(--danger);font-size:12px">' + r.errors.join('<br>') + '</span>';
+      }
+      loadFBAccounts();
+    }
+  } catch (e) {
+    result.style.color = 'var(--danger)';
+    result.textContent = 'Error: ' + e.message;
+  }
+  btn.disabled = false;
+  btn.textContent = 'Import';
+}
+
+/* ── Freebuff OAuth device flow (Login URL) ── */
+var fbOAuthState = null;
+
+function showFBOAuthModal() {
+  var existing = document.getElementById('fbOAuthModal');
+  if (existing) { existing.remove(); }
+  var m = document.createElement('div');
+  m.id = 'fbOAuthModal';
+  m.className = 'modal-overlay';
+  m.style.cssText = 'display:flex;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:1000;align-items:center;justify-content:center';
+  m.onclick = function(e) { if (e.target === m) m.remove(); };
+  m.innerHTML = '<div style="background:var(--bg-secondary);border:1px solid var(--border);border-radius:var(--radius);width:90%;max-width:520px;padding:24px">' +
+    '<h3 style="margin:0 0 16px;font-size:16px">Add Freebuff via Login URL</h3>' +
+    '<div id="fbOAuthContent" style="margin-bottom:16px">' +
+    '<p style="font-size:13px;color:var(--text-tertiary);line-height:1.6;margin-bottom:12px">Click "Generate Login URL" to start the OAuth device flow. Open the URL in your browser, log in with Google/GitHub, and the token will be auto-imported.</p>' +
+    '<button class="btn-primary" onclick="startFBOAuth()" style="padding:8px 16px;border-radius:var(--radius-sm);background:var(--brand);color:#fff;border:none;font-size:13px;font-weight:500;cursor:pointer">Generate Login URL</button>' +
+    '</div>' +
+    '<div style="display:flex;gap:8px;justify-content:flex-end">' +
+    '<button class="btn-ghost" onclick="document.getElementById(\'fbOAuthModal\').remove()" style="padding:8px 16px;font-size:13px">Close</button>' +
+    '</div></div>';
+  document.body.appendChild(m);
+}
+
+async function startFBOAuth() {
+  var content = document.getElementById('fbOAuthContent');
+  content.innerHTML = '<p style="font-size:13px;color:var(--text-tertiary)">Generating login URL...</p>';
+  try {
+    var r = await apiFetch('/fb/oauth/device/start', { method: 'POST', body: '{}' });
+    console.log('fb oauth start response:', r);
+    if (r.error) {
+      content.innerHTML = '<p style="color:var(--danger);font-size:13px">Error: ' + escHtml(r.error) + '</p>';
+      return;
+    }
+    fbOAuthState = r;
+    content.innerHTML =
+      '<div style="margin-bottom:12px">' +
+      '<label style="display:block;margin-bottom:6px;font-size:13px;color:var(--text-secondary)">Login URL (open in browser)</label>' +
+      '<div style="display:flex;gap:8px">' +
+      '<input id="fbOAuthUrl" readonly value="' + escHtml(r.auth_url) + '" style="flex:1;padding:8px 12px;background:var(--bg-input);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text-primary);font-family:var(--mono);font-size:12px" />' +
+      '<button class="btn-ghost" onclick="navigator.clipboard.writeText(document.getElementById(\'fbOAuthUrl\').value);this.textContent=\'Copied!\'" style="padding:8px 12px;font-size:12px;white-space:nowrap">Copy</button>' +
+      '<button class="btn-ghost" onclick="window.open(document.getElementById(\'fbOAuthUrl\').value,\'_blank\')" style="padding:8px 12px;font-size:12px;white-space:nowrap">Open</button>' +
+      '</div></div>' +
+      '<div id="fbOAuthPollStatus" style="padding:10px;border-radius:var(--radius-sm);background:var(--bg-elevated);font-size:13px;color:var(--text-tertiary)">Waiting for login... <span class="spinner"></span></div>' +
+      '<button class="btn-primary" onclick="pollFBOAuth()" style="margin-top:12px;padding:8px 16px;border-radius:var(--radius-sm);background:var(--brand);color:#fff;border:none;font-size:13px;font-weight:500;cursor:pointer">Check Status</button>';
+    // Auto-poll every 3s
+    fbOAuthPollInterval = setInterval(pollFBOAuth, 3000);
+    pollFBOAuth(); // immediate first check
+  } catch (e) {
+    content.innerHTML = '<p style="color:var(--danger);font-size:13px">Error: ' + escHtml(e.message) + '</p>';
+  }
+}
+
+var fbOAuthPollInterval = null;
+
+async function pollFBOAuth() {
+  if (!fbOAuthState) return;
+  var statusEl = document.getElementById('fbOAuthPollStatus');
+  if (!statusEl) return;
+  try {
+    var url = '/fb/oauth/device/poll?fingerprint_id=' + encodeURIComponent(fbOAuthState.fingerprint_id) +
+      '&fingerprint_hash=' + encodeURIComponent(fbOAuthState.fingerprint_hash) +
+      '&expires_at=' + encodeURIComponent(fbOAuthState.expires_at);
+    var r = await fetchJSON(url);
+    console.log('fb oauth poll response:', r);
+    if (r.status === 'ready') {
+      clearInterval(fbOAuthPollInterval);
+      statusEl.innerHTML = '<span style="color:var(--success)">✓ Login successful! Token imported.</span><br>' +
+        '<span style="font-size:12px;color:var(--text-tertiary)">Email: ' + escHtml(r.email || '—') + ' · User: ' + escHtml(r.user_id || '—') + '</span>';
+      loadFBAccounts();
+      setTimeout(function() {
+        var modal = document.getElementById('fbOAuthModal');
+        if (modal) modal.remove();
+      }, 3000);
+    } else if (r.status === 'error') {
+      clearInterval(fbOAuthPollInterval);
+      statusEl.innerHTML = '<span style="color:var(--danger)">✗ ' + escHtml(r.error || 'Unknown error') + '</span>';
+    } else {
+      statusEl.innerHTML = 'Waiting for login... <span class="spinner"></span>';
+    }
+  } catch (e) {
+    console.error('fb poll error:', e.message);
+    statusEl.innerHTML = '<span style="color:var(--danger)">Poll error: ' + escHtml(e.message) + '</span>';
+  }
+}
+
+async function deleteFBAccount(token) {
+  if (!confirm('Delete this Freebuff token?')) return;
+  try {
+    await apiFetch('/fb/accounts/' + encodeURIComponent(token), { method: 'DELETE' });
+    loadFBAccounts();
+  } catch (e) {
+    alert('Delete failed: ' + e.message);
+  }
 }
 
 /* ══════════════════════════════════════════════════════════

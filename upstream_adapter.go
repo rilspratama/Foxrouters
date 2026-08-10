@@ -59,6 +59,8 @@ const (
 var (
 	NewGrokAccountManager = upstream.NewGrokAccountManager
 	NewCBKeyManager       = upstream.NewCBKeyManager
+	NewFreebuffAccountManager = upstream.NewFreebuffAccountManager
+	FbQuotaSyncWorker         = upstream.FbQuotaSyncWorker
 
 	autoRefreshWorker   = upstream.AutoRefreshWorker
 	reenableWorker      = upstream.ReenableWorker

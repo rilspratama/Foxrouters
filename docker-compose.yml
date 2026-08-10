@@ -70,7 +70,7 @@ services:
     build:
       context: .
       args:
-        VERSION: v1.6.3
+        VERSION: v1.6.4
     image: ghcr.io/rilspratama/foxrouters:v1.6.4
     container_name: foxrouters
     ports:
