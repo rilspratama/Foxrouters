@@ -112,6 +112,11 @@ func main() {
 	if err := cbKM.LoadFromRedis(); err != nil {
 		slog.Warn("LoadFromRedis failed, starting empty", "module", "cb", "error", err)
 	}
+
+	fbAM := NewFreebuffAccountManager(db)
+	if err := fbAM.LoadFromRedis(); err != nil {
+		slog.Warn("Freebuff LoadFromRedis failed, starting empty", "module", "freebuff", "error", err)
+	}
 	LoadSelectorMode(db)                  // restore persisted CB selector mode (rr|sticky|content-hash|hybrid)
 	LoadGrokSelectorMode(db)             // restore persisted Grok selector mode
 
@@ -193,6 +198,7 @@ func main() {
 		go cbOAuthRefreshWorker(workerCtx, cbKM)
 		go cbCreditSyncWorker(workerCtx, cbKM)
 		go grokBillingSyncWorker(workerCtx, grokAM)
+		go FbQuotaSyncWorker(workerCtx, fbAM)
 	}
 	// Snapshot pool sizes into Prometheus gauges every 10s. Cheap RLock walk;
 	// keeps activeKeys/disabledKeys eventually consistent without touching the
@@ -244,7 +250,7 @@ func main() {
 	loginLimiter := newLoginLimiter()
 	r.POST("/login", loginLimiter.middleware(), handleLogin(authMgr, sessions))
 	r.POST("/logout", handleLogout(sessions))
-	r.GET("/health", handleHealth(grokAM, cbKM, hc, authMgr, sessions))
+	r.GET("/health", handleHealth(grokAM, cbKM, fbAM, hc, authMgr, sessions))
 	r.HEAD("/health", handleHealthMinimal())
 	// Prometheus scrape endpoint — admin only (exposes pool sizes, traffic
 	// patterns, circuit state). External scrapers should authenticate via
@@ -352,6 +358,13 @@ func main() {
 	r.POST("/accounts/test", csrfGuard(), adminAuth, handleTestGrokAccount(grokAM))
 	r.DELETE("/accounts/:email", csrfGuard(), adminAuth, handleDeleteAccount(grokAM))
 	r.DELETE("/cb/keys/:key", csrfGuard(), adminAuth, handleDeleteCBKey(cbKM))
+	r.POST("/fb/import", csrfGuard(), adminAuth, handleFBImport(fbAM))
+	r.POST("/fb/import/bulk", csrfGuard(), adminAuth, handleFBImportBulk(fbAM))
+	r.POST("/fb/quota/sync", csrfGuard(), adminAuth, handleFBQuotaSync(fbAM))
+	r.GET("/fb/accounts", adminAuth, handleFBAccounts(fbAM))
+	r.DELETE("/fb/accounts/:token", csrfGuard(), adminAuth, handleFBDeleteAccount(fbAM))
+	r.POST("/fb/oauth/device/start", csrfGuard(), adminAuth, handleFBDeviceStart(fbAM))
+	r.GET("/fb/oauth/device/poll", adminAuth, handleFBDevicePoll(fbAM))
 	r.POST("/cleanup/disabled", csrfGuard(), adminAuth, handleCleanupDisabled(grokAM, cbKM))
 	r.POST("/cleanup/banned", csrfGuard(), adminAuth, handleCleanupBanned(grokAM))
 	r.GET("/history", adminAuth, handleHistory(db))
@@ -399,10 +412,10 @@ func main() {
 	// anthropicAuthMiddleware (rewrites x-api-key → Authorization: Bearer).
 	r.Any("/v1/*path", func(c *gin.Context) {
 		if c.Request.URL.Path == "/v1/messages" && c.Request.Method == http.MethodPost {
-			handleMessages(grokAM, cbKM, hc, authMgr, customReg, comboReg)(c)
+			handleMessages(grokAM, cbKM, fbAM, hc, authMgr, customReg, comboReg)(c)
 			return
 		}
-		proxyRequest(grokAM, cbKM, hc, authMgr, customReg, comboReg)(c)
+		proxyRequest(grokAM, cbKM, fbAM, hc, authMgr, customReg, comboReg)(c)
 	})
 
 	r.GET("/", func(c *gin.Context) {

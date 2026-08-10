@@ -171,7 +171,7 @@ func TestModelsListIncludesCustom(t *testing.T) {
 
 	// The handler needs typed nils for the upstream managers — the /v1/models
 	// branch never touches them, so this is safe.
-	h := proxy.ProxyRequest(nil, nil, nil, nil, reg, nil)
+	h := proxy.ProxyRequest(nil, nil, nil, nil, nil, reg, nil)
 
 	r := gin.New()
 	r.GET("/v1/models", h)
@@ -211,7 +211,7 @@ func TestModelsListIncludesCustom(t *testing.T) {
 // TestModelsListNilRegistry keeps the hardcoded list working when registry is nil.
 func TestModelsListNilRegistry(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	h := proxy.ProxyRequest(nil, nil, nil, nil, nil, nil)
+	h := proxy.ProxyRequest(nil, nil, nil, nil, nil, nil, nil)
 	r := gin.New()
 	r.GET("/v1/models", h)
 	req := httptest.NewRequest("GET", "/v1/models", nil)

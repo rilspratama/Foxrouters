@@ -62,6 +62,8 @@ ensure_network() {
 dev_redis_up() {
   ensure_network
   if docker ps -a --format '{{.Names}}' | grep -qx "$DEV_REDIS_NAME"; then
+    # Graceful stop (SIGTERM) so Redis saves to disk before removal
+    docker stop "$DEV_REDIS_NAME" >/dev/null 2>&1 || true
     docker rm -f "$DEV_REDIS_NAME" >/dev/null 2>&1 || true
   fi
   docker volume create "$REDIS_VOL" >/dev/null 2>&1 || true
@@ -71,7 +73,7 @@ dev_redis_up() {
     -p "127.0.0.1:${DEV_REDIS_PORT}:6379" \
     -v "$REDIS_VOL:/data" \
     redis:7-alpine \
-    redis-server --requirepass "$DEV_REDIS_PASS" --appendonly no >/dev/null
+    redis-server --requirepass "$DEV_REDIS_PASS" --appendonly yes --save 60 1 >/dev/null
   # wait for redis ping
   for i in $(seq 1 15); do
     if docker exec "$DEV_REDIS_NAME" redis-cli -a "$DEV_REDIS_PASS" ping 2>/dev/null | grep -q PONG; then
@@ -94,6 +96,7 @@ up() {
   dev_redis_up
   # kill any stale dev gateway container
   if docker ps -a --format '{{.Names}}' | grep -qx "$DEV_NAME"; then
+    docker stop "$DEV_NAME" >/dev/null 2>&1 || true
     docker rm -f "$DEV_NAME" >/dev/null 2>&1 || true
   fi
   # ensure sqlite volume exists + owned by UID 1000 (foxrouters)

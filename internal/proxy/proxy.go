@@ -112,7 +112,7 @@ func toString(v interface{}) string {
 // Fallback combos retry on 5xx by buffering the upstream response through a
 // httptest-style recorder and only flushing to the real writer on success
 // or list exhaustion.
-func ProxyRequest(grokAM *upstream.GrokAccountManager, cbKM *upstream.CBKeyManager, hc *upstream.HealthChecker, authMgr *auth.Manager, registry *CustomRegistry, combos *ComboRegistry) gin.HandlerFunc {
+func ProxyRequest(grokAM *upstream.GrokAccountManager, cbKM *upstream.CBKeyManager, fbAM *upstream.FreebuffAccountManager, hc *upstream.HealthChecker, authMgr *auth.Manager, registry *CustomRegistry, combos *ComboRegistry) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		path := c.Request.URL.Path
 
@@ -156,6 +156,13 @@ func ProxyRequest(grokAM *upstream.GrokAccountManager, cbKM *upstream.CBKeyManag
 				{"id": "kimi-k3", "object": "model", "owned_by": "codebuddy", "reasoning": true},
 				// CodeBuddy — Default
 				{"id": "default-model", "object": "model", "owned_by": "codebuddy", "reasoning": true},
+			// Freebuff
+			{"id": "fb/deepseek-v4-flash", "object": "model", "owned_by": "freebuff", "reasoning": true},
+			{"id": "fb/mimo-v2.5", "object": "model", "owned_by": "freebuff", "reasoning": false},
+			{"id": "fb/deepseek-v4-pro", "object": "model", "owned_by": "freebuff", "reasoning": true},
+			{"id": "fb/minimax-m3", "object": "model", "owned_by": "freebuff", "reasoning": false},
+			{"id": "fb/gpt-5.6-luna", "object": "model", "owned_by": "freebuff", "reasoning": false},
+			{"id": "fb/glm-5.2", "object": "model", "owned_by": "freebuff", "reasoning": true},
 			}
 			// Backward-compat aliases: cb/<model> → same model, same upstream.
 			// Routing treats non-grok-* as CodeBuddy, so both shapes work.
@@ -371,7 +378,10 @@ func ProxyRequest(grokAM *upstream.GrokAccountManager, cbKM *upstream.CBKeyManag
 				}
 				upstream.ProxyCodeBuddy(c, b, bm, cbKM, clientStream, hc)
 			default:
-				if upstream.IsGrokModel(m) {
+				if upstream.IsFreebuffModel(m) {
+					upstreamName = "freebuff"
+					upstream.ProxyFreebuff(c, b, bm, fbAM, clientStream, hc)
+				} else if upstream.IsGrokModel(m) {
 					upstreamName = "grok"
 					upstream.ProxyGrok(c, b, grokAM, clientStream, hc, m)
 				} else {

@@ -6,10 +6,10 @@
 [![Security](https://img.shields.io/badge/security-audited%203x-brightgreen)](./CHANGELOG.md)
 [![Tests](https://img.shields.io/badge/tests-62%2F62%20PASS%20(%2Brace)-success)](./)
 
-Unified **OpenAI-compatible** API gateway that fronts **Grok** and **CodeBuddy** behind
-one `/v1/chat/completions` endpoint. Route by model prefix, round-robin across many
-upstream accounts/keys, refresh tokens automatically, enforce per-key quotas, and log
-every request/response to ClickHouse — all behind a single Bearer token.
+Unified **OpenAI-compatible** API gateway that fronts **Grok**, **CodeBuddy**, and
+**Freebuff** behind one `/v1/chat/completions` endpoint. Route by model prefix, round-robin
+across many upstream accounts/keys, refresh tokens automatically, enforce per-key quotas,
+and log every request/response to ClickHouse — all behind a single Bearer token.
 
 ---
 
@@ -33,7 +33,7 @@ every request/response to ClickHouse — all behind a single Bearer token.
 
 ## Features
 
-- **Model prefix routing** — `grok-*` → Grok, `cb/*` → CodeBuddy.
+- **Model prefix routing** — `grok-*` → Grok, `cb/*` → CodeBuddy, `fb/*` → Freebuff.
 - **Grok alias expansion** — `grok-4.5-{high,medium,low,xhigh,auto,none}` collapse
   to `grok-4.5` + injected `reasoning_effort` (client value wins if set).
 - **Multi-account / multi-key round-robin** — O(k) `Next()` on the hot path,
@@ -66,6 +66,11 @@ every request/response to ClickHouse — all behind a single Bearer token.
   open in browser, auto-poll tokens, import into pool. Dashboard Add OAuth: Manual | Login URL.
 - **Credential Test** (v1.6.2) — per-row Test for Grok + CodeBuddy (API key & OAuth).
   Probes upstream directly (`POST /accounts/test`, `POST /cb/keys/test`).
+- **Freebuff provider** (v1.6.4) — third upstream (`fb/` prefix). Free ad-supported
+  LLM via Codebuff rebrand. 6 models (deepseek-v4-flash, mimo-v2.5, deepseek-v4-pro,
+  minimax-m3, gpt-5.6-luna, glm-5.2). OAuth device flow, bulk import (pipe format),
+  quota sync + auto-cooldown, Buffy prefix auto-inject, tool calling bypass,
+  1M context auto-clamp. Dashboard: Freebuff tab + overview cards.
 - **API-key auth** with role-based access — `inference` (default, least privilege)
   can only reach `/v1/*`; `admin` reaches everything.
 - **Per-key model whitelist** with glob patterns (`grok-*`, `cb/*`, exact match).
@@ -301,6 +306,18 @@ Both modes share `www.codebuddy.ai/v2/chat/completions` and mixed RR. Credits co
 `POST /v2/billing/meter/get-user-resource` (worker every 5m + manual `/cb/credits/sync`).
 Dashboard: Type badge, Expires, Add OAuth Manual|Login URL, Bulk OAuth, Sync credits, per-row Test.
 
+### Freebuff credentials (v1.6.4+)
+
+| Method | Endpoint | Input |
+|--------|----------|-------|
+| Single token | `POST /fb/import` | `{"token":"UUID","email":"...","user_id":"..."}` |
+| Bulk (pipe format) | `POST /fb/import/bulk` | `{"raw":"token1\|email1\|userid1\ntoken2\|email2\|userid2"}` |
+| OAuth device flow | `POST /fb/oauth/device/start` | generates login URL → `GET /fb/oauth/device/poll` auto-imports |
+| Quota sync | `POST /fb/quota/sync` | `{"token":"optional"}` (empty = all) |
+
+Pipe format: `token|email|userid` — token required, email+userid optional, bare UUID also works.
+Buffy prefix auto-injected. Quota auto-synced every 5min. Auto-cooldown when exhausted.
+
 ---
 
 ## Configuration
@@ -322,6 +339,7 @@ startup).
 | `CB_KEY_FILE` | `./cb-keys.json` | Path to a JSON file of CodeBuddy keys to seed. |
 | `CPA_AUTH_DIR` | `./` | Directory scanned for `xai-*.json` Grok credential files at boot. |
 | `GATEWAY_AUTH_DISABLE` | `false` | **Dev only.** When `true`, bypasses auth on all routes. Never enable in production. |
+| `FREEBUFF_DISABLED` | `false` | When `true`, disables the Freebuff provider entirely. |
 | `COOKIE_SECURE` | `1` | Session cookie `Secure` flag. Set to `0` for dev HTTP (localhost). Default `1` = HTTPS-only. |
 
 > **Do not** commit secrets. Put the `.env` outside the repo or use `chmod 600

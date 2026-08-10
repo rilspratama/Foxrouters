@@ -61,10 +61,14 @@ func HandleHealthMinimal() gin.HandlerFunc {
 }
 
 // HandleHealth reports overall status + (when authed) per-upstream telemetry.
-func HandleHealth(grokAM *upstream.GrokAccountManager, cbKM *upstream.CBKeyManager, hc *upstream.HealthChecker, am *auth.Manager, sessions *auth.SessionStore) gin.HandlerFunc {
+func HandleHealth(grokAM *upstream.GrokAccountManager, cbKM *upstream.CBKeyManager, fbAM *upstream.FreebuffAccountManager, hc *upstream.HealthChecker, am *auth.Manager, sessions *auth.SessionStore) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		grokStats := hc.Grok.Stats()
 		cbStats := hc.CB.Stats()
+		var fbStats map[string]any
+		if hc.FB != nil {
+			fbStats = hc.FB.Stats()
+		}
 
 		// Overall status: unhealthy if any circuit is open
 		grokCircuit := grokStats["circuit_state"].(string)
@@ -72,6 +76,11 @@ func HandleHealth(grokAM *upstream.GrokAccountManager, cbKM *upstream.CBKeyManag
 		overall := "healthy"
 		if grokCircuit == "open" || cbCircuit == "open" {
 			overall = "degraded"
+		}
+		if fbStats != nil {
+			if fbCircuit, ok := fbStats["circuit_state"].(string); ok && fbCircuit == "open" {
+				overall = "degraded"
+			}
 		}
 
 		// Public response: minimal liveness only.
@@ -113,10 +122,11 @@ func HandleHealth(grokAM *upstream.GrokAccountManager, cbKM *upstream.CBKeyManag
 			"status":  overall,
 			"service": "foxrouters",
 			"version": version,
-			"mode":    "unified (grok + codebuddy)",
+			"mode":    "unified (grok + codebuddy + freebuff)",
 			"upstreams": gin.H{
 				"grok":      grokStats,
 				"codebuddy": cbStats,
+				"freebuff":  fbStats,
 			},
 			"grok_accounts": grokAM.Len(),
 			"cb_keys":       cbKM.Len(),
@@ -128,6 +138,20 @@ func HandleHealth(grokAM *upstream.GrokAccountManager, cbKM *upstream.CBKeyManag
 					}
 				}
 				return active
+			}(),
+			"fb_accounts":       fbAM.Len(),
+			"fb_quota_used":     func() float64 { t, _, _ := fbAM.QuotaSummary(); return t }(),
+			"fb_quota_limit":    func() float64 { _, t, _ := fbAM.QuotaSummary(); return t }(),
+			"fb_quota_exhausted": func() int {
+				count := 0
+				for _, a := range fbAM.ListAccounts() {
+					lr, _ := a["quota_limit"].(float64)
+					rr, _ := a["quota_recent"].(float64)
+					if lr > 0 && rr >= lr {
+						count++
+					}
+				}
+				return count
 			}(),
 			"time": time.Now().Format(time.RFC3339),
 		})

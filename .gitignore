@@ -33,3 +33,5 @@ stress_test_v2.py
 !skills/
 !skills/**
 migration-backup/
+foxrouters-dev
+.vscode/
