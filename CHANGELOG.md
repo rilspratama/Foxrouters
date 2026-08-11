@@ -41,6 +41,21 @@ Policy: **test (`go test -race`) before build/restart**. Secrets only via `.gate
   `TOKEN_REFRESH_DISABLED=1` + credential zeroing make dev safe for seeded pools.
 
 ---
+## v1.6.7 (dev, PR #5) — MoonCalendar UI overhaul (2026-08-11)
+
+### Added
+- **MoonCalendar monochrome theme** — pure black bg, `#171717` panels, Geist/Geist Mono, soft functional status colors (commits f4de2d5, a839241)
+- **Stat Card 5 (21st.dev) treatment** — inline delta + segmented quota bar on all 4 POOL cards: Grok tokens, CB credits, Freebuff sessions, Cache Hit (`ba3149d`, `bb07bf4`, `a3697d8`)
+- **Fox-network logo** (user-provided) — sidebar + login + favicon, base64 embedded (`bbce489`)
+- **Collapsible sidebar** — icon-rail toggle, localStorage persisted, mobile-safe (`5493a89`)
+- **/health aggregate fields** — `grok_active`, `grok_tokens_used`, `grok_tokens_quota` (`bb07bf4`)
+
+### Fixed
+- White-on-white primary buttons (25 occurrences) (`a839241`)
+- Stat cards stretch per-section (auto-fit sub-grids) (`8ed4a3f`)
+- Proxies + Tunnel cards missing `.stats-cards` wrapper → vertical stack (`8aba73d`)
+- History detail: Freebuff stream rows raw SSE broke JSON parse — aggregated + `json.Valid` guard (`42f0b84`)
+
 ## v1.6.6 — Tier detection, per-model quota, dynamic model registry (2026-08-11)
 
 > Ship: Freebuff access-tier detection + premium gating, per-model quota
