@@ -1036,7 +1036,11 @@ body {
         <div class="stats-cards">
         <div class="stat-card">
           <div class="stat-label">Grok Accounts</div>
-          <div class="stat-value" id="grokCount">—</div>
+          <div class="stat-value-row">
+            <div class="stat-value" id="grokCount">—</div>
+            <span class="stat-delta" id="grokDelta"></span>
+          </div>
+          <div class="stat-bar" id="grokBar"><div class="stat-bar-seg used" id="grokBarUsed" style="width:0%"></div><div class="stat-bar-seg rest" id="grokBarRest" style="width:0%"></div></div>
           <div class="stat-sub" id="grokActive"></div>
         </div>
         <div class="stat-card">
@@ -2172,6 +2176,20 @@ async function refresh() {
 
     // Stats grid
     document.getElementById('grokCount').textContent = health.grok_accounts;
+    var gDeltaEl = document.getElementById('grokDelta');
+    var gBarUsedEl = document.getElementById('grokBarUsed');
+    var gBarRestEl = document.getElementById('grokBarRest');
+    if (health.grok_tokens_quota > 0) {
+      var gPct = Math.round(health.grok_tokens_used / health.grok_tokens_quota * 100);
+      var gClass = gPct >= 100 ? 'err' : (gPct >= 80 ? 'warn' : 'ok');
+      if (gDeltaEl) { gDeltaEl.textContent = gPct + '%'; gDeltaEl.className = 'stat-delta ' + gClass; }
+      if (gBarUsedEl && gBarRestEl) {
+        var gw = Math.min(100, gPct);
+        gBarUsedEl.style.width = gw + '%';
+        gBarRestEl.style.width = (100 - gw) + '%';
+        gBarUsedEl.className = 'stat-bar-seg used' + (gPct >= 100 ? ' err' : (gPct >= 80 ? ' warn' : ''));
+      }
+    } else if (gDeltaEl) { gDeltaEl.textContent = ''; gDeltaEl.className = 'stat-delta'; }
     document.getElementById('cbCount').textContent = health.cb_keys;
     document.getElementById('cbActive').innerHTML = '<span class="ok">' + health.cb_keys_active + ' active</span>';
     document.getElementById('models').textContent = models.data ? models.data.length : '—';
