@@ -295,10 +295,17 @@ body {
 
 /* ── Stats Grid ── */
 .stats-grid {
+  display: block;
+  margin-bottom: 8px;
+}
+
+/* Per-section sub-grid: auto-fit collapses empty tracks so each
+   section's cards stretch to fill the full row width (fixes empty
+   space on the right when a section has < track-count cards). */
+.stats-cards {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   gap: 8px;
-  margin-bottom: 8px;
 }
 
 .stats-section {
@@ -308,7 +315,6 @@ body {
   text-transform: uppercase;
   letter-spacing: 0.08em;
   margin: 14px 0 6px;
-  grid-column: 1 / -1;
 }
 
 .stats-section:first-child { margin-top: 0; }
@@ -989,6 +995,7 @@ body {
       <!-- Stats Grid -->
       <div class="stats-grid" id="statsGrid">
         <div class="stats-section">Pool</div>
+        <div class="stats-cards">
         <div class="stat-card">
           <div class="stat-label">Grok Accounts</div>
           <div class="stat-value" id="grokCount">—</div>
@@ -1014,8 +1021,10 @@ body {
           <div class="stat-value" id="cacheHitAvg">—</div>
           <div class="stat-sub" id="cacheHitSub">prompt cache</div>
         </div>
+        </div>
 
         <div class="stats-section">Performance (24h)</div>
+        <div class="stats-cards">
         <div class="stat-card">
           <div class="stat-label">Total Tokens</div>
           <div class="stat-value" id="totalTokens">—</div>
@@ -1041,8 +1050,10 @@ body {
           <div class="stat-value" id="avgLatencyVal">—</div>
           <div class="stat-sub">all requests</div>
         </div>
+        </div>
 
         <div class="stats-section">Health</div>
+        <div class="stats-cards">
         <div class="stat-card">
           <div class="stat-label">Grok Circuit</div>
           <div class="stat-value" id="grokCircuit" style="font-size:15px;padding-top:2px">—</div>
@@ -1072,6 +1083,7 @@ body {
           <div class="stat-label">FB Errors</div>
           <div class="stat-value" id="fbErrors">—</div>
           <div class="stat-sub" id="fbErrRate"></div>
+        </div>
         </div>
       </div>
 
