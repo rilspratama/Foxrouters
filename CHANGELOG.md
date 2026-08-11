@@ -2,7 +2,7 @@
 
 **Service:** Docker Compose (`foxrouters` container) · port **20130** · image local / GHCR  
 **Repo:** `/root/nexus-workspace/foxrouters/`  
-**Live version:** `const Version` in `main.go` / image tag (currently **v1.6.4**)
+**Live version:** `const Version` in `main.go` / image tag (currently **v1.6.6**)
 
 Policy: **test (`go test -race`) before build/restart**. Secrets only via `.gateway.env` (gitignored).
 
@@ -41,7 +41,13 @@ Policy: **test (`go test -race`) before build/restart**. Secrets only via `.gate
   `TOKEN_REFRESH_DISABLED=1` + credential zeroing make dev safe for seeded pools.
 
 ---
-## v1.6.5 (working tree, not released) — Freebuff provider integration (2026-08-10)
+## v1.6.6 — Tier detection, per-model quota, dynamic model registry (2026-08-11)
+
+> Ship: Freebuff access-tier detection + premium gating, per-model quota
+> snapshot (expandable dashboard rows), dynamic model registry (Freebuff +
+> Grok fetched from upstream, 6h refresh, static fallback), session/run cache
+> persisted to Redis, freebuff proxy-pool scope, informative errors.
+> Fix: test GatewayID lookup (fb/glm-5.2).
 
 ### Added
 - **Dynamic model registry** (`internal/upstream/model_registry.go`) — Freebuff +
