@@ -49,6 +49,19 @@ Policy: **test (`go test -race`) before build/restart**. Secrets only via `.gate
 > persisted to Redis, freebuff proxy-pool scope, informative errors.
 > Fix: test GatewayID lookup (fb/glm-5.2).
 
+### Fixed (post-ship hotfix)
+- **History detail: empty response for Freebuff rows** — the streaming
+  `ProxyFreebuff` path stored the raw SSE text (`data: {...}` lines) as
+  `response_body`, which is NOT valid JSON. `json.RawMessage` marshaling
+  failed → `/history/detail/:id` returned HTTP 200 with empty body →
+  dashboard "Failed to execute 'json' on 'Response': Unexpected end of JSON
+  input" for FB rows only (Grok/CB store proper JSON).
+  - `ProxyFreebuff` stream path now aggregates the captured SSE into the same
+    JSON shape as the non-stream path (via `fbStreamToNonStream`) + sets
+    `output_text` for stream previews.
+  - `GetRequestDetail` (sqlite) wraps any non-JSON body as a JSON string
+    (`json.Valid` guard) so legacy/broken rows never break the detail view.
+
 ### Added
 - **Dynamic model registry** (`internal/upstream/model_registry.go`) — Freebuff +
   Grok model lists now refresh from upstream sources every 6h (workers gated by

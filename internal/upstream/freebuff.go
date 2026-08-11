@@ -1746,7 +1746,11 @@ func ProxyFreebuff(c *gin.Context, body []byte, bodyMap map[string]any, am *Free
 				}
 			}
 
-			// Set tokens + response_body for logging
+			// Set tokens + response_body for logging.
+			// Store an AGGREGATED JSON object (same shape as the non-stream
+			// path) instead of the raw SSE text — raw `data: {...}` lines are
+			// not valid JSON and break history-detail marshaling (RawMessage
+			// MarshalJSON error → empty response in the dashboard).
 			if streamUsage != nil {
 				if pt, ok := streamUsage["prompt_tokens"].(float64); ok {
 					c.Set("tokens_in", int(pt))
@@ -1754,8 +1758,22 @@ func ProxyFreebuff(c *gin.Context, body []byte, bodyMap map[string]any, am *Free
 				if ct, ok := streamUsage["completion_tokens"].(float64); ok {
 					c.Set("tokens_out", int(ct))
 				}
-				// Store stream body for cache_hit_pct extraction
-				c.Set("response_body", json.RawMessage(streamBuf.String()))
+			}
+			if agg := fbStreamToNonStream(strings.NewReader(streamBuf.String()), upstreamModel); agg != nil {
+				if aggBytes, err := json.Marshal(agg); err == nil {
+					c.Set("response_body", json.RawMessage(aggBytes))
+				}
+				// output_text for dashboard preview (stream clients don't get
+				// it through the SSE passthrough).
+				if msg, ok := agg["choices"].([]any); ok && len(msg) > 0 {
+					if choice, ok := msg[0].(map[string]any); ok {
+						if m, ok := choice["message"].(map[string]any); ok {
+							if content, ok := m["content"].(string); ok {
+								c.Set("output_text", content)
+							}
+						}
+					}
+				}
 			}
 
 			// Increment hourly session counter
