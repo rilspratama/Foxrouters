@@ -129,6 +129,25 @@ func HandleHealth(grokAM *upstream.GrokAccountManager, cbKM *upstream.CBKeyManag
 				"freebuff":  fbStats,
 			},
 			"grok_accounts": grokAM.Len(),
+			"grok_active": func() int {
+				active := 0
+				for _, a := range grokAM.GetAll() {
+					if s := a.Snapshot(); !s.Disabled {
+						active++
+					}
+				}
+				return active
+			}(),
+			"grok_tokens_used": func() int64 {
+				var total int64
+				for _, a := range grokAM.GetAll() {
+					total += a.Snapshot().TokensUsed
+				}
+				return total
+			}(),
+			"grok_tokens_quota": func() int64 {
+				return int64(upstream.GROK_FREE_TIER_QUOTA) * int64(grokAM.Len())
+			}(),
 			"cb_keys":       cbKM.Len(),
 			"cb_keys_active": func() int {
 				active := 0

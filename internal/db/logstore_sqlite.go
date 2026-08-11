@@ -433,11 +433,22 @@ func (s *sqliteStore) GetRequestDetail(ctx context.Context, id uint64) (*Request
 	}
 	d.ID = strconv.FormatInt(rawID, 10)
 	d.Timestamp = ts.UTC().Format("2006-01-02 15:04:05")
+	// Bodies must be valid JSON for json.RawMessage marshaling. Some legacy /
+	// streamed rows hold raw SSE text (`data: {...}` lines) which is NOT valid
+	// JSON — wrap those as a JSON string so the dashboard never fails to load.
 	if reqBody != "" {
-		d.RequestBody = []byte(reqBody)
+		if json.Valid([]byte(reqBody)) {
+			d.RequestBody = []byte(reqBody)
+		} else {
+			d.RequestBody, _ = json.Marshal(reqBody)
+		}
 	}
 	if respBody != "" {
-		d.ResponseBody = []byte(respBody)
+		if json.Valid([]byte(respBody)) {
+			d.ResponseBody = []byte(respBody)
+		} else {
+			d.ResponseBody, _ = json.Marshal(respBody)
+		}
 	}
 	return &d, nil
 }

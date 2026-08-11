@@ -5,73 +5,74 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="referrer" content="no-referrer">
 <title>FoxRouters</title>
+<link rel="icon" type="image/png" href="data:image/png;base64,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">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;510;590;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
 /* ──────────────────────────────────────────────────────────
-   Design System: Linear.app Dark Theme
-   Backgrounds: #08090a (page), #0f1011 (panel), #191a1b (elevated)
-   Text: #f7f8f8, #d0d6e0, #8a8f98, #62666d
-   Brand: #5e6ad2, #7170ff, #828fff
-   Borders: rgba(255,255,255,0.05–0.08)
-   No shadows — luminance stepping for elevation
+   Design System: MoonCalendar (21st.dev) — monochrome dark
+   Backgrounds: #000000 (page), #171717 (panel), #1f1f1f (elevated)
+   Text: #ffffff, #b3b3b3, #8c8c8c, #5c5c5c
+   Brand: white (monochrome) — functional status colors only
+   Borders: #2a2a2a — luminance stepping for elevation
+   Fonts: Geist / Geist Mono (fallback Inter/system)
    ────────────────────────────────────────────────────────── */
 :root {
-  /* Backgrounds — refined dark (GitHub-dark inspired) */
-  --bg:           #0d1117;
-  --bg-panel:     #161b22;
-  --bg-elevated:  #21262d;
-  --bg-hover:     rgba(255,255,255,0.04);
-  --bg-input:     #0d1117;
+  /* Backgrounds — MoonCalendar monochrome (pure black + grey steps) */
+  --bg:           #000000;
+  --bg-panel:     #171717;
+  --bg-elevated:  #1f1f1f;
+  --bg-hover:     rgba(255,255,255,0.05);
+  --bg-input:     #171717;
 
   /* Text */
-  --text-primary:    #e6edf3;
-  --text-secondary:  #9dabb8;
-  --text-tertiary:   #6e7681;
-  --text-quaternary: #484f58;
+  --text-primary:    #ffffff;
+  --text-secondary:  #b3b3b3;
+  --text-tertiary:   #9c9c9c;
+  --text-quaternary: #6b6b6b;
 
-  /* Brand — indigo */
-  --brand:       #6366f1;
-  --brand-hover: #818cf8;
-  --brand-violet:#7170ff;
-  --brand-bg:    rgba(99,102,241,0.10);
-  --brand-subtle:rgba(99,102,241,0.15);
+  /* Brand — monochrome white */
+  --brand:       #ffffff;
+  --brand-hover: rgba(255,255,255,0.82);
+  --brand-violet:#ffffff;
+  --brand-bg:    rgba(255,255,255,0.08);
+  --brand-subtle:rgba(255,255,255,0.14);
 
   /* Borders */
-  --border:        #30363d;
-  --border-strong: rgba(255,255,255,0.10);
-  --border-bright: rgba(255,255,255,0.16);
-  --border-muted:  #21262d;
+  --border:        #2a2a2a;
+  --border-strong: rgba(255,255,255,0.12);
+  --border-bright: rgba(255,255,255,0.20);
+  --border-muted:  #242424;
 
-  /* Status */
-  --green:   #3fb950;
-  --emerald: #10b981;
-  --green-subtle: rgba(63,185,80,0.12);
-  --red:     #f85149;
-  --red-subtle:   rgba(248,81,73,0.12);
-  --orange:  #f59e0b;
-  --yellow:  #eab308;
-  --yellow-subtle:rgba(234,179,8,0.12);
+  /* Status — functional, restrained on monochrome */
+  --green:   #4ade80;
+  --emerald: #34d399;
+  --green-subtle: rgba(74,222,128,0.12);
+  --red:     #f87171;
+  --red-subtle:   rgba(248,113,113,0.12);
+  --orange:  #fbbf24;
+  --yellow:  #fbbf24;
+  --yellow-subtle:rgba(251,191,36,0.12);
 
-  /* Radius */
-  --radius:    8px;
-  --radius-sm: 6px;
-  --radius-xs: 4px;
-  --radius-lg: 12px;
+  /* Radius — MoonCalendar 0.375rem */
+  --radius:    6px;
+  --radius-sm: 4px;
+  --radius-xs: 3px;
+  --radius-lg: 10px;
 
-  /* Shadows — subtle elevation */
-  --shadow-card:   0 1px 3px rgba(0,0,0,0.3);
-  --shadow-hover:  0 4px 12px rgba(0,0,0,0.35);
-  --shadow-modal:  0 8px 32px rgba(0,0,0,0.5);
+  /* Shadows — subtle elevation on black */
+  --shadow-card:   0 1px 3px rgba(0,0,0,0.5);
+  --shadow-hover:  0 4px 12px rgba(0,0,0,0.55);
+  --shadow-modal:  0 8px 32px rgba(0,0,0,0.7);
 
   /* Spacing scale (4px base) */
   --sp-1: 4px; --sp-2: 8px; --sp-3: 12px; --sp-4: 16px;
   --sp-5: 20px; --sp-6: 24px; --sp-8: 32px; --sp-10: 40px; --sp-12: 48px;
 
-  /* Typography */
-  --font: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
-  --mono: 'JetBrains Mono', 'Fira Code', 'SF Mono', Menlo, monospace;
+  /* Typography — Geist (MoonCalendar) */
+  --font: 'Geist', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  --mono: 'Geist Mono', 'JetBrains Mono', 'Fira Code', 'SF Mono', Menlo, monospace;
 
   /* Transitions */
   --tc: 150ms ease;
@@ -130,14 +131,13 @@ body {
   width: 28px;
   height: 28px;
   border-radius: var(--radius-sm);
-  background: var(--brand);
+  background: transparent;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 14px;
   flex-shrink: 0;
-  color: #fff;
-  box-shadow: 0 1px 3px rgba(99,102,241,0.4);
+  border: 1px solid rgba(255,255,255,0.08);
+  overflow: hidden;
 }
 
 .sidebar-brand .title {
@@ -199,7 +199,7 @@ body {
 }
 
 .nav-item.active {
-  background: rgba(255,255,255,0.04);
+  background: rgba(255,255,255,0.08);
   color: var(--text-primary);
 }
 
@@ -211,6 +211,33 @@ body {
 }
 
 .nav-item.active svg { opacity: 1; }
+
+/* ── Sidebar collapse (icon rail) ── */
+.sidebar { transition: width 200ms ease; }
+.sidebar.collapsed { width: 60px; }
+.sidebar.collapsed .sidebar-brand { justify-content: center; padding: 18px 0 16px; }
+.sidebar.collapsed .sidebar-brand .title,
+.sidebar.collapsed .sidebar-brand .version,
+.sidebar.collapsed .nav-section-label,
+.sidebar.collapsed .nav-item span,
+.sidebar.collapsed .sidebar-footer { display: none; }
+.sidebar.collapsed .nav-item { font-size: 0; gap: 0; justify-content: center; padding: 7px 0; }
+.sidebar.collapsed .nav-item svg { width: 18px; height: 18px; }
+.sidebar-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.sidebar-toggle:hover { border-color: var(--border-bright); color: var(--text-primary); }
+.sidebar-toggle svg { width: 16px; height: 16px; }
 
 .sidebar-footer {
   padding: 12px 18px;
@@ -295,10 +322,17 @@ body {
 
 /* ── Stats Grid ── */
 .stats-grid {
+  display: block;
+  margin-bottom: 8px;
+}
+
+/* Per-section sub-grid: auto-fit collapses empty tracks so each
+   section's cards stretch to fill the full row width (fixes empty
+   space on the right when a section has < track-count cards). */
+.stats-cards {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   gap: 8px;
-  margin-bottom: 8px;
 }
 
 .stats-section {
@@ -308,7 +342,6 @@ body {
   text-transform: uppercase;
   letter-spacing: 0.08em;
   margin: 14px 0 6px;
-  grid-column: 1 / -1;
 }
 
 .stats-section:first-child { margin-top: 0; }
@@ -338,8 +371,9 @@ body {
 }
 
 .stat-card .stat-value {
+  font-family: var(--mono);
   font-size: 19px;
-  font-weight: 590;
+  font-weight: 600;
   letter-spacing: -0.02em;
   font-feature-settings: "tnum";
   color: var(--text-primary);
@@ -355,6 +389,44 @@ body {
 .stat-card .stat-sub .ok { color: var(--green); }
 .stat-card .stat-sub .err { color: var(--red); }
 .stat-card .stat-sub .warn { color: var(--orange); }
+
+/* Card-5 style: value + inline delta (21st.dev Statistic Card 5) */
+.stat-value-row {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  line-height: 1.2;
+}
+.stat-delta {
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.stat-delta.ok   { color: var(--green); }
+.stat-delta.warn { color: var(--orange); }
+.stat-delta.err  { color: var(--red); }
+
+/* Segmented quota bar (Card 5 segmented progress bar) */
+.stat-bar {
+  display: flex;
+  gap: 2px;
+  height: 8px;
+  margin-top: 10px;
+  border-radius: 2px;
+  overflow: hidden;
+  background: rgba(255,255,255,0.06);
+}
+.stat-bar-seg {
+  height: 100%;
+  border-radius: 1px;
+  transition: width 300ms ease;
+}
+.stat-bar-seg.used { background: var(--green); }
+.stat-bar-seg.used.warn { background: var(--orange); }
+.stat-bar-seg.used.err  { background: var(--red); }
+.stat-bar-seg.rest { background: rgba(255,255,255,0.14); }
+.stat-bar-seg.neutral { background: rgba(255,255,255,0.85); }
 
 /* ── Circuit Badge (pill) ── */
 .circuit-badge {
@@ -545,7 +617,7 @@ body {
 
 .btn-primary {
   background: var(--brand);
-  color: #fff;
+  color: #000;
   border: none;
   border-radius: var(--radius-sm);
   padding: 8px 18px;
@@ -557,12 +629,12 @@ body {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  box-shadow: 0 1px 2px rgba(99,102,241,0.3);
+  box-shadow: 0 1px 2px rgba(255,255,255,0.12);
 }
 
 .btn-primary:hover {
   background: var(--brand-hover);
-  box-shadow: 0 2px 8px rgba(99,102,241,0.4);
+  box-shadow: 0 2px 8px rgba(255,255,255,0.15);
   transform: translateY(-1px);
 }
 .btn-primary:active { transform: translateY(0); }
@@ -896,6 +968,12 @@ body {
 @media (max-width: 700px) {
   body { flex-direction: column; }
   .sidebar { width: 100%; height: auto; min-height: auto; position: relative; }
+  .sidebar.collapsed { width: 100%; }
+  .sidebar.collapsed .sidebar-brand { justify-content: flex-start; padding: 18px 18px 16px; }
+  .sidebar.collapsed .sidebar-brand .title,
+  .sidebar.collapsed .sidebar-brand .version { display: inline; }
+  .sidebar.collapsed .nav-item { font-size: 13.5px; gap: 10px; justify-content: flex-start; padding: 7px 10px; }
+  .sidebar.collapsed .sidebar-footer { display: block; }
   .sidebar-nav { flex-direction: row; flex-wrap: wrap; }
   .nav-section-label { display: none; }
   .content { padding: 16px; }
@@ -912,21 +990,7 @@ body {
 <aside class="sidebar">
   <div class="sidebar-brand">
     <div class="logo">
-      <svg width="20" height="20" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
-        <!-- Fox ears -->
-        <path d="M8 4L11 12L6 10L8 4Z" fill="currentColor"/>
-        <path d="M24 4L21 12L26 10L24 4Z" fill="currentColor"/>
-        <!-- Fox head (rounded) -->
-        <path d="M16 7C11 7 7 11 7 16C7 20 10 23 16 25C22 23 25 20 25 16C25 11 21 7 16 7Z" fill="currentColor"/>
-        <!-- Router signal arcs (white cutout) -->
-        <path d="M12 15C13 14 14 14 16 14C18 14 19 14 20 15" stroke="rgba(255,255,255,0.9)" stroke-width="1.2" stroke-linecap="round" fill="none"/>
-        <path d="M11 17C13 16 14.5 16 16 16C17.5 16 19 16 21 17" stroke="rgba(255,255,255,0.7)" stroke-width="1.2" stroke-linecap="round" fill="none"/>
-        <!-- Eyes -->
-        <circle cx="13" cy="13" r="1.2" fill="rgba(255,255,255,0.95)"/>
-        <circle cx="19" cy="13" r="1.2" fill="rgba(255,255,255,0.95)"/>
-        <!-- Nose -->
-        <circle cx="16" cy="19" r="1" fill="rgba(255,255,255,0.9)"/>
-      </svg>
+      <img src="data:image/png;base64,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" width="24" height="24" alt="FoxRouters" style="display:block;border-radius:6px" />
     </div>
     <span class="title">FoxRouters</span>
     <span class="version" id="version">v5.7</span>
@@ -973,6 +1037,9 @@ body {
 <!-- ═══════════════════ MAIN ═══════════════════ -->
 <div class="main">
   <div class="topbar">
+    <button class="sidebar-toggle" onclick="toggleSidebar()" title="Toggle sidebar">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="3" x2="9" y2="21"/></svg>
+    </button>
     <span class="topbar-title" id="pageTitle">Dashboard</span>
     <div class="topbar-spacer"></div>
     <div class="topbar-meta">
@@ -988,19 +1055,32 @@ body {
       <!-- Stats Grid -->
       <div class="stats-grid" id="statsGrid">
         <div class="stats-section">Pool</div>
+        <div class="stats-cards">
         <div class="stat-card">
           <div class="stat-label">Grok Accounts</div>
-          <div class="stat-value" id="grokCount">—</div>
+          <div class="stat-value-row">
+            <div class="stat-value" id="grokCount">—</div>
+            <span class="stat-delta" id="grokDelta"></span>
+          </div>
+          <div class="stat-bar" id="grokBar"><div class="stat-bar-seg used" id="grokBarUsed" style="width:0%"></div><div class="stat-bar-seg rest" id="grokBarRest" style="width:0%"></div></div>
           <div class="stat-sub" id="grokActive"></div>
         </div>
         <div class="stat-card">
           <div class="stat-label">CB Keys</div>
-          <div class="stat-value" id="cbCount">—</div>
+          <div class="stat-value-row">
+            <div class="stat-value" id="cbCount">—</div>
+            <span class="stat-delta" id="cbDelta"></span>
+          </div>
+          <div class="stat-bar" id="cbBar"><div class="stat-bar-seg used" id="cbBarUsed" style="width:0%"></div><div class="stat-bar-seg rest" id="cbBarRest" style="width:0%"></div></div>
           <div class="stat-sub" id="cbActive"></div>
         </div>
         <div class="stat-card">
           <div class="stat-label">Freebuff</div>
-          <div class="stat-value" id="fbCount">—</div>
+          <div class="stat-value-row">
+            <div class="stat-value" id="fbCount">—</div>
+            <span class="stat-delta" id="fbDelta"></span>
+          </div>
+          <div class="stat-bar" id="fbBar"><div class="stat-bar-seg used" id="fbBarUsed" style="width:0%"></div><div class="stat-bar-seg rest" id="fbBarRest" style="width:0%"></div></div>
           <div class="stat-sub" id="fbQuota"></div>
         </div>
         <div class="stat-card">
@@ -1011,10 +1091,13 @@ body {
         <div class="stat-card">
           <div class="stat-label">Cache Hit (24h)</div>
           <div class="stat-value" id="cacheHitAvg">—</div>
+          <div class="stat-bar" id="cacheBar"><div class="stat-bar-seg neutral" id="cacheBarSeg" style="width:0%"></div></div>
           <div class="stat-sub" id="cacheHitSub">prompt cache</div>
+        </div>
         </div>
 
         <div class="stats-section">Performance (24h)</div>
+        <div class="stats-cards">
         <div class="stat-card">
           <div class="stat-label">Total Tokens</div>
           <div class="stat-value" id="totalTokens">—</div>
@@ -1040,8 +1123,10 @@ body {
           <div class="stat-value" id="avgLatencyVal">—</div>
           <div class="stat-sub">all requests</div>
         </div>
+        </div>
 
         <div class="stats-section">Health</div>
+        <div class="stats-cards">
         <div class="stat-card">
           <div class="stat-label">Grok Circuit</div>
           <div class="stat-value" id="grokCircuit" style="font-size:15px;padding-top:2px">—</div>
@@ -1071,6 +1156,7 @@ body {
           <div class="stat-label">FB Errors</div>
           <div class="stat-value" id="fbErrors">—</div>
           <div class="stat-sub" id="fbErrRate"></div>
+        </div>
         </div>
       </div>
 
@@ -1237,7 +1323,7 @@ body {
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg>
           <h3>Gateway API Keys</h3>
           <div style="margin-left:auto;display:flex;gap:8px">
-            <button class="btn-primary" onclick="showCreateKeyModal()" style="display:flex;align-items:center;gap:6px;padding:6px 14px;border-radius:var(--radius-sm);background:var(--brand);color:#fff;border:none;font-size:13px;font-weight:500;cursor:pointer">
+            <button class="btn-primary" onclick="showCreateKeyModal()" style="display:flex;align-items:center;gap:6px;padding:6px 14px;border-radius:var(--radius-sm);background:var(--brand);color:#000;border:none;font-size:13px;font-weight:500;cursor:pointer">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>
               Create Key
             </button>
@@ -1333,7 +1419,7 @@ body {
               <label style="font-size:11px;color:var(--text-tertiary);display:block;margin-bottom:4px">Description (optional)</label>
               <input type="text" id="cbxDesc" placeholder="GPT then Claude" style="width:100%;padding:6px 10px;background:var(--bg);border:1px solid var(--border-strong);border-radius:var(--radius-sm);color:var(--text-primary);font-size:12px" />
             </div>
-            <button class="btn-primary" onclick="addCombo()" style="padding:7px 14px;border-radius:var(--radius-sm);background:var(--brand);color:#fff;border:none;font-size:12px;font-weight:500;cursor:pointer">+ Create</button>
+            <button class="btn-primary" onclick="addCombo()" style="padding:7px 14px;border-radius:var(--radius-sm);background:var(--brand);color:#000;border:none;font-size:12px;font-weight:500;cursor:pointer">+ Create</button>
           </div>
           <div style="margin-bottom:12px">
             <label style="font-size:11px;color:var(--text-tertiary);display:block;margin-bottom:4px">Models</label>
@@ -1399,7 +1485,7 @@ body {
               <label style="font-size:11px;color:var(--text-tertiary);display:block;margin-bottom:4px">Owned By</label>
               <input type="text" id="cmOwnedBy" placeholder="codebuddy" style="width:100%;padding:6px 10px;background:var(--bg);border:1px solid var(--border-strong);border-radius:var(--radius-sm);color:var(--text-primary);font-size:12px" />
             </div>
-            <button class="btn-primary" onclick="addCustomModel()" style="padding:7px 14px;border-radius:var(--radius-sm);background:var(--brand);color:#fff;border:none;font-size:12px;font-weight:500;cursor:pointer">+ Add</button>
+            <button class="btn-primary" onclick="addCustomModel()" style="padding:7px 14px;border-radius:var(--radius-sm);background:var(--brand);color:#000;border:none;font-size:12px;font-weight:500;cursor:pointer">+ Add</button>
           </div>
           <div id="cmError" style="display:none;color:var(--red);font-size:12px;padding:6px 10px;background:rgba(255,80,80,0.08);border-radius:var(--radius-sm);margin-bottom:8px"></div>
           <table style="width:100%;border-collapse:collapse;font-size:12px">
@@ -1438,7 +1524,7 @@ body {
               <label style="font-size:11px;color:var(--text-tertiary);display:block;margin-bottom:4px">Target Model ID</label>
               <input type="text" id="alTarget" placeholder="cb/claude-sonnet-4.6" style="width:100%;padding:6px 10px;background:var(--bg);border:1px solid var(--border-strong);border-radius:var(--radius-sm);color:var(--text-primary);font-size:12px;font-family:var(--mono)" />
             </div>
-            <button class="btn-primary" onclick="addAlias()" style="padding:7px 14px;border-radius:var(--radius-sm);background:var(--brand);color:#fff;border:none;font-size:12px;font-weight:500;cursor:pointer">+ Add</button>
+            <button class="btn-primary" onclick="addAlias()" style="padding:7px 14px;border-radius:var(--radius-sm);background:var(--brand);color:#000;border:none;font-size:12px;font-weight:500;cursor:pointer">+ Add</button>
           </div>
           <div id="alError" style="display:none;color:var(--red);font-size:12px;padding:6px 10px;background:rgba(255,80,80,0.08);border-radius:var(--radius-sm);margin-bottom:8px"></div>
           <table style="width:100%;border-collapse:collapse;font-size:12px">
@@ -1522,7 +1608,7 @@ body {
             </div>
             <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:20px">
               <button class="btn-ghost" onclick="closeKeyModal()">Cancel</button>
-              <button id="keyModalSave" class="btn-primary" onclick="saveKeyModal()" style="padding:8px 16px;border-radius:var(--radius-sm);background:var(--brand);color:#fff;border:none;font-size:13px;font-weight:500;cursor:pointer">Create</button>
+              <button id="keyModalSave" class="btn-primary" onclick="saveKeyModal()" style="padding:8px 16px;border-radius:var(--radius-sm);background:var(--brand);color:#000;border:none;font-size:13px;font-weight:500;cursor:pointer">Create</button>
             </div>
           </div>
         </div>
@@ -1532,6 +1618,7 @@ body {
     <!-- ════════ PAGE 5: PROXIES (v1.5.0) ════════ -->
     <div class="page" id="page-proxies">
       <div class="stats-grid" id="proxyStatsGrid">
+        <div class="stats-cards">
         <div class="stat-card">
           <div class="stat-label">Total Proxies</div>
           <div class="stat-value" id="proxyTotal">—</div>
@@ -1552,6 +1639,7 @@ body {
           <div class="stat-value" id="proxyActive">—</div>
           <div class="stat-sub">recently routed</div>
         </div>
+        </div>
       </div>
 
       <div class="panel">
@@ -1560,7 +1648,7 @@ body {
           <h3>Proxy Pool</h3>
           <span class="head-meta" id="proxyPoolMeta"></span>
           <div style="margin-left:auto;display:flex;gap:8px">
-            <button class="btn-primary" onclick="showAddProxyModal()" style="padding:6px 14px;border-radius:var(--radius-sm);background:var(--brand);color:#fff;border:none;font-size:12px;font-weight:500;cursor:pointer">+ Add Proxy</button>
+            <button class="btn-primary" onclick="showAddProxyModal()" style="padding:6px 14px;border-radius:var(--radius-sm);background:var(--brand);color:#000;border:none;font-size:12px;font-weight:500;cursor:pointer">+ Add Proxy</button>
             <button class="btn-ghost" onclick="loadProxies()" style="padding:6px 12px;font-size:12px">Refresh</button>
           </div>
         </div>
@@ -1635,7 +1723,7 @@ body {
           <div id="pxError" style="display:none;color:var(--red);font-size:12px;padding:6px 10px;background:rgba(255,80,80,0.08);border-radius:var(--radius-sm)"></div>
           <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:8px">
             <button class="btn-ghost" onclick="closeAddProxyModal()" style="padding:8px 14px;font-size:12px">Cancel</button>
-            <button class="btn-primary" onclick="addProxy()" style="padding:8px 14px;border-radius:var(--radius-sm);background:var(--brand);color:#fff;border:none;font-size:12px;font-weight:500;cursor:pointer">Add Proxy</button>
+            <button class="btn-primary" onclick="addProxy()" style="padding:8px 14px;border-radius:var(--radius-sm);background:var(--brand);color:#000;border:none;font-size:12px;font-weight:500;cursor:pointer">Add Proxy</button>
           </div>
         </div>
       </div>
@@ -1701,7 +1789,7 @@ body {
           <div id="epxError" style="display:none;color:var(--red);font-size:12px;padding:6px 10px;background:rgba(255,80,80,0.08);border-radius:var(--radius-sm)"></div>
           <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:8px">
             <button class="btn-ghost" onclick="closeEditProxyModal()" style="padding:8px 14px;font-size:12px">Cancel</button>
-            <button class="btn-primary" onclick="saveEditProxy()" style="padding:8px 14px;border-radius:var(--radius-sm);background:var(--brand);color:#fff;border:none;font-size:12px;font-weight:500;cursor:pointer">Save</button>
+            <button class="btn-primary" onclick="saveEditProxy()" style="padding:8px 14px;border-radius:var(--radius-sm);background:var(--brand);color:#000;border:none;font-size:12px;font-weight:500;cursor:pointer">Save</button>
           </div>
         </div>
       </div>
@@ -1710,6 +1798,7 @@ body {
     <!-- ════════ PAGE 6: TUNNEL (v1.6.0) ════════ -->
     <div class="page" id="page-tunnel">
       <div class="stats-grid">
+        <div class="stats-cards">
         <div class="stat-card">
           <div class="stat-label">Mode</div>
           <div class="stat-value" id="tunModeVal" style="font-size:20px">—</div>
@@ -1730,6 +1819,7 @@ body {
           <div class="stat-value" id="tunUpstreamVal" style="font-size:14px;font-family:var(--mono)">—</div>
           <div class="stat-sub">cloudflared → gateway</div>
         </div>
+        </div>
       </div>
 
       <div class="panel">
@@ -1748,9 +1838,9 @@ body {
           <!-- Quick actions row -->
           <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
             <span style="font-size:12px;color:var(--text-tertiary)">Enable:</span>
-            <button class="btn-primary" onclick="tunnelEnableQuick()" style="padding:6px 14px;border-radius:var(--radius-sm);background:var(--brand);color:#fff;border:none;font-size:12px;font-weight:500;cursor:pointer">Quick</button>
-            <button class="btn-primary" onclick="showTunnelNamedModal(false)" style="padding:6px 14px;border-radius:var(--radius-sm);background:var(--brand);color:#fff;border:none;font-size:12px;font-weight:500;cursor:pointer">Named…</button>
-            <button class="btn-primary" onclick="showTunnelNamedModal(true)" style="padding:6px 14px;border-radius:var(--radius-sm);background:var(--brand);color:#fff;border:none;font-size:12px;font-weight:500;cursor:pointer">Hybrid…</button>
+            <button class="btn-primary" onclick="tunnelEnableQuick()" style="padding:6px 14px;border-radius:var(--radius-sm);background:var(--brand);color:#000;border:none;font-size:12px;font-weight:500;cursor:pointer">Quick</button>
+            <button class="btn-primary" onclick="showTunnelNamedModal(false)" style="padding:6px 14px;border-radius:var(--radius-sm);background:var(--brand);color:#000;border:none;font-size:12px;font-weight:500;cursor:pointer">Named…</button>
+            <button class="btn-primary" onclick="showTunnelNamedModal(true)" style="padding:6px 14px;border-radius:var(--radius-sm);background:var(--brand);color:#000;border:none;font-size:12px;font-weight:500;cursor:pointer">Hybrid…</button>
             <span id="tunActionResult" style="font-size:12px;color:var(--text-tertiary);margin-left:auto"></span>
           </div>
 
@@ -1820,7 +1910,7 @@ body {
           <div id="tunModalError" style="display:none;color:var(--red);font-size:12px;padding:6px 10px;background:rgba(255,80,80,0.08);border-radius:var(--radius-sm)"></div>
           <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:8px">
             <button class="btn-ghost" onclick="closeTunnelNamedModal()" style="padding:8px 14px;font-size:12px">Cancel</button>
-            <button class="btn-primary" onclick="tunnelEnableNamed()" style="padding:8px 14px;border-radius:var(--radius-sm);background:var(--brand);color:#fff;border:none;font-size:12px;font-weight:500;cursor:pointer">Enable</button>
+            <button class="btn-primary" onclick="tunnelEnableNamed()" style="padding:8px 14px;border-radius:var(--radius-sm);background:var(--brand);color:#000;border:none;font-size:12px;font-weight:500;cursor:pointer">Enable</button>
           </div>
         </div>
       </div>
@@ -1867,6 +1957,17 @@ async function doLogout() {
   } catch(e) {}
   window.location.href = '/login';
 }
+
+// Sidebar collapse toggle (icon rail) — persisted in localStorage
+function toggleSidebar() {
+  var sb = document.querySelector('.sidebar');
+  if (!sb) return;
+  var collapsed = sb.classList.toggle('collapsed');
+  try { localStorage.setItem('fx_sidebar', collapsed ? '1' : '0'); } catch(e) {}
+}
+(function initSidebarState() {
+  try { if (localStorage.getItem('fx_sidebar') === '1') document.querySelector('.sidebar').classList.add('collapsed'); } catch(e) {}
+})();
 
 function showCurrentKey() {
   var el = document.getElementById('currentKeyDisplay');
@@ -2112,12 +2213,42 @@ async function refresh() {
 
     // Version
     var verEl = document.getElementById('version');
-    if (verEl && health.version) verEl.textContent = 'v' + health.version;
+    if (verEl && health.version) verEl.textContent = health.version;
 
     // Stats grid
     document.getElementById('grokCount').textContent = health.grok_accounts;
+    var gDeltaEl = document.getElementById('grokDelta');
+    var gBarUsedEl = document.getElementById('grokBarUsed');
+    var gBarRestEl = document.getElementById('grokBarRest');
+    if (health.grok_tokens_quota > 0) {
+      var gPct = Math.round(health.grok_tokens_used / health.grok_tokens_quota * 100);
+      var gClass = gPct >= 100 ? 'err' : (gPct >= 80 ? 'warn' : 'ok');
+      if (gDeltaEl) { gDeltaEl.textContent = gPct + '%'; gDeltaEl.className = 'stat-delta ' + gClass; }
+      if (gBarUsedEl && gBarRestEl) {
+        var gw = Math.min(100, gPct);
+        gBarUsedEl.style.width = gw + '%';
+        gBarRestEl.style.width = (100 - gw) + '%';
+        gBarUsedEl.className = 'stat-bar-seg used' + (gPct >= 100 ? ' err' : (gPct >= 80 ? ' warn' : ''));
+      }
+    } else if (gDeltaEl) { gDeltaEl.textContent = ''; gDeltaEl.className = 'stat-delta'; }
     document.getElementById('cbCount').textContent = health.cb_keys;
     document.getElementById('cbActive').innerHTML = '<span class="ok">' + health.cb_keys_active + ' active</span>';
+    // CB aggregate credits → delta + quota bar
+    var cbDeltaEl = document.getElementById('cbDelta');
+    var cbBarUsedEl = document.getElementById('cbBarUsed');
+    var cbBarRestEl = document.getElementById('cbBarRest');
+    var cbKeysArr = (accounts && accounts.codebuddy) || [];
+    var cbUsed = 0, cbLimit = 0;
+    cbKeysArr.forEach(function(k) { cbUsed += (k.credits_used || 0); cbLimit += (k.credit_limit || 0); });
+    if (cbLimit > 0 && cbBarUsedEl && cbBarRestEl) {
+      var cbPct = Math.round(cbUsed / cbLimit * 100);
+      var cbClass = cbPct >= 100 ? 'err' : (cbPct >= 80 ? 'warn' : 'ok');
+      if (cbDeltaEl) { cbDeltaEl.textContent = cbPct + '%'; cbDeltaEl.className = 'stat-delta ' + cbClass; }
+      var cbw = Math.min(100, cbPct);
+      cbBarUsedEl.style.width = cbw + '%';
+      cbBarRestEl.style.width = (100 - cbw) + '%';
+      cbBarUsedEl.className = 'stat-bar-seg used' + (cbPct >= 100 ? ' err' : (cbPct >= 80 ? ' warn' : ''));
+    } else if (cbDeltaEl) { cbDeltaEl.textContent = ''; cbDeltaEl.className = 'stat-delta'; }
     document.getElementById('models').textContent = models.data ? models.data.length : '—';
 
     var g = health.upstreams.grok, cb = health.upstreams.codebuddy;
@@ -2127,12 +2258,25 @@ async function refresh() {
     document.getElementById('fbCount').textContent = health.fb_accounts || 0;
     var fbUsed = health.fb_quota_used || 0, fbLimit = health.fb_quota_limit || 0;
     var fbExhausted = health.fb_quota_exhausted || 0;
+    var fbDeltaEl = document.getElementById('fbDelta');
+    var fbBarUsedEl = document.getElementById('fbBarUsed');
+    var fbBarRestEl = document.getElementById('fbBarRest');
     if (fbLimit > 0) {
       var fbPct = Math.round(fbUsed / fbLimit * 100);
       var fbClass = fbPct >= 100 ? 'err' : (fbPct >= 80 ? 'warn' : 'ok');
       document.getElementById('fbQuota').innerHTML = '<span class="' + fbClass + '">' + fbUsed.toFixed(1) + '/' + fbLimit.toFixed(0) + ' (' + fbPct + '%)</span>' + (fbExhausted > 0 ? ' <span class="err">⛔ ' + fbExhausted + ' exhausted</span>' : '');
+      if (fbDeltaEl) { fbDeltaEl.textContent = fbUsed > 0 ? '+' + fbPct + '%' : '0%'; fbDeltaEl.className = 'stat-delta ' + fbClass; }
+      if (fbBarUsedEl && fbBarRestEl) {
+        var usedW = Math.min(100, fbPct);
+        fbBarUsedEl.style.width = usedW + '%';
+        fbBarRestEl.style.width = (100 - usedW) + '%';
+        fbBarUsedEl.className = 'stat-bar-seg used' + (fbPct >= 100 ? ' err' : (fbPct >= 80 ? ' warn' : ''));
+      }
     } else {
       document.getElementById('fbQuota').innerHTML = '<span class="ok">no quota data</span>';
+      if (fbDeltaEl) { fbDeltaEl.textContent = ''; fbDeltaEl.className = 'stat-delta'; }
+      if (fbBarUsedEl) fbBarUsedEl.style.width = '0%';
+      if (fbBarRestEl) fbBarRestEl.style.width = '0%';
     }
 
     // Circuit cards
@@ -2287,7 +2431,7 @@ function renderGrokPage() {
   }
   for (var p = fromPg; p <= toPg; p++) {
     if (p === page) {
-      html += '<button style="padding:4px 10px;border:1px solid var(--brand);border-radius:var(--radius-sm);background:var(--brand);color:#fff;font-size:12px;cursor:default">' + p + '</button>';
+      html += '<button style="padding:4px 10px;border:1px solid var(--brand);border-radius:var(--radius-sm);background:var(--brand);color:#000;font-size:12px;cursor:default">' + p + '</button>';
     } else {
       html += '<button class="pg-btn pg-grok-num' + (p === page ? ' pg-active' : '') + '" data-page="' + p + '" style="padding:4px 10px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg-elevated);color:var(--text-secondary);cursor:pointer;font-size:12px">' + p + '</button>';
     }
@@ -2330,8 +2474,8 @@ function renderCBPage() {
     var color = pct > 90 ? 'pbar-red' : pct > 70 ? 'pbar-orange' : 'pbar-green';
     var status = k.disabled ? '<span class="err">disabled</span>' : '<span class="ok">active</span>';
     var typeBadge = isOAuth
-      ? '<span style="padding:2px 8px;border-radius:10px;font-size:10px;background:rgba(168,85,247,0.12);color:#c084fc">OAuth</span>'
-      : '<span style="padding:2px 8px;border-radius:10px;font-size:10px;background:rgba(99,102,241,0.12);color:#818cf8">API Key</span>';
+      ? '<span style="padding:2px 8px;border-radius:10px;font-size:10px;background:rgba(255,255,255,0.16);color:#ffffff">OAuth</span>'
+      : '<span style="padding:2px 8px;border-radius:10px;font-size:10px;background:rgba(255,255,255,0.08);color:#b3b3b3">API Key</span>';
     var identity = isOAuth
       ? escHtml(k.email || k.key)
       : escHtml(k.key);
@@ -2376,7 +2520,7 @@ function renderCBPage() {
   }
   for (var p = fromPg; p <= toPg; p++) {
     if (p === page) {
-      html += '<button style="padding:4px 10px;border:1px solid var(--brand);border-radius:var(--radius-sm);background:var(--brand);color:#fff;font-size:12px;cursor:default">' + p + '</button>';
+      html += '<button style="padding:4px 10px;border:1px solid var(--brand);border-radius:var(--radius-sm);background:var(--brand);color:#000;font-size:12px;cursor:default">' + p + '</button>';
     } else {
       html += '<button class="pg-btn pg-cb-num" data-page="' + p + '" style="padding:4px 10px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg-elevated);color:var(--text-secondary);cursor:pointer;font-size:12px">' + p + '</button>';
     }
@@ -2532,7 +2676,7 @@ function showAddFBModal() {
     '</div>' +
     '<div style="display:flex;gap:8px;justify-content:flex-end">' +
     '<button class="btn-ghost" onclick="document.getElementById(\'fbModal\').style.display=\'none\'" style="padding:8px 16px;font-size:13px">Cancel</button>' +
-    '<button class="btn-primary" onclick="submitAddFB()" style="padding:8px 16px;border-radius:var(--radius-sm);background:var(--brand);color:#fff;border:none;font-size:13px;font-weight:500;cursor:pointer">Import</button>' +
+    '<button class="btn-primary" onclick="submitAddFB()" style="padding:8px 16px;border-radius:var(--radius-sm);background:var(--brand);color:#000;border:none;font-size:13px;font-weight:500;cursor:pointer">Import</button>' +
     '</div></div>';
   document.body.appendChild(m);
 }
@@ -2567,7 +2711,7 @@ function showBulkFBModal() {
     '<div id="fbBulkResult" style="margin-bottom:12px;display:none;padding:10px;border-radius:var(--radius-sm);font-size:13px"></div>' +
     '<div style="display:flex;gap:8px;justify-content:flex-end">' +
     '<button class="btn-ghost" onclick="document.getElementById(\'fbBulkModal\').remove()" style="padding:8px 16px;font-size:13px">Cancel</button>' +
-    '<button class="btn-primary" onclick="submitBulkFB()" style="padding:8px 16px;border-radius:var(--radius-sm);background:var(--brand);color:#fff;border:none;font-size:13px;font-weight:500;cursor:pointer">Import</button>' +
+    '<button class="btn-primary" onclick="submitBulkFB()" style="padding:8px 16px;border-radius:var(--radius-sm);background:var(--brand);color:#000;border:none;font-size:13px;font-weight:500;cursor:pointer">Import</button>' +
     '</div></div>';
   document.body.appendChild(m);
 }
@@ -2619,7 +2763,7 @@ function showFBOAuthModal() {
     '<h3 style="margin:0 0 16px;font-size:16px">Add Freebuff via Login URL</h3>' +
     '<div id="fbOAuthContent" style="margin-bottom:16px">' +
     '<p style="font-size:13px;color:var(--text-tertiary);line-height:1.6;margin-bottom:12px">Click "Generate Login URL" to start the OAuth device flow. Open the URL in your browser, log in with Google/GitHub, and the token will be auto-imported.</p>' +
-    '<button class="btn-primary" onclick="startFBOAuth()" style="padding:8px 16px;border-radius:var(--radius-sm);background:var(--brand);color:#fff;border:none;font-size:13px;font-weight:500;cursor:pointer">Generate Login URL</button>' +
+    '<button class="btn-primary" onclick="startFBOAuth()" style="padding:8px 16px;border-radius:var(--radius-sm);background:var(--brand);color:#000;border:none;font-size:13px;font-weight:500;cursor:pointer">Generate Login URL</button>' +
     '</div>' +
     '<div style="display:flex;gap:8px;justify-content:flex-end">' +
     '<button class="btn-ghost" onclick="document.getElementById(\'fbOAuthModal\').remove()" style="padding:8px 16px;font-size:13px">Close</button>' +
@@ -2647,7 +2791,7 @@ async function startFBOAuth() {
       '<button class="btn-ghost" onclick="window.open(document.getElementById(\'fbOAuthUrl\').value,\'_blank\')" style="padding:8px 12px;font-size:12px;white-space:nowrap">Open</button>' +
       '</div></div>' +
       '<div id="fbOAuthPollStatus" style="padding:10px;border-radius:var(--radius-sm);background:var(--bg-elevated);font-size:13px;color:var(--text-tertiary)">Waiting for login... <span class="spinner"></span></div>' +
-      '<button class="btn-primary" onclick="pollFBOAuth()" style="margin-top:12px;padding:8px 16px;border-radius:var(--radius-sm);background:var(--brand);color:#fff;border:none;font-size:13px;font-weight:500;cursor:pointer">Check Status</button>';
+      '<button class="btn-primary" onclick="pollFBOAuth()" style="margin-top:12px;padding:8px 16px;border-radius:var(--radius-sm);background:var(--brand);color:#000;border:none;font-size:13px;font-weight:500;cursor:pointer">Check Status</button>';
     // Auto-poll every 3s
     fbOAuthPollInterval = setInterval(pollFBOAuth, 3000);
     pollFBOAuth(); // immediate first check
@@ -2764,9 +2908,13 @@ async function loadHistory() {
         var avg = cacheHits.reduce(function(a, r) { return a + r.cache_hit_pct; }, 0) / cacheHits.length;
         cacheEl.textContent = avg.toFixed(1) + '%';
         if (cacheSubEl) cacheSubEl.textContent = 'avg over ' + cacheHits.length + ' reqs';
+        var cacheBarSeg = document.getElementById('cacheBarSeg');
+        if (cacheBarSeg) cacheBarSeg.style.width = Math.min(100, avg) + '%';
       } else {
         cacheEl.textContent = '—';
         if (cacheSubEl) cacheSubEl.textContent = 'prompt cache';
+        var cacheBarSeg0 = document.getElementById('cacheBarSeg');
+        if (cacheBarSeg0) cacheBarSeg0.style.width = '0%';
       }
     }
 
@@ -3088,7 +3236,7 @@ function loadGatewayKeys() {
       var rpmDisplay = k.rpm > 0 ? k.rpm : '∞';
       var roleBadge = k.role === 'admin'
         ? '<span style="padding:2px 8px;border-radius:10px;font-size:10px;background:rgba(234,179,8,0.12);color:var(--orange)">admin</span>'
-        : '<span style="padding:2px 8px;border-radius:10px;font-size:10px;background:rgba(99,102,241,0.12);color:#818cf8">inference</span>';
+        : '<span style="padding:2px 8px;border-radius:10px;font-size:10px;background:rgba(255,255,255,0.10);color:#ffffff">inference</span>';
       var modelsDisplay = (k.allowed_models && k.allowed_models.length > 0)
         ? '<span style="font-family:var(--mono);font-size:11px;color:var(--text-secondary)">' + escHtml(k.allowed_models.join(', ')) + '</span>'
         : '<span style="color:var(--text-tertiary);font-size:11px">all</span>';
@@ -3794,7 +3942,7 @@ setInterval(refresh, 5000);       // health/accounts every 5s
     </div>
     <div style="display:flex;gap:8px;justify-content:flex-end">
       <button class="btn-ghost" onclick="closeAddCBModal()" style="padding:8px 16px;font-size:13px">Cancel</button>
-      <button class="btn-primary" onclick="submitAddCB()" style="padding:8px 16px;border-radius:var(--radius-sm);background:var(--brand);color:#fff;border:none;font-size:13px;font-weight:500;cursor:pointer">Add</button>
+      <button class="btn-primary" onclick="submitAddCB()" style="padding:8px 16px;border-radius:var(--radius-sm);background:var(--brand);color:#000;border:none;font-size:13px;font-weight:500;cursor:pointer">Add</button>
     </div>
   </div>
 </div>
@@ -3807,7 +3955,7 @@ setInterval(refresh, 5000);       // health/accounts every 5s
 
     <!-- Segmented control: Manual | Login URL -->
     <div id="cbOAuthModeSwitch" style="display:flex;gap:0;margin-bottom:16px;border:1px solid var(--border);border-radius:var(--radius-sm);overflow:hidden;width:fit-content">
-      <button type="button" id="cbOAuthModeManual" onclick="cbOAuthSwitchMode('manual')" style="padding:8px 18px;font-size:13px;border:none;background:var(--brand);color:#fff;cursor:pointer">Manual</button>
+      <button type="button" id="cbOAuthModeManual" onclick="cbOAuthSwitchMode('manual')" style="padding:8px 18px;font-size:13px;border:none;background:var(--brand);color:#000;cursor:pointer">Manual</button>
       <button type="button" id="cbOAuthModeUrl" onclick="cbOAuthSwitchMode('url')" style="padding:8px 18px;font-size:13px;border:none;background:var(--bg-primary);color:var(--text);cursor:pointer">Login URL</button>
     </div>
 
@@ -3840,7 +3988,7 @@ setInterval(refresh, 5000);       // health/accounts every 5s
         <input type="text" id="cbOAuthUrlEmail" placeholder="leave blank to auto-detect from token" style="width:100%;padding:8px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg-primary);color:var(--text);font-size:13px" />
       </div>
       <div style="display:flex;gap:8px;margin-bottom:12px;align-items:center">
-        <button type="button" class="btn-primary" id="cbOAuthGenBtn" onclick="cbOAuthGenerateUrl()" style="padding:8px 16px;border-radius:var(--radius-sm);background:var(--brand);color:#fff;border:none;font-size:13px;font-weight:500;cursor:pointer">Generate login URL</button>
+        <button type="button" class="btn-primary" id="cbOAuthGenBtn" onclick="cbOAuthGenerateUrl()" style="padding:8px 16px;border-radius:var(--radius-sm);background:var(--brand);color:#000;border:none;font-size:13px;font-weight:500;cursor:pointer">Generate login URL</button>
         <button type="button" class="btn-ghost" id="cbOAuthPollBtn" onclick="cbOAuthPollNow()" style="padding:8px 16px;font-size:13px;display:none">Poll now</button>
         <button type="button" class="btn-ghost" id="cbOAuthCancelPollBtn" onclick="cbOAuthCancelPoll()" style="padding:8px 16px;font-size:13px;display:none">Cancel</button>
       </div>
@@ -3859,7 +4007,7 @@ setInterval(refresh, 5000);       // health/accounts every 5s
     <div id="cbOAuthResult" style="margin-bottom:12px;display:none;padding:10px;border-radius:var(--radius-sm);font-size:13px"></div>
     <div style="display:flex;gap:8px;justify-content:flex-end">
       <button class="btn-ghost" onclick="closeAddCBOAuthModal()" style="padding:8px 16px;font-size:13px">Cancel</button>
-      <button class="btn-primary" id="cbOAuthSave" onclick="submitAddCBOAuth()" style="padding:8px 16px;border-radius:var(--radius-sm);background:var(--brand);color:#fff;border:none;font-size:13px;font-weight:500;cursor:pointer">Import</button>
+      <button class="btn-primary" id="cbOAuthSave" onclick="submitAddCBOAuth()" style="padding:8px 16px;border-radius:var(--radius-sm);background:var(--brand);color:#000;border:none;font-size:13px;font-weight:500;cursor:pointer">Import</button>
     </div>
   </div>
 </div>
@@ -3887,7 +4035,7 @@ setInterval(refresh, 5000);       // health/accounts every 5s
     <div id="bulkCBOAuthResult" style="margin-bottom:12px;display:none;padding:10px;border-radius:var(--radius-sm);font-size:13px"></div>
     <div style="display:flex;gap:8px;justify-content:flex-end">
       <button class="btn-ghost" onclick="closeBulkCBOAuthModal()" style="padding:8px 16px;font-size:13px">Cancel</button>
-      <button class="btn-primary" id="bulkCBOAuthSave" onclick="submitBulkCBOAuth()" style="padding:8px 16px;border-radius:var(--radius-sm);background:var(--brand);color:#fff;border:none;font-size:13px;font-weight:500;cursor:pointer">Import</button>
+      <button class="btn-primary" id="bulkCBOAuthSave" onclick="submitBulkCBOAuth()" style="padding:8px 16px;border-radius:var(--radius-sm);background:var(--brand);color:#000;border:none;font-size:13px;font-weight:500;cursor:pointer">Import</button>
     </div>
   </div>
 </div>
@@ -3903,7 +4051,7 @@ setInterval(refresh, 5000);       // health/accounts every 5s
     <div id="bulkCBResult" style="margin-bottom:12px;display:none;padding:10px;border-radius:var(--radius-sm);font-size:13px"></div>
     <div style="display:flex;gap:8px;justify-content:flex-end">
       <button class="btn-ghost" onclick="closeBulkCBModal()" style="padding:8px 16px;font-size:13px">Cancel</button>
-      <button class="btn-primary" id="bulkCBSave" onclick="submitBulkCB()" style="padding:8px 16px;border-radius:var(--radius-sm);background:var(--brand);color:#fff;border:none;font-size:13px;font-weight:500;cursor:pointer">Import</button>
+      <button class="btn-primary" id="bulkCBSave" onclick="submitBulkCB()" style="padding:8px 16px;border-radius:var(--radius-sm);background:var(--brand);color:#000;border:none;font-size:13px;font-weight:500;cursor:pointer">Import</button>
     </div>
   </div>
 </div>
@@ -3936,7 +4084,7 @@ setInterval(refresh, 5000);       // health/accounts every 5s
     </div>
     <div style="display:flex;gap:8px;justify-content:flex-end">
       <button class="btn-ghost" onclick="closeAddGrokModal()" style="padding:8px 16px;font-size:13px">Cancel</button>
-      <button class="btn-primary" onclick="submitAddGrok()" style="padding:8px 16px;border-radius:var(--radius-sm);background:var(--brand);color:#fff;border:none;font-size:13px;font-weight:500;cursor:pointer">Add</button>
+      <button class="btn-primary" onclick="submitAddGrok()" style="padding:8px 16px;border-radius:var(--radius-sm);background:var(--brand);color:#000;border:none;font-size:13px;font-weight:500;cursor:pointer">Add</button>
     </div>
   </div>
 </div>
@@ -3965,7 +4113,7 @@ setInterval(refresh, 5000);       // health/accounts every 5s
     <div id="bulkGrokResult" style="margin-bottom:12px;display:none;padding:10px;border-radius:var(--radius-sm);font-size:13px"></div>
     <div style="display:flex;gap:8px;justify-content:flex-end">
       <button class="btn-ghost" onclick="closeBulkGrokModal()" style="padding:8px 16px;font-size:13px">Cancel</button>
-      <button class="btn-primary" id="bulkGrokSave" onclick="submitBulkGrok()" style="padding:8px 16px;border-radius:var(--radius-sm);background:var(--brand);color:#fff;border:none;font-size:13px;font-weight:500;cursor:pointer">Import</button>
+      <button class="btn-primary" id="bulkGrokSave" onclick="submitBulkGrok()" style="padding:8px 16px;border-radius:var(--radius-sm);background:var(--brand);color:#000;border:none;font-size:13px;font-weight:500;cursor:pointer">Import</button>
     </div>
   </div>
 </div>
