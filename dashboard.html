@@ -1045,7 +1045,11 @@ body {
         </div>
         <div class="stat-card">
           <div class="stat-label">CB Keys</div>
-          <div class="stat-value" id="cbCount">—</div>
+          <div class="stat-value-row">
+            <div class="stat-value" id="cbCount">—</div>
+            <span class="stat-delta" id="cbDelta"></span>
+          </div>
+          <div class="stat-bar" id="cbBar"><div class="stat-bar-seg used" id="cbBarUsed" style="width:0%"></div><div class="stat-bar-seg rest" id="cbBarRest" style="width:0%"></div></div>
           <div class="stat-sub" id="cbActive"></div>
         </div>
         <div class="stat-card">
@@ -2192,6 +2196,22 @@ async function refresh() {
     } else if (gDeltaEl) { gDeltaEl.textContent = ''; gDeltaEl.className = 'stat-delta'; }
     document.getElementById('cbCount').textContent = health.cb_keys;
     document.getElementById('cbActive').innerHTML = '<span class="ok">' + health.cb_keys_active + ' active</span>';
+    // CB aggregate credits → delta + quota bar
+    var cbDeltaEl = document.getElementById('cbDelta');
+    var cbBarUsedEl = document.getElementById('cbBarUsed');
+    var cbBarRestEl = document.getElementById('cbBarRest');
+    var cbKeysArr = (accounts && accounts.codebuddy) || [];
+    var cbUsed = 0, cbLimit = 0;
+    cbKeysArr.forEach(function(k) { cbUsed += (k.credits_used || 0); cbLimit += (k.credit_limit || 0); });
+    if (cbLimit > 0 && cbBarUsedEl && cbBarRestEl) {
+      var cbPct = Math.round(cbUsed / cbLimit * 100);
+      var cbClass = cbPct >= 100 ? 'err' : (cbPct >= 80 ? 'warn' : 'ok');
+      if (cbDeltaEl) { cbDeltaEl.textContent = cbPct + '%'; cbDeltaEl.className = 'stat-delta ' + cbClass; }
+      var cbw = Math.min(100, cbPct);
+      cbBarUsedEl.style.width = cbw + '%';
+      cbBarRestEl.style.width = (100 - cbw) + '%';
+      cbBarUsedEl.className = 'stat-bar-seg used' + (cbPct >= 100 ? ' err' : (cbPct >= 80 ? ' warn' : ''));
+    } else if (cbDeltaEl) { cbDeltaEl.textContent = ''; cbDeltaEl.className = 'stat-delta'; }
     document.getElementById('models').textContent = models.data ? models.data.length : '—';
 
     var g = health.upstreams.grok, cb = health.upstreams.codebuddy;
