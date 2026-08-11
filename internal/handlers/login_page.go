@@ -16,17 +16,17 @@ const loginPageHTML = `<!DOCTYPE html>
 <title>FoxRouters — Login</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;590;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
 :root {
-  --bg: #0d1117; --bg-panel: #161b22; --bg-elevated: #21262d;
-  --text: #e6edf3; --text-tertiary: #6e7681; --text-quaternary: #484f58;
-  --brand: #6366f1; --brand-hover: #818cf8;
-  --border: #30363d; --border-bright: rgba(255,255,255,0.16);
-  --red: #f85149; --red-subtle: rgba(248,81,73,0.12);
-  --radius: 8px; --radius-lg: 12px;
-  --font: 'Inter', -apple-system, sans-serif; --mono: 'JetBrains Mono', monospace;
-  --shadow-modal: 0 8px 32px rgba(0,0,0,0.5);
+  --bg: #000000; --bg-panel: #171717; --bg-elevated: #1f1f1f;
+  --text: #ffffff; --text-tertiary: #8c8c8c; --text-quaternary: #5c5c5c;
+  --brand: #ffffff; --brand-hover: rgba(255,255,255,0.82); --brand-fg: #000000;
+  --border: #2a2a2a; --border-bright: rgba(255,255,255,0.20);
+  --red: #f87171; --red-subtle: rgba(248,113,113,0.12);
+  --radius: 6px; --radius-lg: 10px;
+  --font: 'Geist', 'Inter', -apple-system, sans-serif; --mono: 'Geist Mono', 'JetBrains Mono', monospace;
+  --shadow-modal: 0 8px 32px rgba(0,0,0,0.7);
 }
 * { margin:0; padding:0; box-sizing:border-box; }
 body {
@@ -42,9 +42,9 @@ body {
 .login-logo {
   width: 48px; height: 48px; border-radius: var(--radius);
   background: var(--brand); display: flex; align-items: center; justify-content: center;
-  margin: 0 auto 20px; color: #fff; box-shadow: 0 4px 12px rgba(99,102,241,0.4);
+  margin: 0 auto 20px; color: var(--brand-fg); box-shadow: 0 4px 12px rgba(255,255,255,0.15);
 }
-.login-title { text-align: center; font-size: 20px; font-weight: 590; margin-bottom: 6px; }
+.login-title { text-align: center; font-size: 20px; font-weight: 600; margin-bottom: 6px; }
 .login-sub { text-align: center; font-size: 13px; color: var(--text-tertiary); margin-bottom: 28px; }
 .login-error {
   background: var(--red-subtle); color: var(--red); border: 1px solid rgba(248,81,73,0.3);
@@ -58,14 +58,14 @@ body {
   border-radius: var(--radius); color: var(--text); font-family: var(--mono); font-size: 13px;
   transition: border-color 150ms ease;
 }
-.login-input:focus { outline: none; border-color: var(--brand); box-shadow: 0 0 0 3px rgba(99,102,241,0.15); }
+.login-input:focus { outline: none; border-color: var(--brand); box-shadow: 0 0 0 3px rgba(255,255,255,0.15); }
 .login-btn {
-  width: 100%; padding: 11px; background: var(--brand); color: #fff; border: none;
-  border-radius: var(--radius); font-size: 14px; font-weight: 590; cursor: pointer;
+  width: 100%; padding: 11px; background: var(--brand); color: var(--brand-fg); border: none;
+  border-radius: var(--radius); font-size: 14px; font-weight: 600; cursor: pointer;
   font-family: var(--font); transition: background 150ms ease, box-shadow 150ms ease, transform 200ms ease;
-  box-shadow: 0 1px 3px rgba(99,102,241,0.3);
+  box-shadow: 0 1px 3px rgba(255,255,255,0.12);
 }
-.login-btn:hover { background: var(--brand-hover); box-shadow: 0 4px 12px rgba(99,102,241,0.4); transform: translateY(-1px); }
+.login-btn:hover { background: var(--brand-hover); box-shadow: 0 4px 12px rgba(255,255,255,0.15); transform: translateY(-1px); }
 .login-btn:active { transform: translateY(0); }
 .login-footer { text-align: center; margin-top: 20px; font-size: 11px; color: var(--text-quaternary); font-family: var(--mono); }
 </style>
@@ -77,11 +77,11 @@ body {
       <path d="M8 4L11 12L6 10L8 4Z" fill="currentColor"/>
       <path d="M24 4L21 12L26 10L24 4Z" fill="currentColor"/>
       <path d="M16 7C11 7 7 11 7 16C7 20 10 23 16 25C22 23 25 20 25 16C25 11 21 7 16 7Z" fill="currentColor"/>
-      <path d="M12 15C13 14 14 14 16 14C18 14 19 14 20 15" stroke="rgba(255,255,255,0.9)" stroke-width="1.2" stroke-linecap="round" fill="none"/>
-      <path d="M11 17C13 16 14.5 16 16 16C17.5 16 19 16 21 17" stroke="rgba(255,255,255,0.7)" stroke-width="1.2" stroke-linecap="round" fill="none"/>
-      <circle cx="13" cy="13" r="1.2" fill="rgba(255,255,255,0.95)"/>
-      <circle cx="19" cy="13" r="1.2" fill="rgba(255,255,255,0.95)"/>
-      <circle cx="16" cy="19" r="1" fill="rgba(255,255,255,0.9)"/>
+      <path d="M12 15C13 14 14 14 16 14C18 14 19 14 20 15" stroke="rgba(0,0,0,0.85)" stroke-width="1.2" stroke-linecap="round" fill="none"/>
+      <path d="M11 17C13 16 14.5 16 16 16C17.5 16 19 16 21 17" stroke="rgba(0,0,0,0.6)" stroke-width="1.2" stroke-linecap="round" fill="none"/>
+      <circle cx="13" cy="13" r="1.2" fill="rgba(0,0,0,0.9)"/>
+      <circle cx="19" cy="13" r="1.2" fill="rgba(0,0,0,0.9)"/>
+      <circle cx="16" cy="19" r="1" fill="rgba(0,0,0,0.85)"/>
     </svg>
   </div>
   <div class="login-title">FoxRouters</div>
@@ -93,7 +93,7 @@ body {
     </div>
     <button class="login-btn" type="submit">Sign In</button>
   </form>
-  <div class="login-footer">FoxRouters v5.11</div>
+  <div class="login-footer">FoxRouters v1.6.6</div>
 </div>
 </body>
 </html>`
