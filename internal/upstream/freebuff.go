@@ -22,6 +22,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/redis/go-redis/v9"
 
 	"foxrouters/internal/db"
 )
@@ -51,6 +52,10 @@ const (
 
 	// Run cache: reuse runId for 10 minutes
 	FREEBUFF_RUN_CACHE_TTL = 10 * time.Minute
+
+	// Redis key prefixes (persistent session/run cache — survives gateway restart)
+	fbSessionKeyPrefix = "fb:session:"
+	fbRunKeyPrefix     = "fb:run:"
 )
 
 // FreebuffModels maps gateway model IDs (fb/ prefix) to upstream config.
@@ -81,15 +86,17 @@ func fbStripPrefix(model string) string {
 	return strings.TrimPrefix(model, "fb/")
 }
 
-// fbModelConfig looks up the model config by gateway ID.
+// fbModelConfig looks up the model config by gateway ID (dynamic registry
+// first, static fallback).
 func fbModelConfig(gatewayID string) *FreebuffModelConfig {
-	for i := range FreebuffModels {
-		if FreebuffModels[i].GatewayID == gatewayID {
-			return &FreebuffModels[i]
+	models := GetFBModels()
+	for i := range models {
+		if models[i].GatewayID == gatewayID {
+			return &models[i]
 		}
 	}
 	// Default to deepseek-v4-flash
-	return &FreebuffModels[0]
+	return &models[0]
 }
 
 // ============================================================================
@@ -109,11 +116,31 @@ type FreebuffAccount struct {
 	QuotaSyncedAt time.Time `json:"quota_synced_at"`
 	QuotaResetAt  time.Time `json:"quota_reset_at"`
 	QuotaPeriod   string    `json:"quota_period"`
+	// Access tier from GET /session `accessTier` ("" = unknown, "full", "limited", "blocked")
+	Tier                string  `json:"tier"`
+	CountryCode         string  `json:"country_code"`
+	CountryBlockReason  string  `json:"country_block_reason"`
+	EntitlementBase     float64 `json:"entitlement_base"`
+	EntitlementReferral float64 `json:"entitlement_referral"`
+	EntitlementStreak   float64 `json:"entitlement_streak"`
+	// Per-model session quota snapshot (from rateLimitsByModel, key = upstream model name)
+	QuotaByModel map[string]FbModelQuota `json:"quota_by_model"`
 	// Hourly session tracking (in-memory, resets each hour)
 	HourlySessionCount int       `json:"-"`
 	HourlyWindowStart  time.Time `json:"-"`
 	mu                 sync.Mutex
 	db                 *db.Store
+}
+
+// FbModelQuota is one model's session-quota entry from GET /session rateLimitsByModel.
+type FbModelQuota struct {
+	Limit              float64 `json:"limit"`
+	RecentCount        float64 `json:"recent_count"`
+	ResetAt            string  `json:"reset_at,omitempty"`
+	Period             string  `json:"period,omitempty"`
+	EntitlementBase    float64 `json:"entitlement_base,omitempty"`
+	EntitlementReferral float64 `json:"entitlement_referral,omitempty"`
+	EntitlementStreak  float64 `json:"entitlement_streak,omitempty"`
 }
 
 // FreebuffAccountManager manages the Freebuff account pool.
@@ -239,6 +266,24 @@ func (am *FreebuffAccountManager) LoadFromRedis() error {
 		if v, ok := vals["quota_period"]; ok {
 			acc.QuotaPeriod = v
 		}
+		acc.Tier = vals["tier"]
+		acc.CountryCode = vals["country_code"]
+		acc.CountryBlockReason = vals["country_block_reason"]
+		if v, ok := vals["entitlement_base"]; ok && v != "" {
+			fmt.Sscanf(v, "%f", &acc.EntitlementBase)
+		}
+		if v, ok := vals["entitlement_referral"]; ok && v != "" {
+			fmt.Sscanf(v, "%f", &acc.EntitlementReferral)
+		}
+		if v, ok := vals["entitlement_streak"]; ok && v != "" {
+			fmt.Sscanf(v, "%f", &acc.EntitlementStreak)
+		}
+		if v, ok := vals["quota_by_model"]; ok && v != "" {
+			var qbm map[string]FbModelQuota
+			if json.Unmarshal([]byte(v), &qbm) == nil && len(qbm) > 0 {
+				acc.QuotaByModel = qbm
+			}
+		}
 		am.mu.Lock()
 		am.accounts[token] = acc
 		am.mu.Unlock()
@@ -283,6 +328,15 @@ func (am *FreebuffAccountManager) SaveAccount(acc *FreebuffAccount) {
 		"quota_synced_at": acc.QuotaSyncedAt.Unix(),
 		"quota_reset_at":  acc.QuotaResetAt.Unix(),
 		"quota_period":    acc.QuotaPeriod,
+		"tier":            acc.Tier,
+		"country_code":    acc.CountryCode,
+		"country_block_reason": acc.CountryBlockReason,
+		"entitlement_base":     acc.EntitlementBase,
+		"entitlement_referral": acc.EntitlementReferral,
+		"entitlement_streak":   acc.EntitlementStreak,
+	}
+	if qbmJSON, err := json.Marshal(acc.QuotaByModel); err == nil && qbmJSON != nil {
+		data["quota_by_model"] = string(qbmJSON)
 	}
 	key := "fb:account:" + acc.Token
 	if err := rdb.HSet(ctx, key, data).Err(); err != nil {
@@ -367,9 +421,24 @@ func (am *FreebuffAccountManager) RemoveAccount(token string) error {
 	return nil
 }
 
+// fbIsPremiumModel reports whether the upstream model is a premium (full-mode
+// only) model — i.e. NOT deepseek-v4-flash / mimo-v2.5.
+func fbIsPremiumModel(upstreamModel string) bool {
+	models := GetFBModels()
+	for i := range models {
+		if models[i].Upstream == upstreamModel {
+			return models[i].FullMode
+		}
+	}
+	return false
+}
+
 // Next returns the next available account (quota-aware, skip disabled + cooldown + exhausted).
 // Prefers accounts with lowest QuotaRecent (most remaining quota).
-func (am *FreebuffAccountManager) Next() (*FreebuffAccount, error) {
+// model: requested upstream model — accounts on "limited" tier are skipped for
+// premium (full-mode-only) models, and "blocked" accounts are always skipped.
+// Tier "" (unknown, not yet synced) passes through.
+func (am *FreebuffAccountManager) Next(model string) (*FreebuffAccount, error) {
 	am.mu.RLock()
 	defer am.mu.RUnlock()
 
@@ -377,7 +446,10 @@ func (am *FreebuffAccountManager) Next() (*FreebuffAccount, error) {
 		return nil, fmt.Errorf("no freebuff accounts available")
 	}
 
-	// Build list of eligible accounts (not disabled, not on cooldown, quota not exhausted)
+	premiumModel := fbIsPremiumModel(model)
+
+	// Build list of eligible accounts (not disabled, not on cooldown, quota not exhausted,
+	// tier-compatible with the requested model)
 	var eligible []*FreebuffAccount
 	var earliestReset time.Time
 	for _, acc := range am.accounts {
@@ -385,16 +457,20 @@ func (am *FreebuffAccountManager) Next() (*FreebuffAccount, error) {
 		disabled := acc.Disabled
 		cooldown := !acc.CooldownUntil.IsZero() && time.Now().Before(acc.CooldownUntil)
 		quotaExhausted := acc.QuotaLimit > 0 && acc.QuotaRecent >= acc.QuotaLimit
+		tierBlocked := acc.Tier == "blocked" || (acc.Tier == "limited" && premiumModel)
 		if !acc.QuotaResetAt.IsZero() && (earliestReset.IsZero() || acc.QuotaResetAt.Before(earliestReset)) {
 			earliestReset = acc.QuotaResetAt
 		}
 		acc.mu.Unlock()
-		if !disabled && !cooldown && !quotaExhausted {
+		if !disabled && !cooldown && !quotaExhausted && !tierBlocked {
 			eligible = append(eligible, acc)
 		}
 	}
 
 	if len(eligible) == 0 {
+		if premiumModel {
+			return nil, fmt.Errorf("all freebuff accounts on limited tier — premium model %q unavailable without full-access accounts", model)
+		}
 		if !earliestReset.IsZero() {
 			return nil, fmt.Errorf("all freebuff accounts quota exhausted, resets at %s", earliestReset.UTC().Format(time.RFC3339))
 		}
@@ -455,6 +531,13 @@ func (am *FreebuffAccountManager) ListAccounts() []map[string]any {
 			"quota_period":       acc.QuotaPeriod,
 			"quota_synced_at":    acc.QuotaSyncedAt,
 			"hourly_session_count": acc.HourlySessionCount,
+			"tier":                acc.Tier,
+			"country_code":        acc.CountryCode,
+			"country_block_reason": acc.CountryBlockReason,
+			"entitlement_base":     acc.EntitlementBase,
+			"entitlement_referral": acc.EntitlementReferral,
+			"entitlement_streak":   acc.EntitlementStreak,
+			"quota_by_model":       acc.QuotaByModel,
 		}
 		acc.mu.Unlock()
 		result = append(result, entry)
@@ -491,12 +574,19 @@ func (am *FreebuffAccountManager) ProbeAll() {
 	}
 }
 
-// SyncQuota syncs quota info for a single account from GET /api/v1/freebuff/session.
+// SyncQuota syncs quota + access-tier info for a single account from
+// GET /api/v1/freebuff/session. The response carries `accessTier` directly
+// (full/limited/blocked) + per-model entitlementBreakdown, so this doubles as
+// tier discovery. GET is 0-cost (doesn't create a session / burn quota).
+// If no active session, quota stays 0/0 (account is fresh, full quota available).
 func (am *FreebuffAccountManager) SyncQuota(acc *FreebuffAccount) error {
 	client := &http.Client{Timeout: 10 * time.Second}
 	req, _ := http.NewRequest("GET", FREEBUFF_API_BASE+FREEBUFF_SESSION_PATH, nil)
 	req.Header.Set("Authorization", "Bearer "+acc.Token)
 	req.Header.Set("User-Agent", "Freebuff-CLI/0.0.142")
+	// Force the FULL quota snapshot (including zero-limit models like GLM
+	// referral) — without this the server may return a compact response.
+	req.Header.Set("x-freebuff-include-unused-rate-limits", "1")
 	resp, err := client.Do(req)
 	if err != nil {
 		return fmt.Errorf("quota sync: %w", err)
@@ -508,30 +598,77 @@ func (am *FreebuffAccountManager) SyncQuota(acc *FreebuffAccount) error {
 	}
 
 	var data struct {
-		RateLimitsByModel map[string]struct {
+		Status              string `json:"status"`
+		AccessTier          string `json:"accessTier"` // "full" | "limited" | "blocked"
+		CountryCode         string `json:"countryCode"`
+		CountryBlockReason  string `json:"countryBlockReason"`
+		RateLimitsByModel   map[string]struct {
 			Limit       float64 `json:"limit"`
 			RecentCount float64 `json:"recentCount"`
 			ResetAt     string  `json:"resetAt"`
 			Period      string  `json:"period"`
 			WindowHours int     `json:"windowHours"`
+			EntitlementBreakdown struct {
+				Base      float64 `json:"base"`
+				Referral  float64 `json:"referral"`
+				Streak    float64 `json:"streak"`
+			} `json:"entitlementBreakdown"`
 		} `json:"rateLimitsByModel"`
+		RateLimit struct {
+			EntitlementBreakdown struct {
+				Base      float64 `json:"base"`
+				Referral  float64 `json:"referral"`
+				Streak    float64 `json:"streak"`
+			} `json:"entitlementBreakdown"`
+		} `json:"rateLimit"`
 	}
 	if err := json.Unmarshal(body, &data); err != nil {
 		return fmt.Errorf("quota sync parse: %w", err)
 	}
 
+	// Always persist tier/country info (present even without an active session)
+	acc.mu.Lock()
+	if data.AccessTier != "" {
+		acc.Tier = data.AccessTier
+	}
+	acc.CountryCode = data.CountryCode
+	acc.CountryBlockReason = data.CountryBlockReason
+	acc.EntitlementBase = data.RateLimit.EntitlementBreakdown.Base
+	acc.EntitlementReferral = data.RateLimit.EntitlementBreakdown.Referral
+	acc.EntitlementStreak = data.RateLimit.EntitlementBreakdown.Streak
+
+	// Per-model quota snapshot (full map incl. zero-limit models like GLM referral)
+	if len(data.RateLimitsByModel) > 0 {
+		qbm := make(map[string]FbModelQuota, len(data.RateLimitsByModel))
+		for name, rl := range data.RateLimitsByModel {
+			qbm[name] = FbModelQuota{
+				Limit:              rl.Limit,
+				RecentCount:        rl.RecentCount,
+				ResetAt:            rl.ResetAt,
+				Period:             rl.Period,
+				EntitlementBase:    rl.EntitlementBreakdown.Base,
+				EntitlementReferral: rl.EntitlementBreakdown.Referral,
+				EntitlementStreak:  rl.EntitlementBreakdown.Streak,
+			}
+		}
+		acc.QuotaByModel = qbm
+	}
+
 	// Use deepseek-v4-flash as the reference model (available in all tiers)
 	rl, ok := data.RateLimitsByModel["deepseek/deepseek-v4-flash"]
-	if !ok {
-		// No rate limit info — account might not have a session yet
-		acc.mu.Lock()
+	if !ok || data.Status == "none" {
+		// No active session — account is fresh, full quota available (0/6)
+		acc.QuotaRecent = 0
+		acc.QuotaLimit = 6 // default free tier limit
+		acc.QuotaPeriod = "pacific_day"
 		acc.QuotaSyncedAt = time.Now()
+		acc.CooldownUntil = time.Time{} // not exhausted
 		acc.mu.Unlock()
 		am.SaveAccount(acc)
+		slog.Debug("fb quota: no session, fresh account (0/6)", "module", "freebuff", "token", acc.Token[:8]+"...", "tier", acc.Tier)
 		return nil
 	}
 
-	acc.mu.Lock()
 	acc.QuotaRecent = rl.RecentCount
 	acc.QuotaLimit = rl.Limit
 	acc.QuotaPeriod = rl.Period
@@ -550,7 +687,9 @@ func (am *FreebuffAccountManager) SyncQuota(acc *FreebuffAccount) error {
 	acc.mu.Unlock()
 
 	am.SaveAccount(acc)
-	slog.Info("fb quota synced", "module", "freebuff", "token", acc.Token[:8]+"...", "recent", rl.RecentCount, "limit", rl.Limit, "reset", rl.ResetAt)
+	slog.Info("fb quota synced", "module", "freebuff", "token", acc.Token[:8]+"...",
+		"recent", rl.RecentCount, "limit", rl.Limit, "reset", rl.ResetAt,
+		"tier", data.AccessTier, "country", data.CountryCode)
 	return nil
 }
 
@@ -617,30 +756,144 @@ type fbRunEntry struct {
 	CreatedAt time.Time
 }
 
-// fbGetOrCreateSession returns an active session, creating one if needed.
-func fbGetOrCreateSession(client *http.Client, token, userID, model string) (*FreebuffSession, error) {
-	cacheKey := token + ":" + model
+// redis returns the underlying Redis client (nil-safe). Session/run cache is
+// persisted to Redis so it survives gateway restarts; the in-memory maps act
+// as a fast L1 layer.
+func (am *FreebuffAccountManager) redis() *redis.Client {
+	if am == nil || am.db == nil || !am.db.Ready() {
+		return nil
+	}
+	return am.db.Redis()
+}
 
-	// Check cache
+// cachedSession checks the in-memory L1 cache first, then Redis (L2).
+// Returns nil when no reusable session is found.
+func (am *FreebuffAccountManager) cachedSession(token, model string) *FreebuffSession {
+	cacheKey := fbSessionKeyPrefix + token + ":" + model
+
 	fbSessionCache.Lock()
 	cached, ok := fbSessionCache.m[cacheKey]
 	fbSessionCache.Unlock()
 	if ok && time.Until(cached.ExpiresAt) > FREEBUFF_SESSION_MIN_REMAINING {
+		return cached
+	}
+
+	rdb := am.redis()
+	if rdb != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+		defer cancel()
+		raw, err := rdb.Get(ctx, cacheKey).Result()
+		if err == nil && raw != "" {
+			var sess FreebuffSession
+			if json.Unmarshal([]byte(raw), &sess) == nil && sess.InstanceID != "" &&
+				time.Until(sess.ExpiresAt) > FREEBUFF_SESSION_MIN_REMAINING {
+				fbSessionCache.Lock()
+				fbSessionCache.m[cacheKey] = &sess
+				fbSessionCache.Unlock()
+				return &sess
+			}
+		}
+	}
+	return nil
+}
+
+// storeSession writes the session to both the in-memory cache and Redis
+// (Redis TTL = session expiry, so the key auto-dies when the session does).
+func (am *FreebuffAccountManager) storeSession(token, model string, sess *FreebuffSession) {
+	cacheKey := fbSessionKeyPrefix + token + ":" + model
+
+	fbSessionCache.Lock()
+	fbSessionCache.m[cacheKey] = sess
+	fbSessionCache.Unlock()
+
+	rdb := am.redis()
+	if rdb == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+	raw, err := json.Marshal(sess)
+	if err != nil {
+		return
+	}
+	ttl := time.Until(sess.ExpiresAt)
+	if ttl < time.Second {
+		ttl = time.Second
+	}
+	if err := rdb.Set(ctx, cacheKey, raw, ttl).Err(); err != nil {
+		slog.Warn("fb session cache set failed", "module", "freebuff", "error", err)
+	}
+}
+
+// cachedRun checks the in-memory run cache, then Redis (L2).
+func (am *FreebuffAccountManager) cachedRun(token, agentID string) (string, bool) {
+	cacheKey := fbRunKeyPrefix + token + ":" + agentID
+
+	fbRunCache.Lock()
+	cached, ok := fbRunCache.m[cacheKey]
+	fbRunCache.Unlock()
+	if ok && time.Since(cached.CreatedAt) < FREEBUFF_RUN_CACHE_TTL {
+		return cached.RunID, true
+	}
+
+	rdb := am.redis()
+	if rdb != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+		defer cancel()
+		raw, err := rdb.Get(ctx, cacheKey).Result()
+		if err == nil && raw != "" {
+			var entry fbRunEntry
+			if json.Unmarshal([]byte(raw), &entry) == nil && entry.RunID != "" &&
+				time.Since(entry.CreatedAt) < FREEBUFF_RUN_CACHE_TTL {
+				fbRunCache.Lock()
+				fbRunCache.m[cacheKey] = entry
+				fbRunCache.Unlock()
+				return entry.RunID, true
+			}
+		}
+	}
+	return "", false
+}
+
+// storeRun writes the run to both in-memory and Redis (TTL = run cache TTL).
+func (am *FreebuffAccountManager) storeRun(token, agentID, runID string) {
+	cacheKey := fbRunKeyPrefix + token + ":" + agentID
+	entry := fbRunEntry{RunID: runID, CreatedAt: time.Now()}
+
+	fbRunCache.Lock()
+	fbRunCache.m[cacheKey] = entry
+	fbRunCache.Unlock()
+
+	rdb := am.redis()
+	if rdb == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+	raw, _ := json.Marshal(entry)
+	if err := rdb.Set(ctx, cacheKey, raw, FREEBUFF_RUN_CACHE_TTL).Err(); err != nil {
+		slog.Warn("fb run cache set failed", "module", "freebuff", "error", err)
+	}
+}
+
+// fbGetOrCreateSession returns an active session, creating one if needed.
+// Session cache is L1 in-memory + L2 Redis (persistent across restarts).
+func (am *FreebuffAccountManager) fbGetOrCreateSession(client *http.Client, token, userID, model string) (*FreebuffSession, error) {
+	// Check cache (L1 memory, then L2 Redis)
+	if cached := am.cachedSession(token, model); cached != nil {
 		return cached, nil
 	}
 
 	// GET current session (0 cost — doesn't create one)
 	sess, err := fbGetSession(client, token)
 	if err == nil && sess != nil && sess.Model == model && time.Until(sess.ExpiresAt) > FREEBUFF_SESSION_MIN_REMAINING {
-		fbSessionCache.Lock()
-		fbSessionCache.m[cacheKey] = sess
-		fbSessionCache.Unlock()
+		am.storeSession(token, model, sess)
 		return sess, nil
 	}
 
 	// If model mismatch, delete old session
 	if sess != nil && sess.Model != model {
-		fbDeleteSession(client, token)
+		am.fbDeleteSession(client, token)
 	}
 
 	// Fire ads + streak (best-effort)
@@ -652,9 +905,7 @@ func fbGetOrCreateSession(client *http.Client, token, userID, model string) (*Fr
 		return nil, fmt.Errorf("create session: %w", err)
 	}
 
-	fbSessionCache.Lock()
-	fbSessionCache.m[cacheKey] = sess
-	fbSessionCache.Unlock()
+	am.storeSession(token, model, sess)
 	return sess, nil
 }
 
@@ -784,24 +1035,36 @@ func fbGetSessionWithInstance(client *http.Client, token, instanceID string) (*F
 	}, nil
 }
 
-func fbDeleteSession(client *http.Client, token string) {
-	req, _ := http.NewRequest("DELETE", FREEBUFF_API_BASE+FREEBUFF_SESSION_PATH, nil)
-	req.Header.Set("Authorization", "Bearer "+token)
-	req.Header.Set("User-Agent", "Freebuff-CLI/0.0.142")
-	resp, err := client.Do(req)
-	if err != nil {
-		return
-	}
-	resp.Body.Close()
-
-	// Clear all cached sessions for this token
+func (am *FreebuffAccountManager) fbDeleteSession(client *http.Client, token string) {
+	// Clear all cached sessions for this token FIRST (memory + Redis) so a
+	// stale cache entry can never survive — even if the upstream DELETE fails.
 	fbSessionCache.Lock()
 	for k := range fbSessionCache.m {
-		if strings.HasPrefix(k, token+":") {
+		if strings.HasPrefix(k, fbSessionKeyPrefix+token+":") {
 			delete(fbSessionCache.m, k)
 		}
 	}
 	fbSessionCache.Unlock()
+
+	rdb := am.redis()
+	if rdb != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+		defer cancel()
+		keys, err := rdb.Keys(ctx, fbSessionKeyPrefix+token+":*").Result()
+		if err == nil && len(keys) > 0 {
+			if derr := rdb.Del(ctx, keys...).Err(); derr != nil {
+				slog.Warn("fb session cache del failed", "module", "freebuff", "error", derr)
+			}
+		}
+	}
+
+	// Best-effort upstream DELETE
+	req, _ := http.NewRequest("DELETE", FREEBUFF_API_BASE+FREEBUFF_SESSION_PATH, nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("User-Agent", "Freebuff-CLI/0.0.142")
+	if resp, err := client.Do(req); err == nil {
+		resp.Body.Close()
+	}
 }
 
 // fbFireAdsAndStreak simulates the official CLI behavior (best-effort, don't block).
@@ -839,15 +1102,11 @@ func fbFireAdsAndStreak(client *http.Client, token string) {
 }
 
 // fbGetOrCreateRun returns a cached runId or creates a new one.
-func fbGetOrCreateRun(client *http.Client, token, agentId string) (string, error) {
-	cacheKey := token + ":" + agentId
-
-	// Check cache
-	fbRunCache.Lock()
-	cached, ok := fbRunCache.m[cacheKey]
-	fbRunCache.Unlock()
-	if ok && time.Since(cached.CreatedAt) < FREEBUFF_RUN_CACHE_TTL {
-		return cached.RunID, nil
+// Run cache is L1 in-memory + L2 Redis (TTL 10min).
+func (am *FreebuffAccountManager) fbGetOrCreateRun(client *http.Client, token, agentId string) (string, error) {
+	// Check cache (L1 memory, then L2 Redis)
+	if runID, ok := am.cachedRun(token, agentId); ok {
+		return runID, nil
 	}
 
 	// POST /api/v1/agent-runs
@@ -881,9 +1140,7 @@ func fbGetOrCreateRun(client *http.Client, token, agentId string) (string, error
 		return "", fmt.Errorf("no runId in response")
 	}
 
-	fbRunCache.Lock()
-	fbRunCache.m[cacheKey] = fbRunEntry{RunID: data.RunID, CreatedAt: time.Now()}
-	fbRunCache.Unlock()
+	am.storeRun(token, agentId, data.RunID)
 	return data.RunID, nil
 }
 
@@ -1306,8 +1563,10 @@ func ProxyFreebuff(c *gin.Context, body []byte, bodyMap map[string]any, am *Free
 			return
 		}
 
-		acc, err := am.Next()
+		acc, err := am.Next(upstreamModel)
 		if err != nil {
+			lastErr = fmt.Sprintf("next: %v", err)
+			slog.Warn("fb no eligible account", "module", "freebuff", "model", upstreamModel, "error", err)
 			break
 		}
 
@@ -1315,7 +1574,7 @@ func ProxyFreebuff(c *gin.Context, body []byte, bodyMap map[string]any, am *Free
 		acc.mu.Lock()
 
 		// 1. Get/create session
-		sess, err := fbGetOrCreateSession(client, acc.Token, acc.UserID, upstreamModel)
+		sess, err := am.fbGetOrCreateSession(client, acc.Token, acc.UserID, upstreamModel)
 		if err != nil {
 			acc.mu.Unlock()
 			lastErr = fmt.Sprintf("session: %v", err)
@@ -1324,7 +1583,7 @@ func ProxyFreebuff(c *gin.Context, body []byte, bodyMap map[string]any, am *Free
 		}
 
 		// 2. Get/create run
-		runID, err := fbGetOrCreateRun(client, acc.Token, agentID)
+		runID, err := am.fbGetOrCreateRun(client, acc.Token, agentID)
 		if err != nil {
 			acc.mu.Unlock()
 			lastErr = fmt.Sprintf("run: %v", err)
@@ -1382,8 +1641,8 @@ func ProxyFreebuff(c *gin.Context, body []byte, bodyMap map[string]any, am *Free
 			resp.Body.Close()
 			if strings.Contains(string(respBody), "waiting_room_required") {
 				slog.Debug("fb 428 stale session, recreating", "module", "freebuff", "attempt", attempt+1)
-				fbDeleteSession(client, acc.Token)
-				sess, err = fbGetOrCreateSession(client, acc.Token, acc.UserID, upstreamModel)
+				am.fbDeleteSession(client, acc.Token)
+				sess, err = am.fbGetOrCreateSession(client, acc.Token, acc.UserID, upstreamModel)
 				if err != nil {
 					acc.mu.Unlock()
 					lastErr = fmt.Sprintf("session recreate: %v", err)

@@ -67,10 +67,14 @@ and log every request/response to ClickHouse — all behind a single Bearer toke
 - **Credential Test** (v1.6.2) — per-row Test for Grok + CodeBuddy (API key & OAuth).
   Probes upstream directly (`POST /accounts/test`, `POST /cb/keys/test`).
 - **Freebuff provider** (v1.6.4) — third upstream (`fb/` prefix). Free ad-supported
-  LLM via Codebuff rebrand. 6 models (deepseek-v4-flash, mimo-v2.5, deepseek-v4-pro,
-  minimax-m3, gpt-5.6-luna, glm-5.2). OAuth device flow, bulk import (pipe format),
-  quota sync + auto-cooldown, Buffy prefix auto-inject, tool calling bypass,
-  1M context auto-clamp. Dashboard: Freebuff tab + overview cards.
+  LLM via Codebuff rebrand. **Dynamic model registry** (freebuff-models.json, 6h refresh)
+  with static fallback. OAuth device flow, bulk import (pipe format), per-model
+  quota snapshot + access-tier detection (full/limited/blocked) + premium gating,
+  Buffy prefix auto-inject, tool calling bypass, 1M context auto-clamp.
+  Dashboard: Freebuff tab + per-account expandable quota rows + overview cards.
+- **Dynamic model registry** (v1.6.4+) — Freebuff + Grok model lists refresh from
+  upstream sources every 6h (`POST /models/refresh` for manual trigger). New models
+  appear without code changes; static fallback on fetch failure (zero downtime).
 - **API-key auth** with role-based access — `inference` (default, least privilege)
   can only reach `/v1/*`; `admin` reaches everything.
 - **Per-key model whitelist** with glob patterns (`grok-*`, `cb/*`, exact match).
@@ -314,9 +318,11 @@ Dashboard: Type badge, Expires, Add OAuth Manual|Login URL, Bulk OAuth, Sync cre
 | Bulk (pipe format) | `POST /fb/import/bulk` | `{"raw":"token1\|email1\|userid1\ntoken2\|email2\|userid2"}` |
 | OAuth device flow | `POST /fb/oauth/device/start` | generates login URL → `GET /fb/oauth/device/poll` auto-imports |
 | Quota sync | `POST /fb/quota/sync` | `{"token":"optional"}` (empty = all) |
+| Model refresh | `POST /models/refresh` | Manual dynamic model-registry refresh (Freebuff + Grok; per-upstream source/count/error) |
 
 Pipe format: `token|email|userid` — token required, email+userid optional, bare UUID also works.
 Buffy prefix auto-injected. Quota auto-synced every 5min. Auto-cooldown when exhausted.
+Freebuff + Grok model lists auto-refresh every 6h from upstream sources (static fallback on failure).
 
 ---
 

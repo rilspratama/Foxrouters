@@ -140,6 +140,33 @@ func HandleHealth(grokAM *upstream.GrokAccountManager, cbKM *upstream.CBKeyManag
 				return active
 			}(),
 			"fb_accounts":       fbAM.Len(),
+			"fb_tier_full": func() int {
+				count := 0
+				for _, a := range fbAM.ListAccounts() {
+					if a["tier"] == "full" {
+						count++
+					}
+				}
+				return count
+			}(),
+			"fb_tier_limited": func() int {
+				count := 0
+				for _, a := range fbAM.ListAccounts() {
+					if a["tier"] == "limited" {
+						count++
+					}
+				}
+				return count
+			}(),
+			"fb_tier_blocked": func() int {
+				count := 0
+				for _, a := range fbAM.ListAccounts() {
+					if a["tier"] == "blocked" {
+						count++
+					}
+				}
+				return count
+			}(),
 			"fb_quota_used":     func() float64 { t, _, _ := fbAM.QuotaSummary(); return t }(),
 			"fb_quota_limit":    func() float64 { _, t, _ := fbAM.QuotaSummary(); return t }(),
 			"fb_quota_exhausted": func() int {

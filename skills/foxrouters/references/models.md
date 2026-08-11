@@ -1,5 +1,11 @@
 # FoxRouters — Quick Model Reference
 
+> **Dynamic model registry** (v1.6.4+): Freebuff + Grok model lists refresh
+> from upstream sources every 6h (`FbModelsWorker` / `GrokModelsWorker`),
+> so new models appear without code changes. `/v1/models` serves the dynamic
+> list with static fallback. Manual refresh: `POST /models/refresh` (admin).
+> CodeBuddy has no models endpoint — its list is static.
+
 ## Grok Models (upstream: cli-chat-proxy.grok.com)
 
 | Model ID | Notes |
@@ -13,6 +19,27 @@
 | `grok-4.5-none` | No reasoning (fastest) |
 
 **Alias mechanism:** `grok-4.5-{level}` → `grok-4.5` + `reasoning_effort` param. Client-set `reasoning_effort` wins.
+**Dynamic:** when the registry has been refreshed, aliases are generated from
+the upstream `reasoning_efforts[]` list (`auto`/`none` stay gateway-internal).
+
+## Freebuff Models (upstream: www.codebuff.com — Codebuff rebrand)
+
+**Dynamic** — fetched from `freebuff-models.json` (freebuff2api project releases,
+mirrors `CodebuffAI/freebuff` official source). Static fallback:
+
+| Model ID | Pool | Notes |
+|----------|------|-------|
+| `fb/deepseek-v4-flash` | standard | Limited mode (default) |
+| `fb/mimo-v2.5` | standard | Limited mode |
+| `fb/deepseek-v4-pro` | premium | Full mode only (US/EU residential IP) |
+| `fb/minimax-m3` | premium | Full mode only |
+| `fb/gpt-5.6-luna` | premium | Full mode only |
+| `fb/glm-5.2` | glm (referral) | Referral-unlock only |
+
+Newer models appear automatically after a registry refresh, e.g.
+`fb/laguna-s-2.1`, `fb/kimi-k3-eco`, `fb/claude-fable-5`,
+`fb/muse-spark-1.2-contributor`. Premium/glm pool membership → `FullMode`
+(full-access accounts only) — limited-tier accounts are skipped for those.
 
 ## CodeBuddy Models (upstream: www.codebuddy.ai/v2)
 

@@ -44,6 +44,47 @@ Policy: **test (`go test -race`) before build/restart**. Secrets only via `.gate
 ## v1.6.5 (working tree, not released) — Freebuff provider integration (2026-08-10)
 
 ### Added
+- **Dynamic model registry** (`internal/upstream/model_registry.go`) — Freebuff +
+  Grok model lists now refresh from upstream sources every 6h (workers gated by
+  `WORKERS_DISABLED`), so new models appear WITHOUT code changes / rebuilds:
+  - Freebuff: `freebuff-models.json` from the freebuff2api project (daily
+    generated, mirrors CodebuffAI/freebuff official source) → full model table
+    {id, session, agent, upstream} + premium/glm/standard pools → `FullMode`
+    auto-detected. New models like `fb/laguna-s-2.1`, `fb/kimi-k3-eco`,
+    `fb/claude-fable-5`, `fb/muse-spark` picked up automatically.
+  - Grok: upstream `GET /v1/models` (live account) → base model + `reasoning_efforts`
+    → aliases generated dynamically (auto/none kept as gateway-internal).
+  - CodeBuddy: static (verified — no models endpoint).
+  - `/v1/models` reads the registry with static fallback (zero downtime on fetch
+    failure). `POST /models/refresh` (admin) triggers manual refresh and returns
+    per-upstream source/count/error. Tests: `TestParseFBModelsJSON` (+empty),
+    `TestGetFBModelsFallback`.
+- **Freebuff per-model quota snapshot** — `SyncQuota` stores the full
+  `rateLimitsByModel` map (`quota_by_model` JSON on `fb:account:<token>`):
+  per-model used/limit/reset/period + entitlement breakdown. `/fb/accounts`
+  exposes it; dashboard Freebuff table has an expandable **▶** row per account
+  showing each model's quota (color-coded used %, entitlement, reset time).
+  Tests: `TestFbQuotaByModelJSONRoundTrip`.
+- **Freebuff access-tier detection** — `SyncQuota` now sends
+  `x-freebuff-include-unused-rate-limits: 1` and parses `accessTier`
+  (`full`/`limited`/`blocked`) + `countryCode` + `countryBlockReason` +
+  `entitlementBreakdown` (base/referral/streak) from `GET /api/v1/freebuff/session`.
+  Tier persisted to Redis (`fb:account:<token>`), exposed in `/fb/accounts`,
+  `/health` (`fb_tier_full`/`fb_tier_limited`/`fb_tier_blocked`) + dashboard
+  Freebuff table (Tier column). `Next(model)` skips limited-tier accounts for
+  premium (full-mode-only) models + always skips blocked accounts — no more
+  wasted quota probing models that can't run.
+- **Freebuff session/run cache persisted to Redis** — `fb:session:<token>:<model>` +
+  `fb:run:<token>:<agent>` (L1 in-memory + L2 Redis, survives gateway restart).
+  `fbGetOrCreateSession`/`fbGetOrCreateRun`/`fbDeleteSession` are now manager
+  methods; Redis TTL = session expiry / 10min run TTL. `fbDeleteSession` clears
+  cache first (upstream DELETE best-effort). Tests in `internal/upstream/freebuff_test.go`.
+- **Proxy pool freebuff scope** (`internal/proxy/pool.go`) — new `UpstreamFreebuff` constant
+  + valid value in `Upstreams`. Proxies can now be scoped to `["freebuff"]` only (was
+  `all`/`grok`/`codebuddy`). `ProxyFreebuff()` already called `getClient(up, "freebuff")` —
+  previously only `all`-scoped proxies applied. Dashboard add/edit proxy modals gained a
+  Freebuff checkbox. Tests: `TestProxyPool_ScopingFreebuff`, `TestProxyPool_AllScopeCoversFreebuff`,
+  `TestProxyPool_RejectUnknownScope`, extended `TestProxyPool_EmptyUpstreamsDefaultsToAll`.
 - **Freebuff provider** (`fb/` prefix) — third upstream alongside Grok + CodeBuddy.
   6 models: `fb/deepseek-v4-flash`, `fb/mimo-v2.5` (limited mode), `fb/deepseek-v4-pro`,
   `fb/minimax-m3`, `fb/gpt-5.6-luna`, `fb/glm-5.2` (full mode only).

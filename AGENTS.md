@@ -66,7 +66,7 @@ Log backend choices (`LOG_BACKEND` env, default `sqlite`):
 5. History write async only; credentials never in CH  
 6. Full body unlimited in CH; log `id` JSON **string** for browsers  
 7. No live gateway key inject into `/dashboard` HTML  
-8. Proxy pool: `getClient(default, upstream)` — returns proxied client if pool has enabled proxies matching upstream scope, else direct. Transport cache per proxy ID. Auto-disable after 5 fails.
+8. Proxy pool: `getClient(default, upstream)` — returns proxied client if pool has enabled proxies matching upstream scope (`all`/`grok`/`codebuddy`/`freebuff`), else direct. Transport cache per proxy ID. Auto-disable after 5 fails.
 
 ### Token refresh
 - **Grok:** Pre-warm every 30s, 30min window, 10 concurrent  
@@ -91,10 +91,10 @@ Log backend choices (`LOG_BACKEND` env, default `sqlite`):
 
 ### Freebuff provider (`fb/` prefix)
 - **Upstream:** `www.codebuff.com/api/v1/chat/completions` (OpenAI-compatible, Bearer auth)
-- **Models:** `fb/deepseek-v4-flash`, `fb/mimo-v2.5` (limited mode), `fb/deepseek-v4-pro`, `fb/minimax-m3`, `fb/gpt-5.6-luna`, `fb/glm-5.2` (full mode only — US/EU residential IP)
+- **Models:** dynamic — fetched every 6h from `freebuff-models.json` (freebuff2api project, mirrors CodebuffAI/freebuff official source). Static fallback: `fb/deepseek-v4-flash`, `fb/mimo-v2.5` (limited mode), `fb/deepseek-v4-pro`, `fb/minimax-m3`, `fb/gpt-5.6-luna`, `fb/glm-5.2` (full mode only — US/EU residential IP). See **Dynamic Model Registry** below.
 - **Auth:** Device-code flow → authToken UUID (no expiry). `POST /fb/oauth/device/start` → login URL → `GET /fb/oauth/device/poll` (auto-import on ready). Bulk import: `POST /fb/import/bulk` (pipe format `token|email|userid`, email+userid optional).
 - **Session:** 1hr TTL, model-locked. `fbGetOrCreateSession` caches in-memory (L1) + Redis (L2). Switch model = DELETE + 5s wait + POST new.
-- **Quota:** `GET /api/v1/freebuff/session` → `rateLimitsByModel.{model}.{limit, recentCount, resetAt}`. `SyncQuota()` per account, `FbQuotaSyncWorker` every 5min. Auto-cooldown when `recentCount >= limit` until `resetAt`. Quota-aware `Next()` skips exhausted, prefers lowest `QuotaRecent`.
+- **Quota + tier:** `GET /api/v1/freebuff/session` (header `x-freebuff-include-unused-rate-limits: 1`) → `rateLimitsByModel.{model}.{limit, recentCount, resetAt}` + `accessTier` (`full`/`limited`/`blocked`) + `entitlementBreakdown`. `SyncQuota()` per account, `FbQuotaSyncWorker` every 5min. Auto-cooldown when `recentCount >= limit` until `resetAt`. Quota-aware `Next(model)` skips exhausted, prefers lowest `QuotaRecent`, skips limited-tier for premium models + blocked accounts always.
 - **Buffy prefix:** `fbTransform` auto-prepends `"You are Buffy, the strategic coding assistant.\n\n"` to system prompt. Client system prompt appended after.
 - **Tool calling:** `end_turn` dummy tool injected to bypass foreign client detection.
 - **Max tokens:** Auto-default 384K, auto-clamp to fit 1M combined context (prompt+completion ≤ 1,048,576).
@@ -102,6 +102,25 @@ Log backend choices (`LOG_BACKEND` env, default `sqlite`):
 - **Env gate:** `FREEBUFF_DISABLED=1` skips provider.
 - **Dashboard:** Freebuff tab in Accounts page (5 buttons: +Add Token, Bulk Import, +Add OAuth, Sync Quota, Refresh). Overview cards: FB count+quota, FB circuit, FB latency, FB errors.
 - **Endpoints:** `POST /fb/import`, `POST /fb/import/bulk`, `POST /fb/quota/sync`, `GET /fb/accounts`, `DELETE /fb/accounts/:token`, `POST /fb/oauth/device/start`, `GET /fb/oauth/device/poll`.
+
+### Dynamic Model Registry (`internal/upstream/model_registry.go`)
+Refreshes Freebuff + Grok model lists from upstream sources every **6h** so new
+models appear WITHOUT code changes / rebuilds. Static fallback on any
+fetch/parse failure (zero downtime). CodeBuddy is always static (no models
+endpoint — verified).
+
+| Upstream | Source | What's fetched |
+|----------|--------|----------------|
+| Freebuff | `pingmike2/freebuff2api-wokers` releases `freebuff-models.json` (daily generated, mirrors `CodebuffAI/freebuff`) | Full model table `{id, session, agent, upstream}` + `pools {premium, glm, standard}` → `FullMode` auto-detected (premium+glm = full-mode-only) |
+| Grok | upstream `GET /v1/models` (live account) | Base model + `reasoning_efforts[]` → aliases generated dynamically (`auto`/`none` kept as gateway-internal) |
+| CodeBuddy | — (none) | static |
+
+- `/v1/models` reads the registry (Grok + Freebuff sections), static fallback.
+- Workers: `FbModelsWorker(ctx)`, `GrokModelsWorker(ctx, grokAM)` — gated by `WORKERS_DISABLED=1` (dev).
+- Manual trigger: `POST /models/refresh` (admin) → per-upstream `{source, synced_at, count, error}`.
+- `fbModelConfig()` / `fbIsPremiumModel()` read the dynamic list (registry → static fallback).
+- Accessors: `GetFBModels()`, `FBModelsInfo()`, `GetGrokModels()`, `GrokModelsInfo()`.
+- GatewayID convention: `fb/<short-name>` — provider/ prefix stripped (`deepseek/deepseek-v4-flash` → `fb/deepseek-v4-flash`).
 
 ## File map
 | File | Role |
@@ -134,7 +153,9 @@ Log backend choices (`LOG_BACKEND` env, default `sqlite`):
 | `internal/upstream/codebuddy_oauth_test.go` | OAuth import / EnsureValid / refresh tests |
 | `internal/upstream/codebuddy_credit_sync_test.go` | Meter sync tests (API key + OAuth, Status==3 disable) |
 | `internal/upstream/freebuff.go` | Freebuff pool, quota sync, session/run cache, Buffy prefix, fbTransform, ProxyFreebuff |
+| `internal/upstream/model_registry.go` | Dynamic model registry — Freebuff (freebuff-models.json) + Grok (/v1/models) refresh workers, accessors, static fallback |
 | `internal/handlers/freebuff_handlers.go` | FB import (single+bulk pipe format), quota sync, accounts list, delete, OAuth device flow |
+| `internal/handlers/models.go` | `POST /models/refresh` — manual model-registry refresh (per-upstream source/count/error) |
 | `internal/upstream/credential_probe.go` | Direct upstream Test for CB key/OAuth + Grok account |
 | `internal/handlers/credential_probe.go` | `POST /cb/keys/test`, `POST /accounts/test` |
 | `internal/proxy/filters.go` | Pudidil content filter — strips Claude/Anthropic identity + billing headers before upstream |
@@ -191,6 +212,7 @@ curl -s http://127.0.0.1:20130/health
 | `GET /grok/selector-mode` | Current Grok account selection mode + sticky count |
 | `PUT /grok/selector-mode` | `{"mode":"hybrid"}` → switch + Redis-persist |
 | `POST /accounts/billing/sync` | Manual billing sync (all `{}` or one by email) |
+| `POST /models/refresh` | Manual dynamic model-registry refresh (Freebuff + Grok; per-upstream source/count/error) |
 | `GET /cb-stats` | CB credits + `cred_type` / remain / package / meter_* |
 | `GET/POST /api/keys` … | Gateway key CRUD |
 | `GET/POST /api/proxies` … | Proxy pool CRUD + test + toggle |

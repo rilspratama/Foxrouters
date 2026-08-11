@@ -119,17 +119,6 @@ func ProxyRequest(grokAM *upstream.GrokAccountManager, cbKM *upstream.CBKeyManag
 		// /v1/models — local
 		if path == "/v1/models" || path == "/models" {
 			models := []gin.H{
-				// Grok models
-				{"id": "grok-4.5", "object": "model", "owned_by": "xai", "reasoning": true},
-				{"id": "grok-4.5-high", "object": "model", "owned_by": "xai", "reasoning": true},
-				{"id": "grok-4.5-medium", "object": "model", "owned_by": "xai", "reasoning": true},
-				{"id": "grok-4.5-low", "object": "model", "owned_by": "xai", "reasoning": true},
-				{"id": "grok-4.5-xhigh", "object": "model", "owned_by": "xai", "reasoning": true},
-				{"id": "grok-4.5-auto", "object": "model", "owned_by": "xai", "reasoning": true},
-				{"id": "grok-4.5-none", "object": "model", "owned_by": "xai", "reasoning": true},
-				{"id": "grok-4", "object": "model", "owned_by": "xai", "reasoning": true},
-				{"id": "grok-4-fast-reasoning", "object": "model", "owned_by": "xai", "reasoning": true},
-				{"id": "grok-code-fast-1", "object": "model", "owned_by": "xai", "reasoning": true},
 				// CodeBuddy — GPT
 				{"id": "gpt-5.6-sol", "object": "model", "owned_by": "codebuddy", "reasoning": true},
 				{"id": "gpt-5.6-terra", "object": "model", "owned_by": "codebuddy", "reasoning": true},
@@ -156,13 +145,41 @@ func ProxyRequest(grokAM *upstream.GrokAccountManager, cbKM *upstream.CBKeyManag
 				{"id": "kimi-k3", "object": "model", "owned_by": "codebuddy", "reasoning": true},
 				// CodeBuddy — Default
 				{"id": "default-model", "object": "model", "owned_by": "codebuddy", "reasoning": true},
-			// Freebuff
-			{"id": "fb/deepseek-v4-flash", "object": "model", "owned_by": "freebuff", "reasoning": true},
-			{"id": "fb/mimo-v2.5", "object": "model", "owned_by": "freebuff", "reasoning": false},
-			{"id": "fb/deepseek-v4-pro", "object": "model", "owned_by": "freebuff", "reasoning": true},
-			{"id": "fb/minimax-m3", "object": "model", "owned_by": "freebuff", "reasoning": false},
-			{"id": "fb/gpt-5.6-luna", "object": "model", "owned_by": "freebuff", "reasoning": false},
-			{"id": "fb/glm-5.2", "object": "model", "owned_by": "freebuff", "reasoning": true},
+			}
+			// Grok models — dynamic from upstream /v1/models when refreshed,
+			// static fallback otherwise (aliases are reasoning_effort variants).
+			if gEntries := upstream.GetGrokModels(); len(gEntries) > 0 {
+				for _, g := range gEntries {
+					models = append(models, gin.H{"id": g.ID, "object": "model", "owned_by": "xai", "reasoning": true})
+					for _, e := range g.ReasoningEfforts {
+						if e != "" {
+							models = append(models, gin.H{"id": g.ID + "-" + e, "object": "model", "owned_by": "xai", "reasoning": true})
+						}
+					}
+					if g.ID == "grok-4.5" {
+						// Gateway-internal aliases (not in upstream efforts list)
+						models = append(models,
+							gin.H{"id": "grok-4.5-auto", "object": "model", "owned_by": "xai", "reasoning": true},
+							gin.H{"id": "grok-4.5-none", "object": "model", "owned_by": "xai", "reasoning": true})
+					}
+				}
+			} else {
+				models = append(models,
+					gin.H{"id": "grok-4.5", "object": "model", "owned_by": "xai", "reasoning": true},
+					gin.H{"id": "grok-4.5-high", "object": "model", "owned_by": "xai", "reasoning": true},
+					gin.H{"id": "grok-4.5-medium", "object": "model", "owned_by": "xai", "reasoning": true},
+					gin.H{"id": "grok-4.5-low", "object": "model", "owned_by": "xai", "reasoning": true},
+					gin.H{"id": "grok-4.5-xhigh", "object": "model", "owned_by": "xai", "reasoning": true},
+					gin.H{"id": "grok-4.5-auto", "object": "model", "owned_by": "xai", "reasoning": true},
+					gin.H{"id": "grok-4.5-none", "object": "model", "owned_by": "xai", "reasoning": true},
+					gin.H{"id": "grok-4", "object": "model", "owned_by": "xai", "reasoning": true},
+					gin.H{"id": "grok-4-fast-reasoning", "object": "model", "owned_by": "xai", "reasoning": true},
+					gin.H{"id": "grok-code-fast-1", "object": "model", "owned_by": "xai", "reasoning": true})
+			}
+			// Freebuff models — dynamic from the model registry
+			// (fetched from freebuff-models.json), static fallback otherwise.
+			for _, m := range upstream.GetFBModels() {
+				models = append(models, gin.H{"id": m.GatewayID, "object": "model", "owned_by": "freebuff", "reasoning": m.Reasoning})
 			}
 			// Backward-compat aliases: cb/<model> → same model, same upstream.
 			// Routing treats non-grok-* as CodeBuddy, so both shapes work.

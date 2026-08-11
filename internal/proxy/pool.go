@@ -59,7 +59,7 @@ const (
 // ProxyEntry is the API-visible shape of one proxy pool entry.
 //
 // Upstreams scopes which upstream families a proxy applies to. Values are
-// drawn from {"all", "grok", "codebuddy"}. An entry containing "all"
+// drawn from {"all", "grok", "codebuddy", "freebuff"}. An entry containing "all"
 // matches every Next(upstream) call (used for backward compatibility with
 // pre-scoping entries and for shared proxies). Otherwise the entry only
 // matches when its list contains the requested upstream name.
@@ -72,7 +72,7 @@ type ProxyEntry struct {
 	Password   string    `json:"password,omitempty"`
 	Enabled    bool      `json:"enabled"`
 	Label      string    `json:"label,omitempty"`
-	Upstreams  []string  `json:"upstreams"` // {"all"} | subset of {"grok","codebuddy"}
+	Upstreams  []string  `json:"upstreams"` // {"all"} | subset of {"grok","codebuddy","freebuff"}
 	CreatedAt  time.Time `json:"created_at"`
 	LastUsedAt time.Time `json:"last_used_at,omitempty"`
 	FailCount  int       `json:"fail_count"`
@@ -85,6 +85,7 @@ const (
 	UpstreamAll       = "all"
 	UpstreamGrok      = "grok"
 	UpstreamCodeBuddy = "codebuddy"
+	UpstreamFreebuff  = "freebuff"
 )
 
 // validUpstreams is the set of accepted values in ProxyEntry.Upstreams.
@@ -92,6 +93,7 @@ var validUpstreams = map[string]struct{}{
 	UpstreamAll:       {},
 	UpstreamGrok:      {},
 	UpstreamCodeBuddy: {},
+	UpstreamFreebuff:  {},
 }
 
 // AppliesTo reports whether the entry is scoped to the given upstream. An
@@ -403,7 +405,7 @@ func (p *ProxyPool) Toggle(id string) (bool, error) {
 }
 
 // Next returns the next enabled entry scoped to the given upstream via
-// round-robin. `upstream` should be one of "grok" or "codebuddy". An
+// round-robin. `upstream` should be one of "grok", "codebuddy" or "freebuff". An
 // entry whose Upstreams list contains "all" is always eligible; otherwise
 // the list must contain the requested upstream. Returns (nil, error)
 // when no scoped proxies are enabled — callers treat this as a signal to
@@ -627,7 +629,7 @@ func validateEntry(e *ProxyEntry) error {
 	e.Upstreams = normaliseUpstreams(e.Upstreams)
 	for _, u := range e.Upstreams {
 		if _, ok := validUpstreams[u]; !ok {
-			return fmt.Errorf("upstream must be one of 'all', 'grok', 'codebuddy' (got %q)", u)
+			return fmt.Errorf("upstream must be one of 'all', 'grok', 'codebuddy', 'freebuff' (got %q)", u)
 		}
 	}
 	switch e.Protocol {
