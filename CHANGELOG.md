@@ -11,6 +11,12 @@ Policy: **test (`go test -race`) before build/restart**. Secrets only via `.gate
 ## v1.6.4+ (working tree, not released) — Freebuff provider integration (2026-08-10)
 
 ### Added
+- **Freebuff per-model quota snapshot** — `SyncQuota` stores the full
+  `rateLimitsByModel` map (`quota_by_model` JSON on `fb:account:<token>`):
+  per-model used/limit/reset/period + entitlement breakdown. `/fb/accounts`
+  exposes it; dashboard Freebuff table has an expandable **▶** row per account
+  showing each model's quota (color-coded used %, entitlement, reset time).
+  Tests: `TestFbQuotaByModelJSONRoundTrip`.
 - **Freebuff access-tier detection** — `SyncQuota` now sends
   `x-freebuff-include-unused-rate-limits: 1` and parses `accessTier`
   (`full`/`limited`/`blocked`) + `countryCode` + `countryBlockReason` +

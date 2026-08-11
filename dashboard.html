@@ -2445,7 +2445,7 @@ async function loadFBAccounts() {
       body.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:24px;color:var(--text-tertiary);font-size:13px">No Freebuff tokens. Click "+ Add Token" to import.</td></tr>';
       return;
     }
-    body.innerHTML = data.accounts.map(function(a) {
+    body.innerHTML = data.accounts.map(function(a, idx) {
       var statusBadge;
       if (a.status === 'active') {
         statusBadge = '<span style="color:var(--success);font-weight:600">● active</span>';
@@ -2459,20 +2459,59 @@ async function loadFBAccounts() {
       if (a.tier === 'full') tierBadge = '<span style="color:var(--success);font-weight:600">full</span>';
       else if (a.tier === 'limited') tierBadge = '<span style="color:var(--warning);font-weight:600">limited</span>';
       else if (a.tier === 'blocked') tierBadge = '<span style="color:var(--danger);font-weight:600">blocked</span>';
+      var hasQuota = a.quota_by_model && Object.keys(a.quota_by_model).length > 0;
       return '<tr>' +
-        '<td class="mono" style="font-size:12px">' + escHtml(a.token) + '</td>' +
+        '<td class="mono" style="font-size:12px">' + (hasQuota ? '<span style="cursor:pointer;color:var(--accent);font-size:10px" onclick="toggleFbQuota(' + idx + ')">▶</span> ' : '') + escHtml(a.token) + '</td>' +
         '<td>' + escHtml(a.email || '—') + '</td>' +
         '<td class="mono" style="font-size:11px;color:var(--text-tertiary)">' + escHtml(a.user_id ? a.user_id.substring(0,8) + '…' : '—') + '</td>' +
         '<td>' + quota + '</td>' +
         '<td>' + tierBadge + (a.country_code ? ' <span class="mono" style="font-size:10px;color:var(--text-tertiary)">' + escHtml(a.country_code) + '</span>' : '') + '</td>' +
         '<td>' + statusBadge + '</td>' +
         '<td><button class="btn-ghost" style="padding:3px 10px;font-size:11px;color:var(--danger)" onclick="deleteFBAccount(\'' + escHtml(a.token_full) + '\')">Delete</button></td>' +
-        '</tr>';
+        '</tr>' +
+        fbQuotaDetailRow(a, idx);
     }).join('');
   } catch (e) {
     var body = document.getElementById('fbBody');
     if (body) body.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:24px;color:var(--danger);font-size:13px">Failed to load: ' + escHtml(e.message) + '</td></tr>';
   }
+}
+
+// fbQuotaDetailRow builds the hidden per-model quota row for one Freebuff account.
+function fbQuotaDetailRow(a, idx) {
+  if (!a.quota_by_model) return '';
+  var names = Object.keys(a.quota_by_model).sort();
+  if (names.length === 0) return '';
+  var rows = names.map(function(m) {
+    var q = a.quota_by_model[m] || {};
+    var short = escHtml(m.replace(/^(deepseek|openai|minimax|z-ai|meta)\//, '').replace('-2.1-contributor', ''));
+    var color = 'var(--text-primary)';
+    if (q.limit > 0 && q.recent_count >= q.limit) color = 'var(--danger)';
+    else if (q.limit > 0 && q.recent_count / q.limit >= 0.8) color = 'var(--warning)';
+    var pct = q.limit > 0 ? Math.round(q.recent_count / q.limit * 100) + '%' : '—';
+    var ent = 'base ' + (q.entitlement_base || 0);
+    if (q.entitlement_referral) ent += ' +ref ' + q.entitlement_referral;
+    if (q.entitlement_streak) ent += ' +str ' + q.entitlement_streak;
+    var reset = q.reset_at ? q.reset_at.replace('T', ' ').replace('.000Z', '').replace('Z', '') : '—';
+    return '<tr>' +
+      '<td class="mono" style="font-size:11px">' + short + '</td>' +
+      '<td style="font-size:12px;color:' + color + ';font-weight:600">' + (q.recent_count || 0) + '/' + (q.limit || 0) + '</td>' +
+      '<td style="font-size:11px;color:var(--text-tertiary)">' + pct + '</td>' +
+      '<td style="font-size:11px;color:var(--text-tertiary)">' + ent + '</td>' +
+      '<td class="mono" style="font-size:10px;color:var(--text-tertiary)">' + escHtml(reset) + '</td>' +
+      '</tr>';
+  }).join('');
+  return '<tr id="fbq-' + idx + '" style="display:none;background:rgba(255,255,255,0.02)"><td colspan="7" style="padding:0">' +
+    '<div style="padding:8px 12px 12px 32px">' +
+    '<table class="tbl" style="font-size:12px"><thead><tr><th>Model</th><th>Used/Limit</th><th>Used %</th><th>Entitlement</th><th>Reset</th></tr></thead><tbody>' + rows + '</tbody></table>' +
+    '</div></td></tr>';
+}
+
+function toggleFbQuota(idx) {
+  var el = document.getElementById('fbq-' + idx);
+  if (!el) return;
+  var hidden = el.style.display === 'none';
+  el.style.display = hidden ? '' : 'none';
 }
 
 function showAddFBModal() {

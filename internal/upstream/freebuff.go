@@ -121,11 +121,24 @@ type FreebuffAccount struct {
 	EntitlementBase     float64 `json:"entitlement_base"`
 	EntitlementReferral float64 `json:"entitlement_referral"`
 	EntitlementStreak   float64 `json:"entitlement_streak"`
+	// Per-model session quota snapshot (from rateLimitsByModel, key = upstream model name)
+	QuotaByModel map[string]FbModelQuota `json:"quota_by_model"`
 	// Hourly session tracking (in-memory, resets each hour)
 	HourlySessionCount int       `json:"-"`
 	HourlyWindowStart  time.Time `json:"-"`
 	mu                 sync.Mutex
 	db                 *db.Store
+}
+
+// FbModelQuota is one model's session-quota entry from GET /session rateLimitsByModel.
+type FbModelQuota struct {
+	Limit              float64 `json:"limit"`
+	RecentCount        float64 `json:"recent_count"`
+	ResetAt            string  `json:"reset_at,omitempty"`
+	Period             string  `json:"period,omitempty"`
+	EntitlementBase    float64 `json:"entitlement_base,omitempty"`
+	EntitlementReferral float64 `json:"entitlement_referral,omitempty"`
+	EntitlementStreak  float64 `json:"entitlement_streak,omitempty"`
 }
 
 // FreebuffAccountManager manages the Freebuff account pool.
@@ -263,6 +276,12 @@ func (am *FreebuffAccountManager) LoadFromRedis() error {
 		if v, ok := vals["entitlement_streak"]; ok && v != "" {
 			fmt.Sscanf(v, "%f", &acc.EntitlementStreak)
 		}
+		if v, ok := vals["quota_by_model"]; ok && v != "" {
+			var qbm map[string]FbModelQuota
+			if json.Unmarshal([]byte(v), &qbm) == nil && len(qbm) > 0 {
+				acc.QuotaByModel = qbm
+			}
+		}
 		am.mu.Lock()
 		am.accounts[token] = acc
 		am.mu.Unlock()
@@ -313,6 +332,9 @@ func (am *FreebuffAccountManager) SaveAccount(acc *FreebuffAccount) {
 		"entitlement_base":     acc.EntitlementBase,
 		"entitlement_referral": acc.EntitlementReferral,
 		"entitlement_streak":   acc.EntitlementStreak,
+	}
+	if qbmJSON, err := json.Marshal(acc.QuotaByModel); err == nil && qbmJSON != nil {
+		data["quota_by_model"] = string(qbmJSON)
 	}
 	key := "fb:account:" + acc.Token
 	if err := rdb.HSet(ctx, key, data).Err(); err != nil {
@@ -512,6 +534,7 @@ func (am *FreebuffAccountManager) ListAccounts() []map[string]any {
 			"entitlement_base":     acc.EntitlementBase,
 			"entitlement_referral": acc.EntitlementReferral,
 			"entitlement_streak":   acc.EntitlementStreak,
+			"quota_by_model":       acc.QuotaByModel,
 		}
 		acc.mu.Unlock()
 		result = append(result, entry)
@@ -582,6 +605,11 @@ func (am *FreebuffAccountManager) SyncQuota(acc *FreebuffAccount) error {
 			ResetAt     string  `json:"resetAt"`
 			Period      string  `json:"period"`
 			WindowHours int     `json:"windowHours"`
+			EntitlementBreakdown struct {
+				Base      float64 `json:"base"`
+				Referral  float64 `json:"referral"`
+				Streak    float64 `json:"streak"`
+			} `json:"entitlementBreakdown"`
 		} `json:"rateLimitsByModel"`
 		RateLimit struct {
 			EntitlementBreakdown struct {
@@ -605,6 +633,23 @@ func (am *FreebuffAccountManager) SyncQuota(acc *FreebuffAccount) error {
 	acc.EntitlementBase = data.RateLimit.EntitlementBreakdown.Base
 	acc.EntitlementReferral = data.RateLimit.EntitlementBreakdown.Referral
 	acc.EntitlementStreak = data.RateLimit.EntitlementBreakdown.Streak
+
+	// Per-model quota snapshot (full map incl. zero-limit models like GLM referral)
+	if len(data.RateLimitsByModel) > 0 {
+		qbm := make(map[string]FbModelQuota, len(data.RateLimitsByModel))
+		for name, rl := range data.RateLimitsByModel {
+			qbm[name] = FbModelQuota{
+				Limit:              rl.Limit,
+				RecentCount:        rl.RecentCount,
+				ResetAt:            rl.ResetAt,
+				Period:             rl.Period,
+				EntitlementBase:    rl.EntitlementBreakdown.Base,
+				EntitlementReferral: rl.EntitlementBreakdown.Referral,
+				EntitlementStreak:  rl.EntitlementBreakdown.Streak,
+			}
+		}
+		acc.QuotaByModel = qbm
+	}
 
 	// Use deepseek-v4-flash as the reference model (available in all tiers)
 	rl, ok := data.RateLimitsByModel["deepseek/deepseek-v4-flash"]

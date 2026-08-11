@@ -1,6 +1,7 @@
 package upstream
 
 import (
+	"encoding/json"
 	"net/http"
 	"testing"
 	"time"
@@ -158,6 +159,38 @@ func TestFbNextTierGating(t *testing.T) {
 				t.Fatalf("expected an account")
 			}
 		})
+	}
+}
+
+// TestFbQuotaByModelJSONRoundTrip verifies the per-model quota map survives
+// JSON marshal/unmarshal (the Redis persistence format).
+func TestFbQuotaByModelJSONRoundTrip(t *testing.T) {
+	acc := &FreebuffAccount{
+		Token: "tok-qbm",
+		Tier:  "limited",
+		QuotaByModel: map[string]FbModelQuota{
+			"deepseek/deepseek-v4-flash": {Limit: 6, RecentCount: 4, Period: "pacific_day", ResetAt: "2026-08-11T07:00:00Z", EntitlementBase: 6},
+			"mimo/mimo-v2.5":             {Limit: 6, RecentCount: 4, Period: "pacific_day"},
+			"z-ai/glm-5.2":               {Limit: 0, RecentCount: 0, Period: "pacific_day"},
+		},
+	}
+	raw, err := json.Marshal(acc.QuotaByModel)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var got map[string]FbModelQuota
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(got) != 3 {
+		t.Fatalf("expected 3 models, got %d", len(got))
+	}
+	flash := got["deepseek/deepseek-v4-flash"]
+	if flash.Limit != 6 || flash.RecentCount != 4 || flash.EntitlementBase != 6 {
+		t.Fatalf("flash quota mismatch: %+v", flash)
+	}
+	if got["z-ai/glm-5.2"].Limit != 0 {
+		t.Fatalf("glm should have zero limit: %+v", got["z-ai/glm-5.2"])
 	}
 }
 
