@@ -363,6 +363,44 @@ body {
 .stat-card .stat-sub .err { color: var(--red); }
 .stat-card .stat-sub .warn { color: var(--orange); }
 
+/* Card-5 style: value + inline delta (21st.dev Statistic Card 5) */
+.stat-value-row {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  line-height: 1.2;
+}
+.stat-delta {
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.stat-delta.ok   { color: var(--green); }
+.stat-delta.warn { color: var(--orange); }
+.stat-delta.err  { color: var(--red); }
+
+/* Segmented quota bar (Card 5 segmented progress bar) */
+.stat-bar {
+  display: flex;
+  gap: 2px;
+  height: 8px;
+  margin-top: 10px;
+  border-radius: 2px;
+  overflow: hidden;
+  background: rgba(255,255,255,0.06);
+}
+.stat-bar-seg {
+  height: 100%;
+  border-radius: 1px;
+  transition: width 300ms ease;
+}
+.stat-bar-seg.used { background: var(--green); }
+.stat-bar-seg.used.warn { background: var(--orange); }
+.stat-bar-seg.used.err  { background: var(--red); }
+.stat-bar-seg.rest { background: rgba(255,255,255,0.14); }
+.stat-bar-seg.neutral { background: rgba(255,255,255,0.85); }
+
 /* ── Circuit Badge (pill) ── */
 .circuit-badge {
   display: inline-flex;
@@ -1008,7 +1046,11 @@ body {
         </div>
         <div class="stat-card">
           <div class="stat-label">Freebuff</div>
-          <div class="stat-value" id="fbCount">—</div>
+          <div class="stat-value-row">
+            <div class="stat-value" id="fbCount">—</div>
+            <span class="stat-delta" id="fbDelta"></span>
+          </div>
+          <div class="stat-bar" id="fbBar"><div class="stat-bar-seg used" id="fbBarUsed" style="width:0%"></div><div class="stat-bar-seg rest" id="fbBarRest" style="width:0%"></div></div>
           <div class="stat-sub" id="fbQuota"></div>
         </div>
         <div class="stat-card">
@@ -1019,6 +1061,7 @@ body {
         <div class="stat-card">
           <div class="stat-label">Cache Hit (24h)</div>
           <div class="stat-value" id="cacheHitAvg">—</div>
+          <div class="stat-bar" id="cacheBar"><div class="stat-bar-seg neutral" id="cacheBarSeg" style="width:0%"></div></div>
           <div class="stat-sub" id="cacheHitSub">prompt cache</div>
         </div>
         </div>
@@ -2140,12 +2183,25 @@ async function refresh() {
     document.getElementById('fbCount').textContent = health.fb_accounts || 0;
     var fbUsed = health.fb_quota_used || 0, fbLimit = health.fb_quota_limit || 0;
     var fbExhausted = health.fb_quota_exhausted || 0;
+    var fbDeltaEl = document.getElementById('fbDelta');
+    var fbBarUsedEl = document.getElementById('fbBarUsed');
+    var fbBarRestEl = document.getElementById('fbBarRest');
     if (fbLimit > 0) {
       var fbPct = Math.round(fbUsed / fbLimit * 100);
       var fbClass = fbPct >= 100 ? 'err' : (fbPct >= 80 ? 'warn' : 'ok');
       document.getElementById('fbQuota').innerHTML = '<span class="' + fbClass + '">' + fbUsed.toFixed(1) + '/' + fbLimit.toFixed(0) + ' (' + fbPct + '%)</span>' + (fbExhausted > 0 ? ' <span class="err">⛔ ' + fbExhausted + ' exhausted</span>' : '');
+      if (fbDeltaEl) { fbDeltaEl.textContent = fbUsed > 0 ? '+' + fbPct + '%' : '0%'; fbDeltaEl.className = 'stat-delta ' + fbClass; }
+      if (fbBarUsedEl && fbBarRestEl) {
+        var usedW = Math.min(100, fbPct);
+        fbBarUsedEl.style.width = usedW + '%';
+        fbBarRestEl.style.width = (100 - usedW) + '%';
+        fbBarUsedEl.className = 'stat-bar-seg used' + (fbPct >= 100 ? ' err' : (fbPct >= 80 ? ' warn' : ''));
+      }
     } else {
       document.getElementById('fbQuota').innerHTML = '<span class="ok">no quota data</span>';
+      if (fbDeltaEl) { fbDeltaEl.textContent = ''; fbDeltaEl.className = 'stat-delta'; }
+      if (fbBarUsedEl) fbBarUsedEl.style.width = '0%';
+      if (fbBarRestEl) fbBarRestEl.style.width = '0%';
     }
 
     // Circuit cards
@@ -2777,9 +2833,13 @@ async function loadHistory() {
         var avg = cacheHits.reduce(function(a, r) { return a + r.cache_hit_pct; }, 0) / cacheHits.length;
         cacheEl.textContent = avg.toFixed(1) + '%';
         if (cacheSubEl) cacheSubEl.textContent = 'avg over ' + cacheHits.length + ' reqs';
+        var cacheBarSeg = document.getElementById('cacheBarSeg');
+        if (cacheBarSeg) cacheBarSeg.style.width = Math.min(100, avg) + '%';
       } else {
         cacheEl.textContent = '—';
         if (cacheSubEl) cacheSubEl.textContent = 'prompt cache';
+        var cacheBarSeg0 = document.getElementById('cacheBarSeg');
+        if (cacheBarSeg0) cacheBarSeg0.style.width = '0%';
       }
     }
 
