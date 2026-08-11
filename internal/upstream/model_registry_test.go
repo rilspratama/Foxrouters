@@ -53,8 +53,8 @@ func TestParseFBModelsJSON(t *testing.T) {
 	if m := byID["fb/laguna-s-2.1"]; !m.FullMode || m.Agent != "base2-free-laguna-s-2-1" || m.Upstream != "poolside/laguna-s-2.1" {
 		t.Fatalf("laguna config wrong: %+v", m)
 	}
-	// glm: premium pool → FullMode + reasoning
-	if m := byID["fb/z-ai/glm-5.2"]; !m.FullMode || !m.Reasoning {
+	// glm: premium pool → FullMode + reasoning (GatewayID strips provider prefix)
+	if m := byID["fb/glm-5.2"]; !m.FullMode || !m.Reasoning || m.Upstream != "z-ai/glm-5.2" {
 		t.Fatalf("glm config wrong: %+v", m)
 	}
 }
