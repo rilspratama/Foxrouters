@@ -22,6 +22,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/redis/go-redis/v9"
 
 	"foxrouters/internal/db"
 )
@@ -51,6 +52,10 @@ const (
 
 	// Run cache: reuse runId for 10 minutes
 	FREEBUFF_RUN_CACHE_TTL = 10 * time.Minute
+
+	// Redis key prefixes (persistent session/run cache — survives gateway restart)
+	fbSessionKeyPrefix = "fb:session:"
+	fbRunKeyPrefix     = "fb:run:"
 )
 
 // FreebuffModels maps gateway model IDs (fb/ prefix) to upstream config.
@@ -492,6 +497,8 @@ func (am *FreebuffAccountManager) ProbeAll() {
 }
 
 // SyncQuota syncs quota info for a single account from GET /api/v1/freebuff/session.
+// If no active session, quota stays 0/0 (account is fresh, full quota available).
+// Creating a session would consume 1 quota — we avoid that to preserve quota.
 func (am *FreebuffAccountManager) SyncQuota(acc *FreebuffAccount) error {
 	client := &http.Client{Timeout: 10 * time.Second}
 	req, _ := http.NewRequest("GET", FREEBUFF_API_BASE+FREEBUFF_SESSION_PATH, nil)
@@ -508,6 +515,7 @@ func (am *FreebuffAccountManager) SyncQuota(acc *FreebuffAccount) error {
 	}
 
 	var data struct {
+		Status           string `json:"status"`
 		RateLimitsByModel map[string]struct {
 			Limit       float64 `json:"limit"`
 			RecentCount float64 `json:"recentCount"`
@@ -522,12 +530,17 @@ func (am *FreebuffAccountManager) SyncQuota(acc *FreebuffAccount) error {
 
 	// Use deepseek-v4-flash as the reference model (available in all tiers)
 	rl, ok := data.RateLimitsByModel["deepseek/deepseek-v4-flash"]
-	if !ok {
-		// No rate limit info — account might not have a session yet
+	if !ok || data.Status == "none" {
+		// No active session — account is fresh, full quota available (0/6)
 		acc.mu.Lock()
+		acc.QuotaRecent = 0
+		acc.QuotaLimit = 6 // default free tier limit
+		acc.QuotaPeriod = "pacific_day"
 		acc.QuotaSyncedAt = time.Now()
+		acc.CooldownUntil = time.Time{} // not exhausted
 		acc.mu.Unlock()
 		am.SaveAccount(acc)
+		slog.Debug("fb quota: no session, fresh account (0/6)", "module", "freebuff", "token", acc.Token[:8]+"...")
 		return nil
 	}
 
@@ -617,30 +630,144 @@ type fbRunEntry struct {
 	CreatedAt time.Time
 }
 
-// fbGetOrCreateSession returns an active session, creating one if needed.
-func fbGetOrCreateSession(client *http.Client, token, userID, model string) (*FreebuffSession, error) {
-	cacheKey := token + ":" + model
+// redis returns the underlying Redis client (nil-safe). Session/run cache is
+// persisted to Redis so it survives gateway restarts; the in-memory maps act
+// as a fast L1 layer.
+func (am *FreebuffAccountManager) redis() *redis.Client {
+	if am == nil || am.db == nil || !am.db.Ready() {
+		return nil
+	}
+	return am.db.Redis()
+}
 
-	// Check cache
+// cachedSession checks the in-memory L1 cache first, then Redis (L2).
+// Returns nil when no reusable session is found.
+func (am *FreebuffAccountManager) cachedSession(token, model string) *FreebuffSession {
+	cacheKey := fbSessionKeyPrefix + token + ":" + model
+
 	fbSessionCache.Lock()
 	cached, ok := fbSessionCache.m[cacheKey]
 	fbSessionCache.Unlock()
 	if ok && time.Until(cached.ExpiresAt) > FREEBUFF_SESSION_MIN_REMAINING {
+		return cached
+	}
+
+	rdb := am.redis()
+	if rdb != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+		defer cancel()
+		raw, err := rdb.Get(ctx, cacheKey).Result()
+		if err == nil && raw != "" {
+			var sess FreebuffSession
+			if json.Unmarshal([]byte(raw), &sess) == nil && sess.InstanceID != "" &&
+				time.Until(sess.ExpiresAt) > FREEBUFF_SESSION_MIN_REMAINING {
+				fbSessionCache.Lock()
+				fbSessionCache.m[cacheKey] = &sess
+				fbSessionCache.Unlock()
+				return &sess
+			}
+		}
+	}
+	return nil
+}
+
+// storeSession writes the session to both the in-memory cache and Redis
+// (Redis TTL = session expiry, so the key auto-dies when the session does).
+func (am *FreebuffAccountManager) storeSession(token, model string, sess *FreebuffSession) {
+	cacheKey := fbSessionKeyPrefix + token + ":" + model
+
+	fbSessionCache.Lock()
+	fbSessionCache.m[cacheKey] = sess
+	fbSessionCache.Unlock()
+
+	rdb := am.redis()
+	if rdb == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+	raw, err := json.Marshal(sess)
+	if err != nil {
+		return
+	}
+	ttl := time.Until(sess.ExpiresAt)
+	if ttl < time.Second {
+		ttl = time.Second
+	}
+	if err := rdb.Set(ctx, cacheKey, raw, ttl).Err(); err != nil {
+		slog.Warn("fb session cache set failed", "module", "freebuff", "error", err)
+	}
+}
+
+// cachedRun checks the in-memory run cache, then Redis (L2).
+func (am *FreebuffAccountManager) cachedRun(token, agentID string) (string, bool) {
+	cacheKey := fbRunKeyPrefix + token + ":" + agentID
+
+	fbRunCache.Lock()
+	cached, ok := fbRunCache.m[cacheKey]
+	fbRunCache.Unlock()
+	if ok && time.Since(cached.CreatedAt) < FREEBUFF_RUN_CACHE_TTL {
+		return cached.RunID, true
+	}
+
+	rdb := am.redis()
+	if rdb != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+		defer cancel()
+		raw, err := rdb.Get(ctx, cacheKey).Result()
+		if err == nil && raw != "" {
+			var entry fbRunEntry
+			if json.Unmarshal([]byte(raw), &entry) == nil && entry.RunID != "" &&
+				time.Since(entry.CreatedAt) < FREEBUFF_RUN_CACHE_TTL {
+				fbRunCache.Lock()
+				fbRunCache.m[cacheKey] = entry
+				fbRunCache.Unlock()
+				return entry.RunID, true
+			}
+		}
+	}
+	return "", false
+}
+
+// storeRun writes the run to both in-memory and Redis (TTL = run cache TTL).
+func (am *FreebuffAccountManager) storeRun(token, agentID, runID string) {
+	cacheKey := fbRunKeyPrefix + token + ":" + agentID
+	entry := fbRunEntry{RunID: runID, CreatedAt: time.Now()}
+
+	fbRunCache.Lock()
+	fbRunCache.m[cacheKey] = entry
+	fbRunCache.Unlock()
+
+	rdb := am.redis()
+	if rdb == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+	raw, _ := json.Marshal(entry)
+	if err := rdb.Set(ctx, cacheKey, raw, FREEBUFF_RUN_CACHE_TTL).Err(); err != nil {
+		slog.Warn("fb run cache set failed", "module", "freebuff", "error", err)
+	}
+}
+
+// fbGetOrCreateSession returns an active session, creating one if needed.
+// Session cache is L1 in-memory + L2 Redis (persistent across restarts).
+func (am *FreebuffAccountManager) fbGetOrCreateSession(client *http.Client, token, userID, model string) (*FreebuffSession, error) {
+	// Check cache (L1 memory, then L2 Redis)
+	if cached := am.cachedSession(token, model); cached != nil {
 		return cached, nil
 	}
 
 	// GET current session (0 cost — doesn't create one)
 	sess, err := fbGetSession(client, token)
 	if err == nil && sess != nil && sess.Model == model && time.Until(sess.ExpiresAt) > FREEBUFF_SESSION_MIN_REMAINING {
-		fbSessionCache.Lock()
-		fbSessionCache.m[cacheKey] = sess
-		fbSessionCache.Unlock()
+		am.storeSession(token, model, sess)
 		return sess, nil
 	}
 
 	// If model mismatch, delete old session
 	if sess != nil && sess.Model != model {
-		fbDeleteSession(client, token)
+		am.fbDeleteSession(client, token)
 	}
 
 	// Fire ads + streak (best-effort)
@@ -652,9 +779,7 @@ func fbGetOrCreateSession(client *http.Client, token, userID, model string) (*Fr
 		return nil, fmt.Errorf("create session: %w", err)
 	}
 
-	fbSessionCache.Lock()
-	fbSessionCache.m[cacheKey] = sess
-	fbSessionCache.Unlock()
+	am.storeSession(token, model, sess)
 	return sess, nil
 }
 
@@ -784,24 +909,36 @@ func fbGetSessionWithInstance(client *http.Client, token, instanceID string) (*F
 	}, nil
 }
 
-func fbDeleteSession(client *http.Client, token string) {
-	req, _ := http.NewRequest("DELETE", FREEBUFF_API_BASE+FREEBUFF_SESSION_PATH, nil)
-	req.Header.Set("Authorization", "Bearer "+token)
-	req.Header.Set("User-Agent", "Freebuff-CLI/0.0.142")
-	resp, err := client.Do(req)
-	if err != nil {
-		return
-	}
-	resp.Body.Close()
-
-	// Clear all cached sessions for this token
+func (am *FreebuffAccountManager) fbDeleteSession(client *http.Client, token string) {
+	// Clear all cached sessions for this token FIRST (memory + Redis) so a
+	// stale cache entry can never survive — even if the upstream DELETE fails.
 	fbSessionCache.Lock()
 	for k := range fbSessionCache.m {
-		if strings.HasPrefix(k, token+":") {
+		if strings.HasPrefix(k, fbSessionKeyPrefix+token+":") {
 			delete(fbSessionCache.m, k)
 		}
 	}
 	fbSessionCache.Unlock()
+
+	rdb := am.redis()
+	if rdb != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+		defer cancel()
+		keys, err := rdb.Keys(ctx, fbSessionKeyPrefix+token+":*").Result()
+		if err == nil && len(keys) > 0 {
+			if derr := rdb.Del(ctx, keys...).Err(); derr != nil {
+				slog.Warn("fb session cache del failed", "module", "freebuff", "error", derr)
+			}
+		}
+	}
+
+	// Best-effort upstream DELETE
+	req, _ := http.NewRequest("DELETE", FREEBUFF_API_BASE+FREEBUFF_SESSION_PATH, nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("User-Agent", "Freebuff-CLI/0.0.142")
+	if resp, err := client.Do(req); err == nil {
+		resp.Body.Close()
+	}
 }
 
 // fbFireAdsAndStreak simulates the official CLI behavior (best-effort, don't block).
@@ -839,15 +976,11 @@ func fbFireAdsAndStreak(client *http.Client, token string) {
 }
 
 // fbGetOrCreateRun returns a cached runId or creates a new one.
-func fbGetOrCreateRun(client *http.Client, token, agentId string) (string, error) {
-	cacheKey := token + ":" + agentId
-
-	// Check cache
-	fbRunCache.Lock()
-	cached, ok := fbRunCache.m[cacheKey]
-	fbRunCache.Unlock()
-	if ok && time.Since(cached.CreatedAt) < FREEBUFF_RUN_CACHE_TTL {
-		return cached.RunID, nil
+// Run cache is L1 in-memory + L2 Redis (TTL 10min).
+func (am *FreebuffAccountManager) fbGetOrCreateRun(client *http.Client, token, agentId string) (string, error) {
+	// Check cache (L1 memory, then L2 Redis)
+	if runID, ok := am.cachedRun(token, agentId); ok {
+		return runID, nil
 	}
 
 	// POST /api/v1/agent-runs
@@ -881,9 +1014,7 @@ func fbGetOrCreateRun(client *http.Client, token, agentId string) (string, error
 		return "", fmt.Errorf("no runId in response")
 	}
 
-	fbRunCache.Lock()
-	fbRunCache.m[cacheKey] = fbRunEntry{RunID: data.RunID, CreatedAt: time.Now()}
-	fbRunCache.Unlock()
+	am.storeRun(token, agentId, data.RunID)
 	return data.RunID, nil
 }
 
@@ -1315,7 +1446,7 @@ func ProxyFreebuff(c *gin.Context, body []byte, bodyMap map[string]any, am *Free
 		acc.mu.Lock()
 
 		// 1. Get/create session
-		sess, err := fbGetOrCreateSession(client, acc.Token, acc.UserID, upstreamModel)
+		sess, err := am.fbGetOrCreateSession(client, acc.Token, acc.UserID, upstreamModel)
 		if err != nil {
 			acc.mu.Unlock()
 			lastErr = fmt.Sprintf("session: %v", err)
@@ -1324,7 +1455,7 @@ func ProxyFreebuff(c *gin.Context, body []byte, bodyMap map[string]any, am *Free
 		}
 
 		// 2. Get/create run
-		runID, err := fbGetOrCreateRun(client, acc.Token, agentID)
+		runID, err := am.fbGetOrCreateRun(client, acc.Token, agentID)
 		if err != nil {
 			acc.mu.Unlock()
 			lastErr = fmt.Sprintf("run: %v", err)
@@ -1382,8 +1513,8 @@ func ProxyFreebuff(c *gin.Context, body []byte, bodyMap map[string]any, am *Free
 			resp.Body.Close()
 			if strings.Contains(string(respBody), "waiting_room_required") {
 				slog.Debug("fb 428 stale session, recreating", "module", "freebuff", "attempt", attempt+1)
-				fbDeleteSession(client, acc.Token)
-				sess, err = fbGetOrCreateSession(client, acc.Token, acc.UserID, upstreamModel)
+				am.fbDeleteSession(client, acc.Token)
+				sess, err = am.fbGetOrCreateSession(client, acc.Token, acc.UserID, upstreamModel)
 				if err != nil {
 					acc.mu.Unlock()
 					lastErr = fmt.Sprintf("session recreate: %v", err)

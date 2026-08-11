@@ -11,6 +11,11 @@ Policy: **test (`go test -race`) before build/restart**. Secrets only via `.gate
 ## v1.6.4+ (working tree, not released) — Freebuff provider integration (2026-08-10)
 
 ### Added
+- **Freebuff session/run cache persisted to Redis** — `fb:session:<token>:<model>` +
+  `fb:run:<token>:<agent>` (L1 in-memory + L2 Redis, survives gateway restart).
+  `fbGetOrCreateSession`/`fbGetOrCreateRun`/`fbDeleteSession` are now manager
+  methods; Redis TTL = session expiry / 10min run TTL. `fbDeleteSession` clears
+  cache first (upstream DELETE best-effort). Tests in `internal/upstream/freebuff_test.go`.
 - **Proxy pool freebuff scope** (`internal/proxy/pool.go`) — new `UpstreamFreebuff` constant
   + valid value in `Upstreams`. Proxies can now be scoped to `["freebuff"]` only (was
   `all`/`grok`/`codebuddy`). `ProxyFreebuff()` already called `getClient(up, "freebuff")` —
