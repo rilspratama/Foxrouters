@@ -1238,7 +1238,7 @@ body {
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg>
           <h3>Gateway API Keys</h3>
           <div style="margin-left:auto;display:flex;gap:8px">
-            <button class="btn-primary" onclick="showCreateKeyModal()" style="display:flex;align-items:center;gap:6px;padding:6px 14px;border-radius:var(--radius-sm);background:var(--brand);color:#fff;border:none;font-size:13px;font-weight:500;cursor:pointer">
+            <button class="btn-primary" onclick="showCreateKeyModal()" style="display:flex;align-items:center;gap:6px;padding:6px 14px;border-radius:var(--radius-sm);background:var(--brand);color:#000;border:none;font-size:13px;font-weight:500;cursor:pointer">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>
               Create Key
             </button>
@@ -1334,7 +1334,7 @@ body {
               <label style="font-size:11px;color:var(--text-tertiary);display:block;margin-bottom:4px">Description (optional)</label>
               <input type="text" id="cbxDesc" placeholder="GPT then Claude" style="width:100%;padding:6px 10px;background:var(--bg);border:1px solid var(--border-strong);border-radius:var(--radius-sm);color:var(--text-primary);font-size:12px" />
             </div>
-            <button class="btn-primary" onclick="addCombo()" style="padding:7px 14px;border-radius:var(--radius-sm);background:var(--brand);color:#fff;border:none;font-size:12px;font-weight:500;cursor:pointer">+ Create</button>
+            <button class="btn-primary" onclick="addCombo()" style="padding:7px 14px;border-radius:var(--radius-sm);background:var(--brand);color:#000;border:none;font-size:12px;font-weight:500;cursor:pointer">+ Create</button>
           </div>
           <div style="margin-bottom:12px">
             <label style="font-size:11px;color:var(--text-tertiary);display:block;margin-bottom:4px">Models</label>
@@ -1400,7 +1400,7 @@ body {
               <label style="font-size:11px;color:var(--text-tertiary);display:block;margin-bottom:4px">Owned By</label>
               <input type="text" id="cmOwnedBy" placeholder="codebuddy" style="width:100%;padding:6px 10px;background:var(--bg);border:1px solid var(--border-strong);border-radius:var(--radius-sm);color:var(--text-primary);font-size:12px" />
             </div>
-            <button class="btn-primary" onclick="addCustomModel()" style="padding:7px 14px;border-radius:var(--radius-sm);background:var(--brand);color:#fff;border:none;font-size:12px;font-weight:500;cursor:pointer">+ Add</button>
+            <button class="btn-primary" onclick="addCustomModel()" style="padding:7px 14px;border-radius:var(--radius-sm);background:var(--brand);color:#000;border:none;font-size:12px;font-weight:500;cursor:pointer">+ Add</button>
           </div>
           <div id="cmError" style="display:none;color:var(--red);font-size:12px;padding:6px 10px;background:rgba(255,80,80,0.08);border-radius:var(--radius-sm);margin-bottom:8px"></div>
           <table style="width:100%;border-collapse:collapse;font-size:12px">
@@ -1439,7 +1439,7 @@ body {
               <label style="font-size:11px;color:var(--text-tertiary);display:block;margin-bottom:4px">Target Model ID</label>
               <input type="text" id="alTarget" placeholder="cb/claude-sonnet-4.6" style="width:100%;padding:6px 10px;background:var(--bg);border:1px solid var(--border-strong);border-radius:var(--radius-sm);color:var(--text-primary);font-size:12px;font-family:var(--mono)" />
             </div>
-            <button class="btn-primary" onclick="addAlias()" style="padding:7px 14px;border-radius:var(--radius-sm);background:var(--brand);color:#fff;border:none;font-size:12px;font-weight:500;cursor:pointer">+ Add</button>
+            <button class="btn-primary" onclick="addAlias()" style="padding:7px 14px;border-radius:var(--radius-sm);background:var(--brand);color:#000;border:none;font-size:12px;font-weight:500;cursor:pointer">+ Add</button>
           </div>
           <div id="alError" style="display:none;color:var(--red);font-size:12px;padding:6px 10px;background:rgba(255,80,80,0.08);border-radius:var(--radius-sm);margin-bottom:8px"></div>
           <table style="width:100%;border-collapse:collapse;font-size:12px">
@@ -1523,7 +1523,7 @@ body {
             </div>
             <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:20px">
               <button class="btn-ghost" onclick="closeKeyModal()">Cancel</button>
-              <button id="keyModalSave" class="btn-primary" onclick="saveKeyModal()" style="padding:8px 16px;border-radius:var(--radius-sm);background:var(--brand);color:#fff;border:none;font-size:13px;font-weight:500;cursor:pointer">Create</button>
+              <button id="keyModalSave" class="btn-primary" onclick="saveKeyModal()" style="padding:8px 16px;border-radius:var(--radius-sm);background:var(--brand);color:#000;border:none;font-size:13px;font-weight:500;cursor:pointer">Create</button>
             </div>
           </div>
         </div>
@@ -1561,7 +1561,7 @@ body {
           <h3>Proxy Pool</h3>
           <span class="head-meta" id="proxyPoolMeta"></span>
           <div style="margin-left:auto;display:flex;gap:8px">
-            <button class="btn-primary" onclick="showAddProxyModal()" style="padding:6px 14px;border-radius:var(--radius-sm);background:var(--brand);color:#fff;border:none;font-size:12px;font-weight:500;cursor:pointer">+ Add Proxy</button>
+            <button class="btn-primary" onclick="showAddProxyModal()" style="padding:6px 14px;border-radius:var(--radius-sm);background:var(--brand);color:#000;border:none;font-size:12px;font-weight:500;cursor:pointer">+ Add Proxy</button>
             <button class="btn-ghost" onclick="loadProxies()" style="padding:6px 12px;font-size:12px">Refresh</button>
           </div>
         </div>
@@ -1636,7 +1636,7 @@ body {
           <div id="pxError" style="display:none;color:var(--red);font-size:12px;padding:6px 10px;background:rgba(255,80,80,0.08);border-radius:var(--radius-sm)"></div>
           <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:8px">
             <button class="btn-ghost" onclick="closeAddProxyModal()" style="padding:8px 14px;font-size:12px">Cancel</button>
-            <button class="btn-primary" onclick="addProxy()" style="padding:8px 14px;border-radius:var(--radius-sm);background:var(--brand);color:#fff;border:none;font-size:12px;font-weight:500;cursor:pointer">Add Proxy</button>
+            <button class="btn-primary" onclick="addProxy()" style="padding:8px 14px;border-radius:var(--radius-sm);background:var(--brand);color:#000;border:none;font-size:12px;font-weight:500;cursor:pointer">Add Proxy</button>
           </div>
         </div>
       </div>
@@ -1702,7 +1702,7 @@ body {
           <div id="epxError" style="display:none;color:var(--red);font-size:12px;padding:6px 10px;background:rgba(255,80,80,0.08);border-radius:var(--radius-sm)"></div>
           <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:8px">
             <button class="btn-ghost" onclick="closeEditProxyModal()" style="padding:8px 14px;font-size:12px">Cancel</button>
-            <button class="btn-primary" onclick="saveEditProxy()" style="padding:8px 14px;border-radius:var(--radius-sm);background:var(--brand);color:#fff;border:none;font-size:12px;font-weight:500;cursor:pointer">Save</button>
+            <button class="btn-primary" onclick="saveEditProxy()" style="padding:8px 14px;border-radius:var(--radius-sm);background:var(--brand);color:#000;border:none;font-size:12px;font-weight:500;cursor:pointer">Save</button>
           </div>
         </div>
       </div>
@@ -1749,9 +1749,9 @@ body {
           <!-- Quick actions row -->
           <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
             <span style="font-size:12px;color:var(--text-tertiary)">Enable:</span>
-            <button class="btn-primary" onclick="tunnelEnableQuick()" style="padding:6px 14px;border-radius:var(--radius-sm);background:var(--brand);color:#fff;border:none;font-size:12px;font-weight:500;cursor:pointer">Quick</button>
-            <button class="btn-primary" onclick="showTunnelNamedModal(false)" style="padding:6px 14px;border-radius:var(--radius-sm);background:var(--brand);color:#fff;border:none;font-size:12px;font-weight:500;cursor:pointer">Named…</button>
-            <button class="btn-primary" onclick="showTunnelNamedModal(true)" style="padding:6px 14px;border-radius:var(--radius-sm);background:var(--brand);color:#fff;border:none;font-size:12px;font-weight:500;cursor:pointer">Hybrid…</button>
+            <button class="btn-primary" onclick="tunnelEnableQuick()" style="padding:6px 14px;border-radius:var(--radius-sm);background:var(--brand);color:#000;border:none;font-size:12px;font-weight:500;cursor:pointer">Quick</button>
+            <button class="btn-primary" onclick="showTunnelNamedModal(false)" style="padding:6px 14px;border-radius:var(--radius-sm);background:var(--brand);color:#000;border:none;font-size:12px;font-weight:500;cursor:pointer">Named…</button>
+            <button class="btn-primary" onclick="showTunnelNamedModal(true)" style="padding:6px 14px;border-radius:var(--radius-sm);background:var(--brand);color:#000;border:none;font-size:12px;font-weight:500;cursor:pointer">Hybrid…</button>
             <span id="tunActionResult" style="font-size:12px;color:var(--text-tertiary);margin-left:auto"></span>
           </div>
 
@@ -1821,7 +1821,7 @@ body {
           <div id="tunModalError" style="display:none;color:var(--red);font-size:12px;padding:6px 10px;background:rgba(255,80,80,0.08);border-radius:var(--radius-sm)"></div>
           <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:8px">
             <button class="btn-ghost" onclick="closeTunnelNamedModal()" style="padding:8px 14px;font-size:12px">Cancel</button>
-            <button class="btn-primary" onclick="tunnelEnableNamed()" style="padding:8px 14px;border-radius:var(--radius-sm);background:var(--brand);color:#fff;border:none;font-size:12px;font-weight:500;cursor:pointer">Enable</button>
+            <button class="btn-primary" onclick="tunnelEnableNamed()" style="padding:8px 14px;border-radius:var(--radius-sm);background:var(--brand);color:#000;border:none;font-size:12px;font-weight:500;cursor:pointer">Enable</button>
           </div>
         </div>
       </div>
@@ -2288,7 +2288,7 @@ function renderGrokPage() {
   }
   for (var p = fromPg; p <= toPg; p++) {
     if (p === page) {
-      html += '<button style="padding:4px 10px;border:1px solid var(--brand);border-radius:var(--radius-sm);background:var(--brand);color:#fff;font-size:12px;cursor:default">' + p + '</button>';
+      html += '<button style="padding:4px 10px;border:1px solid var(--brand);border-radius:var(--radius-sm);background:var(--brand);color:#000;font-size:12px;cursor:default">' + p + '</button>';
     } else {
       html += '<button class="pg-btn pg-grok-num' + (p === page ? ' pg-active' : '') + '" data-page="' + p + '" style="padding:4px 10px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg-elevated);color:var(--text-secondary);cursor:pointer;font-size:12px">' + p + '</button>';
     }
@@ -2377,7 +2377,7 @@ function renderCBPage() {
   }
   for (var p = fromPg; p <= toPg; p++) {
     if (p === page) {
-      html += '<button style="padding:4px 10px;border:1px solid var(--brand);border-radius:var(--radius-sm);background:var(--brand);color:#fff;font-size:12px;cursor:default">' + p + '</button>';
+      html += '<button style="padding:4px 10px;border:1px solid var(--brand);border-radius:var(--radius-sm);background:var(--brand);color:#000;font-size:12px;cursor:default">' + p + '</button>';
     } else {
       html += '<button class="pg-btn pg-cb-num" data-page="' + p + '" style="padding:4px 10px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg-elevated);color:var(--text-secondary);cursor:pointer;font-size:12px">' + p + '</button>';
     }
@@ -2533,7 +2533,7 @@ function showAddFBModal() {
     '</div>' +
     '<div style="display:flex;gap:8px;justify-content:flex-end">' +
     '<button class="btn-ghost" onclick="document.getElementById(\'fbModal\').style.display=\'none\'" style="padding:8px 16px;font-size:13px">Cancel</button>' +
-    '<button class="btn-primary" onclick="submitAddFB()" style="padding:8px 16px;border-radius:var(--radius-sm);background:var(--brand);color:#fff;border:none;font-size:13px;font-weight:500;cursor:pointer">Import</button>' +
+    '<button class="btn-primary" onclick="submitAddFB()" style="padding:8px 16px;border-radius:var(--radius-sm);background:var(--brand);color:#000;border:none;font-size:13px;font-weight:500;cursor:pointer">Import</button>' +
     '</div></div>';
   document.body.appendChild(m);
 }
@@ -2568,7 +2568,7 @@ function showBulkFBModal() {
     '<div id="fbBulkResult" style="margin-bottom:12px;display:none;padding:10px;border-radius:var(--radius-sm);font-size:13px"></div>' +
     '<div style="display:flex;gap:8px;justify-content:flex-end">' +
     '<button class="btn-ghost" onclick="document.getElementById(\'fbBulkModal\').remove()" style="padding:8px 16px;font-size:13px">Cancel</button>' +
-    '<button class="btn-primary" onclick="submitBulkFB()" style="padding:8px 16px;border-radius:var(--radius-sm);background:var(--brand);color:#fff;border:none;font-size:13px;font-weight:500;cursor:pointer">Import</button>' +
+    '<button class="btn-primary" onclick="submitBulkFB()" style="padding:8px 16px;border-radius:var(--radius-sm);background:var(--brand);color:#000;border:none;font-size:13px;font-weight:500;cursor:pointer">Import</button>' +
     '</div></div>';
   document.body.appendChild(m);
 }
@@ -2620,7 +2620,7 @@ function showFBOAuthModal() {
     '<h3 style="margin:0 0 16px;font-size:16px">Add Freebuff via Login URL</h3>' +
     '<div id="fbOAuthContent" style="margin-bottom:16px">' +
     '<p style="font-size:13px;color:var(--text-tertiary);line-height:1.6;margin-bottom:12px">Click "Generate Login URL" to start the OAuth device flow. Open the URL in your browser, log in with Google/GitHub, and the token will be auto-imported.</p>' +
-    '<button class="btn-primary" onclick="startFBOAuth()" style="padding:8px 16px;border-radius:var(--radius-sm);background:var(--brand);color:#fff;border:none;font-size:13px;font-weight:500;cursor:pointer">Generate Login URL</button>' +
+    '<button class="btn-primary" onclick="startFBOAuth()" style="padding:8px 16px;border-radius:var(--radius-sm);background:var(--brand);color:#000;border:none;font-size:13px;font-weight:500;cursor:pointer">Generate Login URL</button>' +
     '</div>' +
     '<div style="display:flex;gap:8px;justify-content:flex-end">' +
     '<button class="btn-ghost" onclick="document.getElementById(\'fbOAuthModal\').remove()" style="padding:8px 16px;font-size:13px">Close</button>' +
@@ -2648,7 +2648,7 @@ async function startFBOAuth() {
       '<button class="btn-ghost" onclick="window.open(document.getElementById(\'fbOAuthUrl\').value,\'_blank\')" style="padding:8px 12px;font-size:12px;white-space:nowrap">Open</button>' +
       '</div></div>' +
       '<div id="fbOAuthPollStatus" style="padding:10px;border-radius:var(--radius-sm);background:var(--bg-elevated);font-size:13px;color:var(--text-tertiary)">Waiting for login... <span class="spinner"></span></div>' +
-      '<button class="btn-primary" onclick="pollFBOAuth()" style="margin-top:12px;padding:8px 16px;border-radius:var(--radius-sm);background:var(--brand);color:#fff;border:none;font-size:13px;font-weight:500;cursor:pointer">Check Status</button>';
+      '<button class="btn-primary" onclick="pollFBOAuth()" style="margin-top:12px;padding:8px 16px;border-radius:var(--radius-sm);background:var(--brand);color:#000;border:none;font-size:13px;font-weight:500;cursor:pointer">Check Status</button>';
     // Auto-poll every 3s
     fbOAuthPollInterval = setInterval(pollFBOAuth, 3000);
     pollFBOAuth(); // immediate first check
@@ -3795,7 +3795,7 @@ setInterval(refresh, 5000);       // health/accounts every 5s
     </div>
     <div style="display:flex;gap:8px;justify-content:flex-end">
       <button class="btn-ghost" onclick="closeAddCBModal()" style="padding:8px 16px;font-size:13px">Cancel</button>
-      <button class="btn-primary" onclick="submitAddCB()" style="padding:8px 16px;border-radius:var(--radius-sm);background:var(--brand);color:#fff;border:none;font-size:13px;font-weight:500;cursor:pointer">Add</button>
+      <button class="btn-primary" onclick="submitAddCB()" style="padding:8px 16px;border-radius:var(--radius-sm);background:var(--brand);color:#000;border:none;font-size:13px;font-weight:500;cursor:pointer">Add</button>
     </div>
   </div>
 </div>
@@ -3808,7 +3808,7 @@ setInterval(refresh, 5000);       // health/accounts every 5s
 
     <!-- Segmented control: Manual | Login URL -->
     <div id="cbOAuthModeSwitch" style="display:flex;gap:0;margin-bottom:16px;border:1px solid var(--border);border-radius:var(--radius-sm);overflow:hidden;width:fit-content">
-      <button type="button" id="cbOAuthModeManual" onclick="cbOAuthSwitchMode('manual')" style="padding:8px 18px;font-size:13px;border:none;background:var(--brand);color:#fff;cursor:pointer">Manual</button>
+      <button type="button" id="cbOAuthModeManual" onclick="cbOAuthSwitchMode('manual')" style="padding:8px 18px;font-size:13px;border:none;background:var(--brand);color:#000;cursor:pointer">Manual</button>
       <button type="button" id="cbOAuthModeUrl" onclick="cbOAuthSwitchMode('url')" style="padding:8px 18px;font-size:13px;border:none;background:var(--bg-primary);color:var(--text);cursor:pointer">Login URL</button>
     </div>
 
@@ -3841,7 +3841,7 @@ setInterval(refresh, 5000);       // health/accounts every 5s
         <input type="text" id="cbOAuthUrlEmail" placeholder="leave blank to auto-detect from token" style="width:100%;padding:8px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg-primary);color:var(--text);font-size:13px" />
       </div>
       <div style="display:flex;gap:8px;margin-bottom:12px;align-items:center">
-        <button type="button" class="btn-primary" id="cbOAuthGenBtn" onclick="cbOAuthGenerateUrl()" style="padding:8px 16px;border-radius:var(--radius-sm);background:var(--brand);color:#fff;border:none;font-size:13px;font-weight:500;cursor:pointer">Generate login URL</button>
+        <button type="button" class="btn-primary" id="cbOAuthGenBtn" onclick="cbOAuthGenerateUrl()" style="padding:8px 16px;border-radius:var(--radius-sm);background:var(--brand);color:#000;border:none;font-size:13px;font-weight:500;cursor:pointer">Generate login URL</button>
         <button type="button" class="btn-ghost" id="cbOAuthPollBtn" onclick="cbOAuthPollNow()" style="padding:8px 16px;font-size:13px;display:none">Poll now</button>
         <button type="button" class="btn-ghost" id="cbOAuthCancelPollBtn" onclick="cbOAuthCancelPoll()" style="padding:8px 16px;font-size:13px;display:none">Cancel</button>
       </div>
@@ -3860,7 +3860,7 @@ setInterval(refresh, 5000);       // health/accounts every 5s
     <div id="cbOAuthResult" style="margin-bottom:12px;display:none;padding:10px;border-radius:var(--radius-sm);font-size:13px"></div>
     <div style="display:flex;gap:8px;justify-content:flex-end">
       <button class="btn-ghost" onclick="closeAddCBOAuthModal()" style="padding:8px 16px;font-size:13px">Cancel</button>
-      <button class="btn-primary" id="cbOAuthSave" onclick="submitAddCBOAuth()" style="padding:8px 16px;border-radius:var(--radius-sm);background:var(--brand);color:#fff;border:none;font-size:13px;font-weight:500;cursor:pointer">Import</button>
+      <button class="btn-primary" id="cbOAuthSave" onclick="submitAddCBOAuth()" style="padding:8px 16px;border-radius:var(--radius-sm);background:var(--brand);color:#000;border:none;font-size:13px;font-weight:500;cursor:pointer">Import</button>
     </div>
   </div>
 </div>
@@ -3888,7 +3888,7 @@ setInterval(refresh, 5000);       // health/accounts every 5s
     <div id="bulkCBOAuthResult" style="margin-bottom:12px;display:none;padding:10px;border-radius:var(--radius-sm);font-size:13px"></div>
     <div style="display:flex;gap:8px;justify-content:flex-end">
       <button class="btn-ghost" onclick="closeBulkCBOAuthModal()" style="padding:8px 16px;font-size:13px">Cancel</button>
-      <button class="btn-primary" id="bulkCBOAuthSave" onclick="submitBulkCBOAuth()" style="padding:8px 16px;border-radius:var(--radius-sm);background:var(--brand);color:#fff;border:none;font-size:13px;font-weight:500;cursor:pointer">Import</button>
+      <button class="btn-primary" id="bulkCBOAuthSave" onclick="submitBulkCBOAuth()" style="padding:8px 16px;border-radius:var(--radius-sm);background:var(--brand);color:#000;border:none;font-size:13px;font-weight:500;cursor:pointer">Import</button>
     </div>
   </div>
 </div>
@@ -3904,7 +3904,7 @@ setInterval(refresh, 5000);       // health/accounts every 5s
     <div id="bulkCBResult" style="margin-bottom:12px;display:none;padding:10px;border-radius:var(--radius-sm);font-size:13px"></div>
     <div style="display:flex;gap:8px;justify-content:flex-end">
       <button class="btn-ghost" onclick="closeBulkCBModal()" style="padding:8px 16px;font-size:13px">Cancel</button>
-      <button class="btn-primary" id="bulkCBSave" onclick="submitBulkCB()" style="padding:8px 16px;border-radius:var(--radius-sm);background:var(--brand);color:#fff;border:none;font-size:13px;font-weight:500;cursor:pointer">Import</button>
+      <button class="btn-primary" id="bulkCBSave" onclick="submitBulkCB()" style="padding:8px 16px;border-radius:var(--radius-sm);background:var(--brand);color:#000;border:none;font-size:13px;font-weight:500;cursor:pointer">Import</button>
     </div>
   </div>
 </div>
@@ -3937,7 +3937,7 @@ setInterval(refresh, 5000);       // health/accounts every 5s
     </div>
     <div style="display:flex;gap:8px;justify-content:flex-end">
       <button class="btn-ghost" onclick="closeAddGrokModal()" style="padding:8px 16px;font-size:13px">Cancel</button>
-      <button class="btn-primary" onclick="submitAddGrok()" style="padding:8px 16px;border-radius:var(--radius-sm);background:var(--brand);color:#fff;border:none;font-size:13px;font-weight:500;cursor:pointer">Add</button>
+      <button class="btn-primary" onclick="submitAddGrok()" style="padding:8px 16px;border-radius:var(--radius-sm);background:var(--brand);color:#000;border:none;font-size:13px;font-weight:500;cursor:pointer">Add</button>
     </div>
   </div>
 </div>
@@ -3966,7 +3966,7 @@ setInterval(refresh, 5000);       // health/accounts every 5s
     <div id="bulkGrokResult" style="margin-bottom:12px;display:none;padding:10px;border-radius:var(--radius-sm);font-size:13px"></div>
     <div style="display:flex;gap:8px;justify-content:flex-end">
       <button class="btn-ghost" onclick="closeBulkGrokModal()" style="padding:8px 16px;font-size:13px">Cancel</button>
-      <button class="btn-primary" id="bulkGrokSave" onclick="submitBulkGrok()" style="padding:8px 16px;border-radius:var(--radius-sm);background:var(--brand);color:#fff;border:none;font-size:13px;font-weight:500;cursor:pointer">Import</button>
+      <button class="btn-primary" id="bulkGrokSave" onclick="submitBulkGrok()" style="padding:8px 16px;border-radius:var(--radius-sm);background:var(--brand);color:#000;border:none;font-size:13px;font-weight:500;cursor:pointer">Import</button>
     </div>
   </div>
 </div>
