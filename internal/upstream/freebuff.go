@@ -86,15 +86,17 @@ func fbStripPrefix(model string) string {
 	return strings.TrimPrefix(model, "fb/")
 }
 
-// fbModelConfig looks up the model config by gateway ID.
+// fbModelConfig looks up the model config by gateway ID (dynamic registry
+// first, static fallback).
 func fbModelConfig(gatewayID string) *FreebuffModelConfig {
-	for i := range FreebuffModels {
-		if FreebuffModels[i].GatewayID == gatewayID {
-			return &FreebuffModels[i]
+	models := GetFBModels()
+	for i := range models {
+		if models[i].GatewayID == gatewayID {
+			return &models[i]
 		}
 	}
 	// Default to deepseek-v4-flash
-	return &FreebuffModels[0]
+	return &models[0]
 }
 
 // ============================================================================
@@ -422,9 +424,10 @@ func (am *FreebuffAccountManager) RemoveAccount(token string) error {
 // fbIsPremiumModel reports whether the upstream model is a premium (full-mode
 // only) model — i.e. NOT deepseek-v4-flash / mimo-v2.5.
 func fbIsPremiumModel(upstreamModel string) bool {
-	for i := range FreebuffModels {
-		if FreebuffModels[i].Upstream == upstreamModel {
-			return FreebuffModels[i].FullMode
+	models := GetFBModels()
+	for i := range models {
+		if models[i].Upstream == upstreamModel {
+			return models[i].FullMode
 		}
 	}
 	return false

@@ -199,6 +199,8 @@ func main() {
 		go cbCreditSyncWorker(workerCtx, cbKM)
 		go grokBillingSyncWorker(workerCtx, grokAM)
 		go FbQuotaSyncWorker(workerCtx, fbAM)
+		go FbModelsWorker(workerCtx)
+		go GrokModelsWorker(workerCtx, grokAM)
 	}
 	// Snapshot pool sizes into Prometheus gauges every 10s. Cheap RLock walk;
 	// keeps activeKeys/disabledKeys eventually consistent without touching the
@@ -361,6 +363,7 @@ func main() {
 	r.POST("/fb/import", csrfGuard(), adminAuth, handleFBImport(fbAM))
 	r.POST("/fb/import/bulk", csrfGuard(), adminAuth, handleFBImportBulk(fbAM))
 	r.POST("/fb/quota/sync", csrfGuard(), adminAuth, handleFBQuotaSync(fbAM))
+	r.POST("/models/refresh", csrfGuard(), adminAuth, handleModelsRefresh(grokAM))
 	r.GET("/fb/accounts", adminAuth, handleFBAccounts(fbAM))
 	r.DELETE("/fb/accounts/:token", csrfGuard(), adminAuth, handleFBDeleteAccount(fbAM))
 	r.POST("/fb/oauth/device/start", csrfGuard(), adminAuth, handleFBDeviceStart(fbAM))

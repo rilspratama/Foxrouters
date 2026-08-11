@@ -39,6 +39,7 @@ var (
 	handleFBAccounts       = handlers.HandleFBAccounts
 	handleFBDeleteAccount  = handlers.HandleFBDeleteAccount
 	handleFBDeviceStart    = handlers.HandleFBDeviceStart
+	handleModelsRefresh    = handlers.HandleModelsRefresh
 	handleFBDevicePoll     = handlers.HandleFBDevicePoll
 	handleTestCBKey        = handlers.HandleTestCBKey
 	handleTestGrokAccount  = handlers.HandleTestGrokAccount

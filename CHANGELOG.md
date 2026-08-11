@@ -11,6 +11,21 @@ Policy: **test (`go test -race`) before build/restart**. Secrets only via `.gate
 ## v1.6.4+ (working tree, not released) — Freebuff provider integration (2026-08-10)
 
 ### Added
+- **Dynamic model registry** (`internal/upstream/model_registry.go`) — Freebuff +
+  Grok model lists now refresh from upstream sources every 6h (workers gated by
+  `WORKERS_DISABLED`), so new models appear WITHOUT code changes / rebuilds:
+  - Freebuff: `freebuff-models.json` from the freebuff2api project (daily
+    generated, mirrors CodebuffAI/freebuff official source) → full model table
+    {id, session, agent, upstream} + premium/glm/standard pools → `FullMode`
+    auto-detected. New models like `fb/laguna-s-2.1`, `fb/kimi-k3-eco`,
+    `fb/claude-fable-5`, `fb/muse-spark` picked up automatically.
+  - Grok: upstream `GET /v1/models` (live account) → base model + `reasoning_efforts`
+    → aliases generated dynamically (auto/none kept as gateway-internal).
+  - CodeBuddy: static (verified — no models endpoint).
+  - `/v1/models` reads the registry with static fallback (zero downtime on fetch
+    failure). `POST /models/refresh` (admin) triggers manual refresh and returns
+    per-upstream source/count/error. Tests: `TestParseFBModelsJSON` (+empty),
+    `TestGetFBModelsFallback`.
 - **Freebuff per-model quota snapshot** — `SyncQuota` stores the full
   `rateLimitsByModel` map (`quota_by_model` JSON on `fb:account:<token>`):
   per-model used/limit/reset/period + entitlement breakdown. `/fb/accounts`
