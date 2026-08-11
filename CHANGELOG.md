@@ -2,13 +2,46 @@
 
 **Service:** Docker Compose (`foxrouters` container) · port **20130** · image local / GHCR  
 **Repo:** `/root/nexus-workspace/foxrouters/`  
-**Live version:** `const Version` in `main.go` / image tag (currently **v1.6.3**)
+**Live version:** `const Version` in `main.go` / image tag (currently **v1.6.4**)
 
 Policy: **test (`go test -race`) before build/restart**. Secrets only via `.gateway.env` (gitignored).
 
 ---
 
-## v1.6.4+ (working tree, not released) — Freebuff provider integration (2026-08-10)
+## v1.6.4 (working tree, not released) — Dev-stack isolation + token-refresh safety (2026-08-05)
+
+### Added
+- **Isolated dev stack** (`dev.sh`) — separate container (`foxrouters-dev`), own Redis
+  (`:6381`), own SQLite volume, port **20131**. Prod (`:20130`) never touched.
+  Commands: `build|up|down|logs|seed|test`. (commits cf1c62a, 5b06fb9)
+- **Env safety gates** — `WORKERS_DISABLED=1` (skip 6 background workers),
+  `HEALTH_PROBES_DISABLED=1` (skip health probes), `TOKEN_REFRESH_DISABLED=1`
+  (gate ALL refresh paths: background, on-demand EnsureValid, 401-retry).
+  Auto-set by `dev.sh up`. (commits cf1c62a, 5b06fb9)
+- **Prod-to-dev Redis seed** — `./dev.sh seed` copies credential keys
+  (`grok:account:*`, `cb:key:*`, `gw:key:*`) from prod Redis to dev Redis via
+  binary-safe DUMP/RESTORE. One-shot, non-destructive to prod. (commit 5b06fb9)
+- **Credential leak prevention** — `toDTO()` zeroes `AccessToken`/`RefreshToken`/`IDToken`
+  when `TOKEN_REFRESH_DISABLED=1`. Dev Redis never stores live credentials even if
+  save paths (RecordUsage/ReEnable/SyncBilling) trigger. (commit b49618d)
+- **DEV_MODE=1** in `install.sh` — prints dev-stack usage instructions post-install.
+
+### Fixed
+- **Tunnel raw HTTP bypass** — `createOrReuseTunnel` replaced cloudflare-go SDK with
+  raw `http.DefaultClient.Do()` to CF REST API. SDK hangs in gateway runtime
+  (HTTP/2 ALPN issue). (commit 1125c88)
+- **CF error body truncation** — API error bodies truncated to 200 chars in logs
+  (may contain account metadata). (commit b49618d)
+- **Dashboard UI** — compact stats cards, `.content` max-width 1600px,
+  `cbPager` toggle fix (was leaking into Grok tab). (commit e2ff6ea)
+
+### Security
+- Dev-stack isolation prevents **rotating-refresh-token race**: two instances
+  refreshing the same account → `invalid_grant` → permanent disable in BOTH.
+  `TOKEN_REFRESH_DISABLED=1` + credential zeroing make dev safe for seeded pools.
+
+---
+## v1.6.5 (working tree, not released) — Freebuff provider integration (2026-08-10)
 
 ### Added
 - **Dynamic model registry** (`internal/upstream/model_registry.go`) — Freebuff +
