@@ -1219,10 +1219,10 @@ body {
           <div class="tbl-scroll" style="max-height:500px">
             <table class="tbl">
               <thead><tr>
-                <th>Token</th><th>Email</th><th>User ID</th><th>Quota</th><th>Status</th><th>Actions</th>
+                <th>Token</th><th>Email</th><th>User ID</th><th>Quota</th><th>Tier</th><th>Status</th><th>Actions</th>
               </tr></thead>
               <tbody id="fbBody">
-                <tr><td colspan="6" style="text-align:center;padding:24px;color:var(--text-tertiary);font-size:13px">No Freebuff tokens. Click "+ Add Token" to import.</td></tr>
+                <tr><td colspan="7" style="text-align:center;padding:24px;color:var(--text-tertiary);font-size:13px">No Freebuff tokens. Click "+ Add Token" to import.</td></tr>
               </tbody>
             </table>
           </div>
@@ -2442,7 +2442,7 @@ async function loadFBAccounts() {
     var data = await fetchJSON('/fb/accounts');
     var body = document.getElementById('fbBody');
     if (!data || !data.accounts || data.accounts.length === 0) {
-      body.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:24px;color:var(--text-tertiary);font-size:13px">No Freebuff tokens. Click "+ Add Token" to import.</td></tr>';
+      body.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:24px;color:var(--text-tertiary);font-size:13px">No Freebuff tokens. Click "+ Add Token" to import.</td></tr>';
       return;
     }
     body.innerHTML = data.accounts.map(function(a) {
@@ -2455,18 +2455,23 @@ async function loadFBAccounts() {
         statusBadge = '<span style="color:var(--danger);font-weight:600">● disabled</span>';
       }
       var quota = a.quota_limit > 0 ? (a.quota_recent + '/' + a.quota_limit) : '—';
+      var tierBadge = '—';
+      if (a.tier === 'full') tierBadge = '<span style="color:var(--success);font-weight:600">full</span>';
+      else if (a.tier === 'limited') tierBadge = '<span style="color:var(--warning);font-weight:600">limited</span>';
+      else if (a.tier === 'blocked') tierBadge = '<span style="color:var(--danger);font-weight:600">blocked</span>';
       return '<tr>' +
         '<td class="mono" style="font-size:12px">' + escHtml(a.token) + '</td>' +
         '<td>' + escHtml(a.email || '—') + '</td>' +
         '<td class="mono" style="font-size:11px;color:var(--text-tertiary)">' + escHtml(a.user_id ? a.user_id.substring(0,8) + '…' : '—') + '</td>' +
         '<td>' + quota + '</td>' +
+        '<td>' + tierBadge + (a.country_code ? ' <span class="mono" style="font-size:10px;color:var(--text-tertiary)">' + escHtml(a.country_code) + '</span>' : '') + '</td>' +
         '<td>' + statusBadge + '</td>' +
         '<td><button class="btn-ghost" style="padding:3px 10px;font-size:11px;color:var(--danger)" onclick="deleteFBAccount(\'' + escHtml(a.token_full) + '\')">Delete</button></td>' +
         '</tr>';
     }).join('');
   } catch (e) {
     var body = document.getElementById('fbBody');
-    if (body) body.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:24px;color:var(--danger);font-size:13px">Failed to load: ' + escHtml(e.message) + '</td></tr>';
+    if (body) body.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:24px;color:var(--danger);font-size:13px">Failed to load: ' + escHtml(e.message) + '</td></tr>';
   }
 }
 

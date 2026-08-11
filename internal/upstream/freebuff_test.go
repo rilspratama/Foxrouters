@@ -109,6 +109,58 @@ func TestFbDeleteSessionClearsCache(t *testing.T) {
 	}
 }
 
+// TestFbNextTierGating verifies Next(model) skips limited-tier accounts for
+// premium models, skips blocked accounts always, and lets unknown tier pass.
+func TestFbNextTierGating(t *testing.T) {
+	mk := func(token, tier string) *FreebuffAccount {
+		return &FreebuffAccount{
+			Token:   token,
+			Email:   token + "@example.com",
+			Tier:    tier,
+			QuotaLimit: 6, QuotaRecent: 0,
+		}
+	}
+	cases := []struct {
+		name        string
+		accounts    []*FreebuffAccount
+		model       string
+		wantToken   string
+		wantErr     bool
+	}{
+		{"limited + premium → no eligible", []*FreebuffAccount{mk("a", "limited")}, "deepseek/deepseek-v4-pro", "", true},
+		{"limited + standard → picked", []*FreebuffAccount{mk("a", "limited")}, "deepseek/deepseek-v4-flash", "a", false},
+		{"full + premium → picked", []*FreebuffAccount{mk("a", "full")}, "deepseek/deepseek-v4-pro", "a", false},
+		{"unknown tier + premium → picked (pass-through)", []*FreebuffAccount{mk("a", "")}, "openai/gpt-5.6-luna", "a", false},
+		{"blocked + standard → no eligible", []*FreebuffAccount{mk("a", "blocked")}, "deepseek/deepseek-v4-flash", "", true},
+		{"mixed: limited+full → full wins premium", []*FreebuffAccount{mk("a", "limited"), mk("b", "full")}, "minimax/minimax-m3", "b", false},
+		{"mixed: standard mimo on limited", []*FreebuffAccount{mk("a", "limited"), mk("b", "full")}, "mimo/mimo-v2.5", "", false}, // either ok
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			am := NewFreebuffAccountManager(nil)
+			for _, acc := range tc.accounts {
+				am.accounts[acc.Token] = acc
+			}
+			got, err := am.Next(tc.model)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("expected error, got account %s", got.Token)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if tc.wantToken != "" && got.Token != tc.wantToken {
+				t.Fatalf("got %s, want %s", got.Token, tc.wantToken)
+			}
+			if tc.wantToken == "" && got == nil {
+				t.Fatalf("expected an account")
+			}
+		})
+	}
+}
+
 // TestFbRedisNilSafe verifies cache helpers never panic when db is nil and
 // fall back to memory-only behavior.
 func TestFbRedisNilSafe(t *testing.T) {

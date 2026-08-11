@@ -114,6 +114,13 @@ type FreebuffAccount struct {
 	QuotaSyncedAt time.Time `json:"quota_synced_at"`
 	QuotaResetAt  time.Time `json:"quota_reset_at"`
 	QuotaPeriod   string    `json:"quota_period"`
+	// Access tier from GET /session `accessTier` ("" = unknown, "full", "limited", "blocked")
+	Tier                string  `json:"tier"`
+	CountryCode         string  `json:"country_code"`
+	CountryBlockReason  string  `json:"country_block_reason"`
+	EntitlementBase     float64 `json:"entitlement_base"`
+	EntitlementReferral float64 `json:"entitlement_referral"`
+	EntitlementStreak   float64 `json:"entitlement_streak"`
 	// Hourly session tracking (in-memory, resets each hour)
 	HourlySessionCount int       `json:"-"`
 	HourlyWindowStart  time.Time `json:"-"`
@@ -244,6 +251,18 @@ func (am *FreebuffAccountManager) LoadFromRedis() error {
 		if v, ok := vals["quota_period"]; ok {
 			acc.QuotaPeriod = v
 		}
+		acc.Tier = vals["tier"]
+		acc.CountryCode = vals["country_code"]
+		acc.CountryBlockReason = vals["country_block_reason"]
+		if v, ok := vals["entitlement_base"]; ok && v != "" {
+			fmt.Sscanf(v, "%f", &acc.EntitlementBase)
+		}
+		if v, ok := vals["entitlement_referral"]; ok && v != "" {
+			fmt.Sscanf(v, "%f", &acc.EntitlementReferral)
+		}
+		if v, ok := vals["entitlement_streak"]; ok && v != "" {
+			fmt.Sscanf(v, "%f", &acc.EntitlementStreak)
+		}
 		am.mu.Lock()
 		am.accounts[token] = acc
 		am.mu.Unlock()
@@ -288,6 +307,12 @@ func (am *FreebuffAccountManager) SaveAccount(acc *FreebuffAccount) {
 		"quota_synced_at": acc.QuotaSyncedAt.Unix(),
 		"quota_reset_at":  acc.QuotaResetAt.Unix(),
 		"quota_period":    acc.QuotaPeriod,
+		"tier":            acc.Tier,
+		"country_code":    acc.CountryCode,
+		"country_block_reason": acc.CountryBlockReason,
+		"entitlement_base":     acc.EntitlementBase,
+		"entitlement_referral": acc.EntitlementReferral,
+		"entitlement_streak":   acc.EntitlementStreak,
 	}
 	key := "fb:account:" + acc.Token
 	if err := rdb.HSet(ctx, key, data).Err(); err != nil {
@@ -372,9 +397,23 @@ func (am *FreebuffAccountManager) RemoveAccount(token string) error {
 	return nil
 }
 
+// fbIsPremiumModel reports whether the upstream model is a premium (full-mode
+// only) model — i.e. NOT deepseek-v4-flash / mimo-v2.5.
+func fbIsPremiumModel(upstreamModel string) bool {
+	for i := range FreebuffModels {
+		if FreebuffModels[i].Upstream == upstreamModel {
+			return FreebuffModels[i].FullMode
+		}
+	}
+	return false
+}
+
 // Next returns the next available account (quota-aware, skip disabled + cooldown + exhausted).
 // Prefers accounts with lowest QuotaRecent (most remaining quota).
-func (am *FreebuffAccountManager) Next() (*FreebuffAccount, error) {
+// model: requested upstream model — accounts on "limited" tier are skipped for
+// premium (full-mode-only) models, and "blocked" accounts are always skipped.
+// Tier "" (unknown, not yet synced) passes through.
+func (am *FreebuffAccountManager) Next(model string) (*FreebuffAccount, error) {
 	am.mu.RLock()
 	defer am.mu.RUnlock()
 
@@ -382,7 +421,10 @@ func (am *FreebuffAccountManager) Next() (*FreebuffAccount, error) {
 		return nil, fmt.Errorf("no freebuff accounts available")
 	}
 
-	// Build list of eligible accounts (not disabled, not on cooldown, quota not exhausted)
+	premiumModel := fbIsPremiumModel(model)
+
+	// Build list of eligible accounts (not disabled, not on cooldown, quota not exhausted,
+	// tier-compatible with the requested model)
 	var eligible []*FreebuffAccount
 	var earliestReset time.Time
 	for _, acc := range am.accounts {
@@ -390,11 +432,12 @@ func (am *FreebuffAccountManager) Next() (*FreebuffAccount, error) {
 		disabled := acc.Disabled
 		cooldown := !acc.CooldownUntil.IsZero() && time.Now().Before(acc.CooldownUntil)
 		quotaExhausted := acc.QuotaLimit > 0 && acc.QuotaRecent >= acc.QuotaLimit
+		tierBlocked := acc.Tier == "blocked" || (acc.Tier == "limited" && premiumModel)
 		if !acc.QuotaResetAt.IsZero() && (earliestReset.IsZero() || acc.QuotaResetAt.Before(earliestReset)) {
 			earliestReset = acc.QuotaResetAt
 		}
 		acc.mu.Unlock()
-		if !disabled && !cooldown && !quotaExhausted {
+		if !disabled && !cooldown && !quotaExhausted && !tierBlocked {
 			eligible = append(eligible, acc)
 		}
 	}
@@ -402,6 +445,9 @@ func (am *FreebuffAccountManager) Next() (*FreebuffAccount, error) {
 	if len(eligible) == 0 {
 		if !earliestReset.IsZero() {
 			return nil, fmt.Errorf("all freebuff accounts quota exhausted, resets at %s", earliestReset.UTC().Format(time.RFC3339))
+		}
+		if premiumModel {
+			return nil, fmt.Errorf("all freebuff accounts on limited tier — premium model %q unavailable without full-access accounts", model)
 		}
 		return nil, fmt.Errorf("all freebuff accounts on cooldown or disabled")
 	}
@@ -460,6 +506,12 @@ func (am *FreebuffAccountManager) ListAccounts() []map[string]any {
 			"quota_period":       acc.QuotaPeriod,
 			"quota_synced_at":    acc.QuotaSyncedAt,
 			"hourly_session_count": acc.HourlySessionCount,
+			"tier":                acc.Tier,
+			"country_code":        acc.CountryCode,
+			"country_block_reason": acc.CountryBlockReason,
+			"entitlement_base":     acc.EntitlementBase,
+			"entitlement_referral": acc.EntitlementReferral,
+			"entitlement_streak":   acc.EntitlementStreak,
 		}
 		acc.mu.Unlock()
 		result = append(result, entry)
@@ -496,14 +548,19 @@ func (am *FreebuffAccountManager) ProbeAll() {
 	}
 }
 
-// SyncQuota syncs quota info for a single account from GET /api/v1/freebuff/session.
+// SyncQuota syncs quota + access-tier info for a single account from
+// GET /api/v1/freebuff/session. The response carries `accessTier` directly
+// (full/limited/blocked) + per-model entitlementBreakdown, so this doubles as
+// tier discovery. GET is 0-cost (doesn't create a session / burn quota).
 // If no active session, quota stays 0/0 (account is fresh, full quota available).
-// Creating a session would consume 1 quota — we avoid that to preserve quota.
 func (am *FreebuffAccountManager) SyncQuota(acc *FreebuffAccount) error {
 	client := &http.Client{Timeout: 10 * time.Second}
 	req, _ := http.NewRequest("GET", FREEBUFF_API_BASE+FREEBUFF_SESSION_PATH, nil)
 	req.Header.Set("Authorization", "Bearer "+acc.Token)
 	req.Header.Set("User-Agent", "Freebuff-CLI/0.0.142")
+	// Force the FULL quota snapshot (including zero-limit models like GLM
+	// referral) — without this the server may return a compact response.
+	req.Header.Set("x-freebuff-include-unused-rate-limits", "1")
 	resp, err := client.Do(req)
 	if err != nil {
 		return fmt.Errorf("quota sync: %w", err)
@@ -515,24 +572,44 @@ func (am *FreebuffAccountManager) SyncQuota(acc *FreebuffAccount) error {
 	}
 
 	var data struct {
-		Status           string `json:"status"`
-		RateLimitsByModel map[string]struct {
+		Status              string `json:"status"`
+		AccessTier          string `json:"accessTier"` // "full" | "limited" | "blocked"
+		CountryCode         string `json:"countryCode"`
+		CountryBlockReason  string `json:"countryBlockReason"`
+		RateLimitsByModel   map[string]struct {
 			Limit       float64 `json:"limit"`
 			RecentCount float64 `json:"recentCount"`
 			ResetAt     string  `json:"resetAt"`
 			Period      string  `json:"period"`
 			WindowHours int     `json:"windowHours"`
 		} `json:"rateLimitsByModel"`
+		RateLimit struct {
+			EntitlementBreakdown struct {
+				Base      float64 `json:"base"`
+				Referral  float64 `json:"referral"`
+				Streak    float64 `json:"streak"`
+			} `json:"entitlementBreakdown"`
+		} `json:"rateLimit"`
 	}
 	if err := json.Unmarshal(body, &data); err != nil {
 		return fmt.Errorf("quota sync parse: %w", err)
 	}
 
+	// Always persist tier/country info (present even without an active session)
+	acc.mu.Lock()
+	if data.AccessTier != "" {
+		acc.Tier = data.AccessTier
+	}
+	acc.CountryCode = data.CountryCode
+	acc.CountryBlockReason = data.CountryBlockReason
+	acc.EntitlementBase = data.RateLimit.EntitlementBreakdown.Base
+	acc.EntitlementReferral = data.RateLimit.EntitlementBreakdown.Referral
+	acc.EntitlementStreak = data.RateLimit.EntitlementBreakdown.Streak
+
 	// Use deepseek-v4-flash as the reference model (available in all tiers)
 	rl, ok := data.RateLimitsByModel["deepseek/deepseek-v4-flash"]
 	if !ok || data.Status == "none" {
 		// No active session — account is fresh, full quota available (0/6)
-		acc.mu.Lock()
 		acc.QuotaRecent = 0
 		acc.QuotaLimit = 6 // default free tier limit
 		acc.QuotaPeriod = "pacific_day"
@@ -540,11 +617,10 @@ func (am *FreebuffAccountManager) SyncQuota(acc *FreebuffAccount) error {
 		acc.CooldownUntil = time.Time{} // not exhausted
 		acc.mu.Unlock()
 		am.SaveAccount(acc)
-		slog.Debug("fb quota: no session, fresh account (0/6)", "module", "freebuff", "token", acc.Token[:8]+"...")
+		slog.Debug("fb quota: no session, fresh account (0/6)", "module", "freebuff", "token", acc.Token[:8]+"...", "tier", acc.Tier)
 		return nil
 	}
 
-	acc.mu.Lock()
 	acc.QuotaRecent = rl.RecentCount
 	acc.QuotaLimit = rl.Limit
 	acc.QuotaPeriod = rl.Period
@@ -563,7 +639,9 @@ func (am *FreebuffAccountManager) SyncQuota(acc *FreebuffAccount) error {
 	acc.mu.Unlock()
 
 	am.SaveAccount(acc)
-	slog.Info("fb quota synced", "module", "freebuff", "token", acc.Token[:8]+"...", "recent", rl.RecentCount, "limit", rl.Limit, "reset", rl.ResetAt)
+	slog.Info("fb quota synced", "module", "freebuff", "token", acc.Token[:8]+"...",
+		"recent", rl.RecentCount, "limit", rl.Limit, "reset", rl.ResetAt,
+		"tier", data.AccessTier, "country", data.CountryCode)
 	return nil
 }
 
@@ -1437,7 +1515,7 @@ func ProxyFreebuff(c *gin.Context, body []byte, bodyMap map[string]any, am *Free
 			return
 		}
 
-		acc, err := am.Next()
+		acc, err := am.Next(upstreamModel)
 		if err != nil {
 			break
 		}

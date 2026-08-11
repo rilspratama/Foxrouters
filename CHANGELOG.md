@@ -11,6 +11,15 @@ Policy: **test (`go test -race`) before build/restart**. Secrets only via `.gate
 ## v1.6.4+ (working tree, not released) — Freebuff provider integration (2026-08-10)
 
 ### Added
+- **Freebuff access-tier detection** — `SyncQuota` now sends
+  `x-freebuff-include-unused-rate-limits: 1` and parses `accessTier`
+  (`full`/`limited`/`blocked`) + `countryCode` + `countryBlockReason` +
+  `entitlementBreakdown` (base/referral/streak) from `GET /api/v1/freebuff/session`.
+  Tier persisted to Redis (`fb:account:<token>`), exposed in `/fb/accounts`,
+  `/health` (`fb_tier_full`/`fb_tier_limited`/`fb_tier_blocked`) + dashboard
+  Freebuff table (Tier column). `Next(model)` skips limited-tier accounts for
+  premium (full-mode-only) models + always skips blocked accounts — no more
+  wasted quota probing models that can't run.
 - **Freebuff session/run cache persisted to Redis** — `fb:session:<token>:<model>` +
   `fb:run:<token>:<agent>` (L1 in-memory + L2 Redis, survives gateway restart).
   `fbGetOrCreateSession`/`fbGetOrCreateRun`/`fbDeleteSession` are now manager

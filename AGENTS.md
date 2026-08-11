@@ -94,7 +94,7 @@ Log backend choices (`LOG_BACKEND` env, default `sqlite`):
 - **Models:** `fb/deepseek-v4-flash`, `fb/mimo-v2.5` (limited mode), `fb/deepseek-v4-pro`, `fb/minimax-m3`, `fb/gpt-5.6-luna`, `fb/glm-5.2` (full mode only — US/EU residential IP)
 - **Auth:** Device-code flow → authToken UUID (no expiry). `POST /fb/oauth/device/start` → login URL → `GET /fb/oauth/device/poll` (auto-import on ready). Bulk import: `POST /fb/import/bulk` (pipe format `token|email|userid`, email+userid optional).
 - **Session:** 1hr TTL, model-locked. `fbGetOrCreateSession` caches in-memory (L1) + Redis (L2). Switch model = DELETE + 5s wait + POST new.
-- **Quota:** `GET /api/v1/freebuff/session` → `rateLimitsByModel.{model}.{limit, recentCount, resetAt}`. `SyncQuota()` per account, `FbQuotaSyncWorker` every 5min. Auto-cooldown when `recentCount >= limit` until `resetAt`. Quota-aware `Next()` skips exhausted, prefers lowest `QuotaRecent`.
+- **Quota + tier:** `GET /api/v1/freebuff/session` (header `x-freebuff-include-unused-rate-limits: 1`) → `rateLimitsByModel.{model}.{limit, recentCount, resetAt}` + `accessTier` (`full`/`limited`/`blocked`) + `entitlementBreakdown`. `SyncQuota()` per account, `FbQuotaSyncWorker` every 5min. Auto-cooldown when `recentCount >= limit` until `resetAt`. Quota-aware `Next(model)` skips exhausted, prefers lowest `QuotaRecent`, skips limited-tier for premium models + blocked accounts always.
 - **Buffy prefix:** `fbTransform` auto-prepends `"You are Buffy, the strategic coding assistant.\n\n"` to system prompt. Client system prompt appended after.
 - **Tool calling:** `end_turn` dummy tool injected to bypass foreign client detection.
 - **Max tokens:** Auto-default 384K, auto-clamp to fit 1M combined context (prompt+completion ≤ 1,048,576).
