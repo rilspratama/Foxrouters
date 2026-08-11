@@ -11,6 +11,12 @@ Policy: **test (`go test -race`) before build/restart**. Secrets only via `.gate
 ## v1.6.4+ (working tree, not released) — Freebuff provider integration (2026-08-10)
 
 ### Added
+- **Proxy pool freebuff scope** (`internal/proxy/pool.go`) — new `UpstreamFreebuff` constant
+  + valid value in `Upstreams`. Proxies can now be scoped to `["freebuff"]` only (was
+  `all`/`grok`/`codebuddy`). `ProxyFreebuff()` already called `getClient(up, "freebuff")` —
+  previously only `all`-scoped proxies applied. Dashboard add/edit proxy modals gained a
+  Freebuff checkbox. Tests: `TestProxyPool_ScopingFreebuff`, `TestProxyPool_AllScopeCoversFreebuff`,
+  `TestProxyPool_RejectUnknownScope`, extended `TestProxyPool_EmptyUpstreamsDefaultsToAll`.
 - **Freebuff provider** (`fb/` prefix) — third upstream alongside Grok + CodeBuddy.
   6 models: `fb/deepseek-v4-flash`, `fb/mimo-v2.5` (limited mode), `fb/deepseek-v4-pro`,
   `fb/minimax-m3`, `fb/gpt-5.6-luna`, `fb/glm-5.2` (full mode only).

@@ -213,7 +213,7 @@ func TestProxyPool_EmptyUpstreamsDefaultsToAll(t *testing.T) {
 		t.Fatalf("expected Upstreams=[all] by default, got %+v", created.Upstreams)
 	}
 	// Both scopes should find this proxy.
-	for _, up := range []string{"grok", "codebuddy"} {
+	for _, up := range []string{"grok", "codebuddy", "freebuff"} {
 		e, err := pool.Next(up)
 		if err != nil {
 			t.Fatalf("Next(%s): %v", up, err)
@@ -221,6 +221,76 @@ func TestProxyPool_EmptyUpstreamsDefaultsToAll(t *testing.T) {
 		if e.ID != created.ID {
 			t.Fatalf("Next(%s) returned unexpected id: %s", up, e.ID)
 		}
+	}
+}
+
+// TestProxyPool_ScopingFreebuff verifies the freebuff scope: a proxy
+// scoped to ["freebuff"] is only eligible for Next("freebuff"), never
+// grok/codebuddy; an "all" proxy stays eligible for freebuff; and the
+// scope is accepted by validation.
+func TestProxyPool_ScopingFreebuff(t *testing.T) {
+	pool := proxy.NewProxyPool(nil)
+
+	// freebuff-only proxy
+	fbOnly, err := pool.Add(proxy.ProxyEntry{
+		Protocol: "http", Host: "fb.example.com", Port: 8080,
+		Enabled: true, Upstreams: []string{"freebuff"},
+	})
+	if err != nil {
+		t.Fatalf("Add(freebuff scope): %v", err)
+	}
+	// validation must have kept the freebuff scope
+	if len(fbOnly.Upstreams) != 1 || fbOnly.Upstreams[0] != "freebuff" {
+		t.Fatalf("expected Upstreams=[freebuff], got %+v", fbOnly.Upstreams)
+	}
+
+	// freebuff scope finds it
+	e, err := pool.Next("freebuff")
+	if err != nil {
+		t.Fatalf("Next(freebuff) unexpected error: %v", err)
+	}
+	if e.ID != fbOnly.ID {
+		t.Fatalf("Next(freebuff) returned %s, want %s", e.ID, fbOnly.ID)
+	}
+	// grok / codebuddy must NOT find the freebuff-only proxy
+	for _, up := range []string{"grok", "codebuddy"} {
+		if _, err := pool.Next(up); err == nil {
+			t.Fatalf("expected Next(%s) to fail (no proxies scoped to it)", up)
+		}
+	}
+}
+
+// TestProxyPool_AllScopeCoversFreebuff verifies an ["all"] proxy is
+// eligible for the freebuff upstream too (backward-compat shared proxy).
+func TestProxyPool_AllScopeCoversFreebuff(t *testing.T) {
+	pool := proxy.NewProxyPool(nil)
+	created, err := pool.Add(proxy.ProxyEntry{
+		Protocol: "http", Host: "shared.example.com", Port: 8080,
+		Enabled: true, Upstreams: []string{"all"},
+	})
+	if err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+	for _, up := range []string{"grok", "codebuddy", "freebuff"} {
+		e, err := pool.Next(up)
+		if err != nil {
+			t.Fatalf("Next(%s): %v", up, err)
+		}
+		if e.ID != created.ID {
+			t.Fatalf("Next(%s) returned unexpected id: %s", up, e.ID)
+		}
+	}
+}
+
+// TestProxyPool_RejectUnknownScope verifies validation rejects an
+// upstream value outside {all, grok, codebuddy, freebuff}.
+func TestProxyPool_RejectUnknownScope(t *testing.T) {
+	pool := proxy.NewProxyPool(nil)
+	if _, err := pool.Add(proxy.ProxyEntry{
+		Protocol: "http", Host: "x.example.com", Port: 80, Enabled: true,
+		Upstreams: []string{"openai"},
+	}); err == nil {
+		t.Fatalf("expected Add to reject unknown upstream scope 'openai'")
 	}
 }
 

@@ -66,7 +66,7 @@ Log backend choices (`LOG_BACKEND` env, default `sqlite`):
 5. History write async only; credentials never in CH  
 6. Full body unlimited in CH; log `id` JSON **string** for browsers  
 7. No live gateway key inject into `/dashboard` HTML  
-8. Proxy pool: `getClient(default, upstream)` — returns proxied client if pool has enabled proxies matching upstream scope, else direct. Transport cache per proxy ID. Auto-disable after 5 fails.
+8. Proxy pool: `getClient(default, upstream)` — returns proxied client if pool has enabled proxies matching upstream scope (`all`/`grok`/`codebuddy`/`freebuff`), else direct. Transport cache per proxy ID. Auto-disable after 5 fails.
 
 ### Token refresh
 - **Grok:** Pre-warm every 30s, 30min window, 10 concurrent  
