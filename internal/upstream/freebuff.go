@@ -443,11 +443,11 @@ func (am *FreebuffAccountManager) Next(model string) (*FreebuffAccount, error) {
 	}
 
 	if len(eligible) == 0 {
-		if !earliestReset.IsZero() {
-			return nil, fmt.Errorf("all freebuff accounts quota exhausted, resets at %s", earliestReset.UTC().Format(time.RFC3339))
-		}
 		if premiumModel {
 			return nil, fmt.Errorf("all freebuff accounts on limited tier — premium model %q unavailable without full-access accounts", model)
+		}
+		if !earliestReset.IsZero() {
+			return nil, fmt.Errorf("all freebuff accounts quota exhausted, resets at %s", earliestReset.UTC().Format(time.RFC3339))
 		}
 		return nil, fmt.Errorf("all freebuff accounts on cooldown or disabled")
 	}
@@ -1517,6 +1517,8 @@ func ProxyFreebuff(c *gin.Context, body []byte, bodyMap map[string]any, am *Free
 
 		acc, err := am.Next(upstreamModel)
 		if err != nil {
+			lastErr = fmt.Sprintf("next: %v", err)
+			slog.Warn("fb no eligible account", "module", "freebuff", "model", upstreamModel, "error", err)
 			break
 		}
 
