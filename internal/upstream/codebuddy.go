@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"golang.org/x/sync/singleflight"
 
 	"foxrouters/internal/db"
@@ -220,6 +221,45 @@ func (k *CBKey) AuthHeader() string {
 		return "Bearer " + k.AccessToken
 	}
 	return "Bearer " + k.Key
+}
+
+// UserID returns the X-User-Id value the current CLI sends:
+// "anonymous_" + last 8 chars of the credential (API key or OAuth AT).
+func (k *CBKey) UserID() string {
+	k.mu.RLock()
+	defer k.mu.RUnlock()
+	cred := k.Key
+	if k.CredType == CBAuthOAuth {
+		cred = k.AccessToken
+	}
+	cred = strings.TrimSpace(cred)
+	if len(cred) > 8 {
+		cred = cred[len(cred)-8:]
+	}
+	return "anonymous_" + cred
+}
+
+// cbChatHeaders applies the header set the current CodeBuddy CLI (2.134.x)
+// sends on /chat/completions — stable subset (drops OTel + stainless noise).
+// Conversation/Request IDs are per-request UUIDs (cache is content-addressed
+// per account, so they're telemetry only, but keeping them matches the CLI).
+func cbChatHeaders(req *http.Request, key *CBKey) {
+	req.Header.Set("Authorization", key.AuthHeader())
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "text/event-stream")
+	req.Header.Set("x-requested-with", "XMLHttpRequest")
+	req.Header.Set("X-Agent-Intent", "craft")
+	req.Header.Set("X-Agent-Purpose", "conversation")
+	req.Header.Set("X-IDE-Type", "CLI")
+	req.Header.Set("X-IDE-Name", "CLI")
+	req.Header.Set("X-IDE-Version", "2.134.0")
+	req.Header.Set("X-Private-Data", "false")
+	req.Header.Set("x-codebuddy-request", "1")
+	req.Header.Set("X-Product", "SaaS")
+	req.Header.Set("X-User-Id", key.UserID())
+	req.Header.Set("User-Agent", "CLI/2.134.0 CodeBuddy/2.134.0")
+	req.Header.Set("X-Conversation-ID", uuid.NewString())
+	req.Header.Set("X-Request-ID", uuid.NewString())
 }
 
 // IsExpired reports whether an OAuth access token needs refresh.
@@ -1608,9 +1648,7 @@ func ProxyCodeBuddy(c *gin.Context, body []byte, bodyMap map[string]any, km *CBK
 		}
 
 		req, _ := http.NewRequestWithContext(c.Request.Context(), "POST", CB_UPSTREAM_URL, bytes.NewReader(transformed))
-		req.Header.Set("Authorization", key.AuthHeader())
-		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("Accept", "text/event-stream")
+		cbChatHeaders(req, key)
 
 		resp, err := client.Do(req)
 		if err != nil {
@@ -1631,9 +1669,7 @@ func ProxyCodeBuddy(c *gin.Context, body []byte, bodyMap map[string]any, km *CBK
 				}
 				// Rebuild request with fresh AT
 				req, _ = http.NewRequestWithContext(c.Request.Context(), "POST", CB_UPSTREAM_URL, bytes.NewReader(transformed))
-				req.Header.Set("Authorization", key.AuthHeader())
-				req.Header.Set("Content-Type", "application/json")
-				req.Header.Set("Accept", "text/event-stream")
+				cbChatHeaders(req, key)
 				resp, err = client.Do(req)
 				if err != nil {
 					markProxyResult(proxyID, err, 0)

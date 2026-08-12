@@ -7,7 +7,7 @@ Unified OpenAI-compatible API gateway for **Grok + CodeBuddy**. Routes by model 
 Multi-account/key round-robin, auto-refresh (singleflight + pre-warm), circuit breaker,
 API key auth, per-key RPM/quota, Redis hot-state, **ClickHouse** full-body history, web dashboard.
 
-**Version:** v1.6.2 (`-X main.Version` build flag)
+**Version:** v1.6.7 (`-X main.Version` build flag)
 **Port:** 20130 · **Deploy:** Docker Compose (`docker compose up -d --build foxrouters`)
 
 > **⚠️ DEV MUST NOT TOUCH PROD.** `docker compose up --build` from a dev
@@ -82,6 +82,7 @@ Log backend choices (`LOG_BACKEND` env, default `sqlite`):
 - Same chat endpoint: `www.codebuddy.ai/v2/chat/completions`
 - Mixed round-robin over one `CBKey` pool (`cred_type`: `api_key` | `oauth`)
 - Upstream auth: API key = Bearer or `X-API-Key`; OAuth = `Authorization: Bearer <AT>` only
+- **Chat headers** (`cbChatHeaders`): mirrors current CLI (2.134.x) — `X-IDE-Type/Name/Version: CLI/2.134.0`, `X-Agent-Intent: craft`, `X-Agent-Purpose: conversation`, `X-Product: SaaS`, `X-Private-Data: false`, `x-codebuddy-request: 1`, `X-User-Id: anonymous_<last8>` (per credential), `User-Agent: CLI/2.134.0 CodeBuddy/2.134.0`, per-request `X-Conversation-ID`/`X-Request-ID` UUIDs. All optional (minimal header set works), sent to match upstream expectations. OTel (`traceparent`/`b3`) + `x-stainless-*` skipped.
 - **Credit sync:** worker every 5m + `POST /cb/credits/sync`. Meter API `POST /v2/billing/meter/get-user-resource` (works for both modes). Persist limit/remain/package/cycle/status. Permanent disable on `Status==3`. Fallback `CB_CREDIT_LIMIT=240` if never synced.
 - **OAuth login URL (device flow):** `POST /cb/oauth/device/start` → `auth_url` + `state` (upstream `POST /v2/plugin/auth/state?platform=CLI`); poll `GET /cb/oauth/device/poll?state=` until ready → client imports via `/cb/oauth/import`. Dashboard Add OAuth modal: **Manual | Login URL**.
 - **Credential probe (Test):** `POST /cb/keys/test` (key or email) and `POST /accounts/test` (Grok email). Hits upstream directly with that credential (CB `gpt-5.5`, Grok `grok-4.5`); not pool RR. Disabled credentials still probed.
@@ -89,12 +90,16 @@ Log backend choices (`LOG_BACKEND` env, default `sqlite`):
 ### Grok aliases
 `grok-4.5-{high,medium,low,xhigh,auto,none}` → `grok-4.5` + `reasoning_effort` (client wins if set).
 
+**Grok chat headers** (`grokHeaders`/credential_probe): `x-grok-client-version: 1.0.0`, `x-grok-client-identifier: grok-shell`, `X-XAI-Token-Auth: xai-grok-cli`, `x-authenticateresponse: authenticate-response`, `x-grok-client-mode: tui`, `User-Agent: grok-shell/1.0.0 (linux; x86_64)`, `x-userid`/`x-email` (JWT sub + email). Mirrors shipped CLI (grok-build source, `xai_grok_version::VERSION` = `GROK_VERSION` stamp). Version source: npm `@xai-official/grok` dist-tags.latest == GCS pointer `storage.googleapis.com/grok-build-public-artifacts/cli/stable`.
+
 ### Freebuff provider (`fb/` prefix)
 - **Upstream:** `www.codebuff.com/api/v1/chat/completions` (OpenAI-compatible, Bearer auth)
 - **Models:** dynamic — fetched every 6h from `freebuff-models.json` (freebuff2api project, mirrors CodebuffAI/freebuff official source). Static fallback: `fb/deepseek-v4-flash`, `fb/mimo-v2.5` (limited mode), `fb/deepseek-v4-pro`, `fb/minimax-m3`, `fb/gpt-5.6-luna`, `fb/glm-5.2` (full mode only — US/EU residential IP). See **Dynamic Model Registry** below.
 - **Auth:** Device-code flow → authToken UUID (no expiry). `POST /fb/oauth/device/start` → login URL → `GET /fb/oauth/device/poll` (auto-import on ready). Bulk import: `POST /fb/import/bulk` (pipe format `token|email|userid`, email+userid optional).
 - **Session:** 1hr TTL, model-locked. `fbGetOrCreateSession` caches in-memory (L1) + Redis (L2). Switch model = DELETE + 5s wait + POST new.
-- **Quota + tier:** `GET /api/v1/freebuff/session` (header `x-freebuff-include-unused-rate-limits: 1`) → `rateLimitsByModel.{model}.{limit, recentCount, resetAt}` + `accessTier` (`full`/`limited`/`blocked`) + `entitlementBreakdown`. `SyncQuota()` per account, `FbQuotaSyncWorker` every 5min. Auto-cooldown when `recentCount >= limit` until `resetAt`. Quota-aware `Next(model)` skips exhausted, prefers lowest `QuotaRecent`, skips limited-tier for premium models + blocked accounts always.
+- **Quota + tier:** `GET /api/v1/freebuff/session` (header `x-freebuff-include-unused-rate-limits: 1`) → `rateLimitsByModel.{model}.{limit, recentCount, resetAt}` + `accessTier` (`full`/`limited`/`blocked`) + `entitlementBreakdown`. `SyncQuota()` per account, `FbQuotaSyncWorker` every 5min. Auto-cooldown when `recentCount >= limit` until `resetAt`. Quota-aware `Next(model)` skips exhausted, prefers lowest `QuotaRecent`, skips limited-tier for premium models + blocked accounts always. Full-tier account detected ≤5min → premium models (deepseek-v4-pro/minimax-m3/gpt-5.6-luna/glm-5.2) auto-unlock, no restart.
+- **Streak worker:** `FBStreakWorker` — fires ads impression + streak check-in (`fbFireAdsAndStreak`) for every account on a timer (default 24h, `FREEBUFF_STREAK_INTERVAL` env, min 1h) so daily streaks never break. First run 20s after startup. Manual trigger `POST /fb/streak/checkin` → `{checked, failed}`. Dashboard "Streak check-in" button.
+- **Credential probe (Test):** `POST /fb/accounts/test` `{"token":"..."}` — probes chat upstream directly (`fb/deepseek-v4-flash`, always-available limited-tier model), warms session cache. Dashboard Test button per row.
 - **Buffy prefix:** `fbTransform` auto-prepends `"You are Buffy, the strategic coding assistant.\n\n"` to system prompt. Client system prompt appended after.
 - **Tool calling:** `end_turn` dummy tool injected to bypass foreign client detection.
 - **Max tokens:** Auto-default 384K, auto-clamp to fit 1M combined context (prompt+completion ≤ 1,048,576).

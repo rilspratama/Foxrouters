@@ -27,6 +27,8 @@ var (
 	handleCBOAuthDeviceStart = handlers.HandleCBOAuthDeviceStart
 	handleCBOAuthDevicePoll  = handlers.HandleCBOAuthDevicePoll
 	handleImportAccount    = handlers.HandleImportAccount
+	handleTestFBAccount    = handlers.HandleTestFBAccount
+	handleFBStreakCheckin  = handlers.HandleFBStreakCheckin
 	handleImportCBKeyBulk  = handlers.HandleImportCBKeyBulk
 	handleImportAccountBulk = handlers.HandleImportAccountBulk
 	handleSyncCBCredits    = handlers.HandleSyncCBCredits
@@ -98,3 +100,10 @@ func handleLogin(am *auth.Manager, sessions *auth.SessionStore) gin.HandlerFunc 
 func handleLogout(sessions *auth.SessionStore) gin.HandlerFunc {
 	return handlers.HandleLogout(sessions)
 }
+
+// Pagination helpers (server-side /accounts + /cb-stats)
+var (
+	parsePage      = handlers.ParsePage
+	parsePageSize  = handlers.ParsePageSize
+	pageRange      = handlers.PageRange
+)

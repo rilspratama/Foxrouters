@@ -199,6 +199,7 @@ func main() {
 		go cbCreditSyncWorker(workerCtx, cbKM)
 		go grokBillingSyncWorker(workerCtx, grokAM)
 		go FbQuotaSyncWorker(workerCtx, fbAM)
+		go FBStreakWorker(workerCtx, fbAM, FreebuffStreakInterval())
 		go FbModelsWorker(workerCtx)
 		go GrokModelsWorker(workerCtx, grokAM)
 	}
@@ -261,9 +262,12 @@ func main() {
 	// Accounts/keys/history — admin only (inference keys must not see other tenants' data)
 	r.GET("/accounts", adminAuth, handleAccounts(grokAM, cbKM))
 	r.GET("/cb-stats", adminAuth, func(c *gin.Context) {
+		page := parsePage(c.Query("page"))
+		pageSize := parsePageSize(c.Query("page_size"))
 		keys := cbKM.GetAll()
+		start, end := pageRange(page, pageSize, len(keys))
 		stats := []gin.H{}
-		for _, k := range keys {
+		for _, k := range keys[start:end] {
 			s := k.Snapshot()
 			remain := s.CreditsRemain
 			if remain == 0 && s.MeterSyncedAt.IsZero() {
@@ -299,7 +303,7 @@ func main() {
 			}
 			stats = append(stats, entry)
 		}
-		c.JSON(200, gin.H{"codebuddy_keys": stats})
+		c.JSON(200, gin.H{"codebuddy_keys": stats, "cb_total": len(keys), "cb_page": page, "cb_page_size": pageSize})
 	})
 	r.POST("/accounts/refresh", csrfGuard(), adminAuth, handleRefresh(grokAM))
 	r.POST("/accounts/import", csrfGuard(), adminAuth, handleImportAccount(grokAM))
@@ -358,6 +362,8 @@ func main() {
 	})
 	r.POST("/cb/keys/test", csrfGuard(), adminAuth, handleTestCBKey(cbKM))
 	r.POST("/accounts/test", csrfGuard(), adminAuth, handleTestGrokAccount(grokAM))
+	r.POST("/fb/accounts/test", csrfGuard(), adminAuth, handleTestFBAccount(fbAM))
+	r.POST("/fb/streak/checkin", csrfGuard(), adminAuth, handleFBStreakCheckin(fbAM))
 	r.DELETE("/accounts/:email", csrfGuard(), adminAuth, handleDeleteAccount(grokAM))
 	r.DELETE("/cb/keys/:key", csrfGuard(), adminAuth, handleDeleteCBKey(cbKM))
 	r.POST("/fb/import", csrfGuard(), adminAuth, handleFBImport(fbAM))

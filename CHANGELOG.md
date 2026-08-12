@@ -2,9 +2,26 @@
 
 **Service:** Docker Compose (`foxrouters` container) · port **20130** · image local / GHCR  
 **Repo:** `/root/nexus-workspace/foxrouters/`  
-**Live version:** `const Version` in `main.go` / image tag (currently **v1.6.6**)
+**Live version:** `const Version` in `main.go` / image tag (currently **v1.6.7**, working tree)
 
 Policy: **test (`go test -race`) before build/restart**. Secrets only via `.gateway.env` (gitignored).
+
+---
+
+## v1.6.7+ (working tree, not released) — Freebuff test + streak worker, CLI header sync, provider grid (2026-08-12)
+
+### Added
+- **Freebuff credential Test** — `POST /fb/accounts/test` `{"token":"..."}` + dashboard Test button per row. Probes chat upstream directly (`fb/deepseek-v4-flash`, always-available limited-tier model), warms session cache. Mirrors Grok (`/accounts/test`) + CB (`/cb/keys/test`). (`TestFreebuffAccount` in freebuff.go, `HandleTestFBAccount` in credential_probe.go)
+- **Freebuff streak worker** — `FBStreakWorker` fires ads impression + streak check-in (`fbFireAdsAndStreak`) for every account on a timer (default **24h**, `FREEBUFF_STREAK_INTERVAL` env, min 1h; first run 20s after startup) so daily streaks never break between sessions. `StreakCheckinOnce()` returns `{checked, failed}`, concurrency 3. Manual trigger `POST /fb/streak/checkin` + dashboard "Streak check-in" button. `fbFireAdsAndStreak` refactored to return error (per-account failure logging).
+- **Provider grid** (Accounts & Keys) — compact horizontal provider cards (Grok / CodeBuddy / Freebuff) as entry point; panel + subtabs revealed on card click. Server-side pagination for `/accounts` + `/cb-stats` (`?upstream=&page=&page_size=` cap 200).
+- **Real provider icons** — embedded data-URI favicons: Grok = xAI X logo (`x.ai/favicon.ico`), CodeBuddy = official SVG logo, Freebuff = **pixel-exact SVG reconstruction of the real sparkle+minus-bar icon** (polyline traced from reference image, 155 points; `freebuff.com/favicon.ico` is the Codebuff swift bird, NOT the real Freebuff mark).
+
+### Changed
+- **CodeBuddy chat headers → CLI 2.134.0** (`cbChatHeaders`): `X-IDE-Version: 2.134.0`, `X-Agent-Purpose: conversation`, `X-Private-Data: false`, `x-codebuddy-request: 1`, `X-User-Id: anonymous_<last8>` (per credential), `User-Agent: CLI/2.134.0 CodeBuddy/2.134.0`, per-request `X-Conversation-ID`/`X-Request-ID` UUIDs. All optional (minimal set still 200) — sent to match current CLI. OTel + `x-stainless-*` skipped. `CBKey.UserID()` helper added. (Verified live: CLI 2.134.0 via capture proxy + direct curl 200.)
+- **Grok version 0.2.93 → 1.0.0** (`GROK_CLIENT_VERSION`) — `x-grok-client-version` + `User-Agent: grok-shell/1.0.0 (linux; x86_64)`. Version verified from shipped CLI (`grok --version` = 1.0.0), npm `@xai-official/grok` dist-tags, GCS stable pointer. Header structure unchanged (identifier grok-shell, X-XAI-Token-Auth, x-authenticateresponse, client-mode tui, x-userid/x-email).
+
+### Fixed
+- Dashboard Freebuff account rows: Test button added (was delete-only).
 
 ---
 

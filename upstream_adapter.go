@@ -61,6 +61,8 @@ var (
 	NewCBKeyManager       = upstream.NewCBKeyManager
 	NewFreebuffAccountManager = upstream.NewFreebuffAccountManager
 	FbQuotaSyncWorker         = upstream.FbQuotaSyncWorker
+	FBStreakWorker            = upstream.FBStreakWorker
+	FreebuffStreakInterval    = upstream.FreebuffStreakInterval
 	FbModelsWorker            = upstream.FbModelsWorker
 	GrokModelsWorker          = upstream.GrokModelsWorker
 

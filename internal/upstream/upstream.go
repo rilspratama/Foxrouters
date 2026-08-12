@@ -155,7 +155,11 @@ const (
 	CB_OAUTH_REFRESH_URL = "https://www.codebuddy.ai/v2/plugin/auth/token/refresh"
 	REFRESH_BUFFER       = 10 * time.Minute
 
-	GROK_CLIENT_VERSION    = "0.2.93"
+	// grok CLI version stamp — check the shipped CLI before bumping:
+	// npm @xai-official/grok dist-tags.latest == GCS pointer
+	// https://storage.googleapis.com/grok-build-public-artifacts/cli/stable
+	// (xai-grok-update/src/version.rs; xai_grok_version::VERSION = GROK_VERSION stamp)
+	GROK_CLIENT_VERSION    = "1.0.0"
 	GROK_CLIENT_IDENTIFIER = "grok-shell"
 	CB_DEFAULT_SYSTEM      = "You are a helpful assistant."
 

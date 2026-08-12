@@ -730,6 +730,86 @@ func FbQuotaSyncWorker(ctx context.Context, am *FreebuffAccountManager) {
 	}
 }
 
+// FreebuffStreakInterval returns the streak check-in interval.
+// Default 24h; env FREEBUFF_STREAK_INTERVAL overrides (min 1h).
+func FreebuffStreakInterval() time.Duration {
+	if v := os.Getenv("FREEBUFF_STREAK_INTERVAL"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil && d >= time.Hour {
+			return d
+		}
+	}
+	return 24 * time.Hour
+}
+
+// FBStreakWorker periodically fires ads + streak check-in for ALL Freebuff
+// accounts so daily streaks don't break between sessions. First run happens
+// shortly after startup (after a short delay so startup burst settles),
+// then every `interval`. Best-effort: failures are logged, never block.
+func FBStreakWorker(ctx context.Context, am *FreebuffAccountManager, interval time.Duration) {
+	if interval < time.Hour {
+		interval = 24 * time.Hour
+	}
+	time.Sleep(20 * time.Second)
+	am.StreakCheckinOnce()
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			am.StreakCheckinOnce()
+		}
+	}
+}
+
+// StreakCheckinOnce fires ads + streak check-in for every Freebuff account
+// with a token. Returns (checked, failed). Concurrency 3; 10s client timeout.
+func (am *FreebuffAccountManager) StreakCheckinOnce() (int, int) {
+	am.mu.RLock()
+	var accounts []*FreebuffAccount
+	for _, acc := range am.accounts {
+		accounts = append(accounts, acc)
+	}
+	am.mu.RUnlock()
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, 3)
+	var mu sync.Mutex
+	checked, failed := 0, 0
+	for _, acc := range accounts {
+		acc.mu.Lock()
+		token := acc.Token
+		acc.mu.Unlock()
+		if token == "" {
+			continue
+		}
+		wg.Add(1)
+		go func(tok string) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			if err := fbFireAdsAndStreak(client, tok); err != nil {
+				mu.Lock()
+				failed++
+				mu.Unlock()
+				slog.Warn("fb streak check-in failed", "module", "fb-streak", "token", tok[:8]+"...", "error", err)
+				return
+			}
+			mu.Lock()
+			checked++
+			mu.Unlock()
+			slog.Info("fb streak check-in ok", "module", "fb-streak", "token", tok[:8]+"...")
+		}(token)
+	}
+	wg.Wait()
+	if len(accounts) > 0 {
+		slog.Info("fb streak check-in done", "module", "fb-streak", "checked", checked, "failed", failed, "total", len(accounts))
+	}
+	return checked, failed
+}
+
 // ============================================================================
 // SESSION + RUN CACHE (in-memory, ephemeral)
 // ============================================================================
@@ -897,7 +977,9 @@ func (am *FreebuffAccountManager) fbGetOrCreateSession(client *http.Client, toke
 	}
 
 	// Fire ads + streak (best-effort)
-	go fbFireAdsAndStreak(client, token)
+	go func() {
+		_ = fbFireAdsAndStreak(client, token)
+	}()
 
 	// POST new session
 	sess, err = fbCreateSession(client, token, model)
@@ -1068,7 +1150,8 @@ func (am *FreebuffAccountManager) fbDeleteSession(client *http.Client, token str
 }
 
 // fbFireAdsAndStreak simulates the official CLI behavior (best-effort, don't block).
-func fbFireAdsAndStreak(client *http.Client, token string) {
+// Returns the first error encountered (nil when both calls succeed or are skipped).
+func fbFireAdsAndStreak(client *http.Client, token string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
@@ -1088,7 +1171,9 @@ func fbFireAdsAndStreak(client *http.Client, token string) {
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", "Freebuff-CLI/0.0.142")
-	if resp, err := client.Do(req); err == nil {
+	if resp, err := client.Do(req); err != nil {
+		return fmt.Errorf("ads: %w", err)
+	} else {
 		resp.Body.Close()
 	}
 
@@ -1096,9 +1181,12 @@ func fbFireAdsAndStreak(client *http.Client, token string) {
 	req2, _ := http.NewRequestWithContext(ctx, "GET", FREEBUFF_API_BASE+FREEBUFF_STREAK_PATH, nil)
 	req2.Header.Set("Authorization", "Bearer "+token)
 	req2.Header.Set("User-Agent", "Freebuff-CLI/0.0.142")
-	if resp, err := client.Do(req2); err == nil {
+	if resp, err := client.Do(req2); err != nil {
+		return fmt.Errorf("streak: %w", err)
+	} else {
 		resp.Body.Close()
 	}
+	return nil
 }
 
 // fbGetOrCreateRun returns a cached runId or creates a new one.
@@ -1337,6 +1425,137 @@ func fbProbeMe(token string) (userID, email string, err error) {
 		return "", "", err
 	}
 	return data.ID, data.Email, nil
+}
+
+// TestFreebuffAccount probes a Freebuff token directly against the chat
+// upstream (deepseek/deepseek-v4-flash — the always-available limited-tier
+// model). Session + run are created through the manager's cache so the probe
+// also warms the gateway's session/run chain. Disabled accounts are still
+// probed so operators can verify recovery. Network I/O happens outside any
+// account mutex.
+func (am *FreebuffAccountManager) TestFreebuffAccount(acc *FreebuffAccount) CredentialProbeResult {
+	res := CredentialProbeResult{Model: "fb/deepseek-v4-flash"}
+	if acc == nil {
+		res.Error = "fb account is nil"
+		return res
+	}
+	acc.mu.Lock()
+	token := acc.Token
+	userID := acc.UserID
+	email := acc.Email
+	acc.mu.Unlock()
+	res.Email = email
+	if token == "" {
+		res.Error = "fb account has no token"
+		return res
+	}
+
+	const (
+		upstreamModel = "deepseek/deepseek-v4-flash"
+		agentID       = "base2-free-deepseek-flash"
+	)
+	client := &http.Client{Timeout: 90 * time.Second}
+	start := time.Now()
+
+	// Session (cached, 1hr TTL) + run chain (cached, 10min)
+	sess, err := am.fbGetOrCreateSession(client, token, userID, upstreamModel)
+	if err != nil {
+		res.Error = "session: " + err.Error()
+		return res
+	}
+	runID, err := am.fbGetOrCreateRun(client, token, agentID)
+	if err != nil {
+		res.Error = "run: " + err.Error()
+		return res
+	}
+
+	body := map[string]any{
+		"model": upstreamModel,
+		"messages": []map[string]string{
+			{"role": "system", "content": FREEBUFF_BUFFY_PREFIX},
+			{"role": "user", "content": "Say OK"},
+		},
+		"max_tokens": 512,
+		"codebuff_metadata": map[string]any{
+			"freebuff_instance_id": sess.InstanceID,
+			"run_id":               runID,
+			"cost_mode":            "free",
+		},
+	}
+	payload := fbTransform(body, upstreamModel, sess.InstanceID, runID)
+
+	req, err := http.NewRequest("POST", FREEBUFF_API_BASE+FREEBUFF_CHAT_PATH, bytes.NewReader(payload))
+	if err != nil {
+		res.Error = "request build: " + err.Error()
+		return res
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("User-Agent", "Freebuff-CLI/0.0.142")
+	req.Header.Set("x-freebuff-instance-id", sess.InstanceID)
+	if userID != "" {
+		req.Header.Set("x-freebuff-acting-user-id", userID)
+	}
+
+	resp, err := client.Do(req)
+	res.LatencyMs = time.Since(start).Milliseconds()
+	if err != nil {
+		res.Error = "network: " + err.Error()
+		return res
+	}
+	defer resp.Body.Close()
+	res.Status = resp.StatusCode
+	if resp.StatusCode != 200 {
+		bodyBytes, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		res.Error = fmt.Sprintf("upstream %d: %s", resp.StatusCode, truncateLog(string(bodyBytes), 160))
+		return res
+	}
+	content, err := fbParseSSEContent(resp.Body)
+	if err != nil {
+		res.Error = "stream parse: " + err.Error()
+		return res
+	}
+	if strings.TrimSpace(content) == "" {
+		res.Error = "empty response"
+		return res
+	}
+	res.Content = truncateLog(content, 160)
+	res.OK = true
+	return res
+}
+
+// fbParseSSEContent joins delta.content pieces from an SSE chat stream.
+func fbParseSSEContent(r io.Reader) (string, error) {
+	sc := bufio.NewScanner(r)
+	sc.Buffer(make([]byte, 0, 64*1024), 1<<20)
+	var content strings.Builder
+	for sc.Scan() {
+		line := sc.Text()
+		if !strings.HasPrefix(line, "data:") {
+			continue
+		}
+		raw := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+		if raw == "[DONE]" {
+			break
+		}
+		var chunk struct {
+			Choices []struct {
+				Delta struct {
+					Content string `json:"content"`
+				} `json:"delta"`
+			} `json:"choices"`
+		}
+		if err := json.Unmarshal([]byte(raw), &chunk); err != nil {
+			continue
+		}
+		if len(chunk.Choices) > 0 {
+			content.WriteString(chunk.Choices[0].Delta.Content)
+		}
+	}
+	if err := sc.Err(); err != nil {
+		return content.String(), err
+	}
+	return content.String(), nil
 }
 
 // ============================================================================

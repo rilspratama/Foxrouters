@@ -53,6 +53,54 @@ func HandleTestCBKey(cbKM *upstream.CBKeyManager) gin.HandlerFunc {
 	}
 }
 
+// HandleFBStreakCheckin: POST /fb/streak/checkin
+// Fires ads + streak check-in for every Freebuff account (same as the
+// daily worker). Returns {checked, failed} counts.
+func HandleFBStreakCheckin(fbAM *upstream.FreebuffAccountManager) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if fbAM == nil {
+			c.JSON(500, gin.H{"error": "freebuff manager not initialised"})
+			return
+		}
+		checked, failed := fbAM.StreakCheckinOnce()
+		slog.Info("fb streak check-in (manual)", "module", "fb-streak", "checked", checked, "failed", failed)
+		c.JSON(200, gin.H{"ok": true, "checked": checked, "failed": failed})
+	}
+}
+
+// HandleTestFBAccount: POST /fb/accounts/test
+// Body: {"token":"<full|masked>"}
+// Probes the credential directly against the Freebuff chat upstream.
+// Always returns HTTP 200 with ok=false on upstream failure so the dashboard
+// can show the result; 400/404 only for bad/missing request identity.
+func HandleTestFBAccount(fbAM *upstream.FreebuffAccountManager) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if fbAM == nil {
+			c.JSON(500, gin.H{"error": "freebuff manager not initialised"})
+			return
+		}
+		var body struct {
+			Token string `json:"token"`
+		}
+		if err := c.ShouldBindJSON(&body); err != nil {
+			c.JSON(400, gin.H{"error": "invalid JSON: " + err.Error()})
+			return
+		}
+		if body.Token == "" {
+			c.JSON(400, gin.H{"error": "token required"})
+			return
+		}
+		acc := fbAM.GetAccount(body.Token)
+		if acc == nil {
+			c.JSON(404, gin.H{"error": "fb account not found"})
+			return
+		}
+		result := fbAM.TestFreebuffAccount(acc)
+		slog.Info("fb account test", "module", "fb-probe", "ok", result.OK, "status", result.Status, "latency_ms", result.LatencyMs, "error", result.Error)
+		c.JSON(200, result)
+	}
+}
+
 // HandleTestGrokAccount: POST /accounts/test
 // Body: {"email":"..."}.
 // Probes the Grok account directly against cli-chat-proxy (no RR).

@@ -148,6 +148,20 @@ func HandleHealth(grokAM *upstream.GrokAccountManager, cbKM *upstream.CBKeyManag
 			"grok_tokens_quota": func() int64 {
 				return int64(upstream.GROK_FREE_TIER_QUOTA) * int64(grokAM.Len())
 			}(),
+			"cb_credits_used": func() float64 {
+				var total float64
+				for _, k := range cbKM.GetAll() {
+					total += float64(k.Snapshot().CreditsUsed)
+				}
+				return total
+			}(),
+			"cb_credits_limit": func() float64 {
+				var total float64
+				for _, k := range cbKM.GetAll() {
+					total += float64(k.Snapshot().CreditLimit)
+				}
+				return total
+			}(),
 			"cb_keys":       cbKM.Len(),
 			"cb_keys_active": func() int {
 				active := 0
@@ -205,75 +219,135 @@ func HandleHealth(grokAM *upstream.GrokAccountManager, cbKM *upstream.CBKeyManag
 }
 
 // HandleAccounts lists Grok accounts and CodeBuddy keys (admin only).
+// Server-side pagination: ?upstream=grok|codebuddy&page=N&page_size=S.
+// Omitting `upstream` returns both full lists (legacy behavior).
 func HandleAccounts(grokAM *upstream.GrokAccountManager, cbKM *upstream.CBKeyManager) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		grokAccs := grokAM.GetAll()
-		grokResult := make([]gin.H, 0)
-		for _, a := range grokAccs {
-			s := a.Snapshot()
-			grokResult = append(grokResult, gin.H{
-				"provider": "grok", "email": s.Email, "sub": s.Sub,
-				"expires_at": s.Expired, "expires_in": s.ExpiresIn,
-				"last_refresh": s.LastRefresh, "disabled": s.Disabled,
-				"disabled_at": s.DisabledAt, "token_status": s.TokenStatus,
-				"billing_synced_at":  s.BillingSyncedAt,
-				"period_end":         s.PeriodEnd,
-				"period_type":        s.PeriodType,
-				"on_demand_cap":      s.OnDemandCap,
-				"on_demand_used":     s.OnDemandUsed,
-				"prepaid_balance":    s.PrepaidBalance,
-				"unified_billing":    s.UnifiedBilling,
-				"tokens_used":        s.TokensUsed,
-				"prompt_tokens":      s.PromptTokens,
-				"completion_tokens":  s.CompletionTokens,
-				"usage_reset_at":     s.UsageResetAt,
-				"quota":              upstream.GROK_FREE_TIER_QUOTA,
-			})
-		}
-		cbKeys := cbKM.GetAll()
-		cbResult := make([]gin.H, 0)
-		for _, k := range cbKeys {
-			s := k.Snapshot()
-			remain := s.CreditsRemain
-			if remain == 0 && s.MeterSyncedAt.IsZero() {
-				// Never synced — derive from fallback limit
-				remain = s.CreditLimit - s.CreditsUsed
-			}
-			entry := gin.H{
-				"provider":         "codebuddy",
-				"cred_type":        string(s.CredType),
-				"disabled":         s.Disabled,
-				"credits_used":     s.CreditsUsed,
-				"credit_limit":     s.CreditLimit,
-				"credits_remain":   remain,
-				"credits_left":     remain,
-				"total_requests":   s.TotalReqs,
-				"package_name":     s.PackageName,
-				"cycle_end":        s.CycleEnd,
-				"meter_status":     s.MeterStatus,
-			}
-			if !s.MeterSyncedAt.IsZero() {
-				entry["meter_synced_at"] = s.MeterSyncedAt.Format(time.RFC3339)
-			}
-			if s.CredType == upstream.CBAuthOAuth {
-				entry["email"] = s.Email
-				entry["key"] = s.Email
-				if !s.ExpiresAt.IsZero() {
-					entry["expires_at"] = s.ExpiresAt.Format(time.RFC3339)
-				}
-			} else {
-				entry["key"] = s.Key[:8] + "..." + s.Key[len(s.Key)-4:]
-			}
-			cbResult = append(cbResult, entry)
-		}
-		c.JSON(200, gin.H{
-			"grok": grokResult, "codebuddy": cbResult,
-			"grok_total": len(grokResult), "cb_total": len(cbResult),
+		up := strings.ToLower(strings.TrimSpace(c.Query("upstream")))
+		page := ParsePage(c.Query("page"))
+		pageSize := ParsePageSize(c.Query("page_size"))
+
+		result := gin.H{
+			"grok_total":         grokAM.Len(),
+			"cb_total":           cbKM.Len(),
 			"grok_selector_mode": string(upstream.GetGrokSelectorMode()),
 			"cb_selector_mode":   string(upstream.GetSelectorMode()),
-		})
+		}
+
+		if up == "" || up == "grok" {
+			grokAccs := grokAM.GetAll()
+			start, end := PageRange(page, pageSize, len(grokAccs))
+			grokResult := make([]gin.H, 0, end-start)
+			for _, a := range grokAccs[start:end] {
+				s := a.Snapshot()
+				grokResult = append(grokResult, gin.H{
+					"provider": "grok", "email": s.Email, "sub": s.Sub,
+					"expires_at": s.Expired, "expires_in": s.ExpiresIn,
+					"last_refresh": s.LastRefresh, "disabled": s.Disabled,
+					"disabled_at": s.DisabledAt, "token_status": s.TokenStatus,
+					"billing_synced_at": s.BillingSyncedAt,
+					"period_end":        s.PeriodEnd,
+					"period_type":       s.PeriodType,
+					"on_demand_cap":     s.OnDemandCap,
+					"on_demand_used":    s.OnDemandUsed,
+					"prepaid_balance":   s.PrepaidBalance,
+					"unified_billing":   s.UnifiedBilling,
+					"tokens_used":       s.TokensUsed,
+					"prompt_tokens":     s.PromptTokens,
+					"completion_tokens": s.CompletionTokens,
+					"usage_reset_at":    s.UsageResetAt,
+					"quota":             upstream.GROK_FREE_TIER_QUOTA,
+				})
+			}
+			result["grok"] = grokResult
+			result["grok_page"] = page
+			result["grok_page_size"] = pageSize
+		}
+
+		if up == "" || up == "codebuddy" {
+			cbKeys := cbKM.GetAll()
+			start, end := PageRange(page, pageSize, len(cbKeys))
+			cbResult := make([]gin.H, 0, end-start)
+			for _, k := range cbKeys[start:end] {
+				s := k.Snapshot()
+				remain := s.CreditsRemain
+				if remain == 0 && s.MeterSyncedAt.IsZero() {
+					// Never synced — derive from fallback limit
+					remain = s.CreditLimit - s.CreditsUsed
+				}
+				entry := gin.H{
+					"provider":       "codebuddy",
+					"cred_type":      string(s.CredType),
+					"disabled":       s.Disabled,
+					"credits_used":   s.CreditsUsed,
+					"credit_limit":   s.CreditLimit,
+					"credits_remain": remain,
+					"credits_left":   remain,
+					"total_requests": s.TotalReqs,
+					"package_name":   s.PackageName,
+					"cycle_end":      s.CycleEnd,
+					"meter_status":   s.MeterStatus,
+				}
+				if !s.MeterSyncedAt.IsZero() {
+					entry["meter_synced_at"] = s.MeterSyncedAt.Format(time.RFC3339)
+				}
+				if s.CredType == upstream.CBAuthOAuth {
+					entry["email"] = s.Email
+					entry["key"] = s.Email
+					if !s.ExpiresAt.IsZero() {
+						entry["expires_at"] = s.ExpiresAt.Format(time.RFC3339)
+					}
+				} else {
+					entry["key"] = s.Key[:8] + "..." + s.Key[len(s.Key)-4:]
+				}
+				cbResult = append(cbResult, entry)
+			}
+			result["codebuddy"] = cbResult
+			result["cb_page"] = page
+			result["cb_page_size"] = pageSize
+		}
+
+		c.JSON(200, result)
 	}
 }
+
+// parsePage parses a 1-based page query param (default 1).
+func ParsePage(v string) int {
+	p, err := strconv.Atoi(v)
+	if err != nil || p < 1 {
+		return 1
+	}
+	return p
+}
+
+// parsePageSize parses page_size (default 50, capped at 200).
+func ParsePageSize(v string) int {
+	n, err := strconv.Atoi(v)
+	if err != nil || n < 1 {
+		return 50
+	}
+	if n > 200 {
+		return 200
+	}
+	return n
+}
+
+// pageRange returns the half-open [start, end) slice bounds for a page.
+func PageRange(page, pageSize, total int) (int, int) {
+	if page < 1 {
+		page = 1
+	}
+	start := (page - 1) * pageSize
+	if start > total {
+		start = total
+	}
+	end := start + pageSize
+	if end > total {
+		end = total
+	}
+	return start, end
+}
+
 
 // HandleRefresh forces a refresh on every Grok account (admin only).
 func HandleRefresh(grokAM *upstream.GrokAccountManager) gin.HandlerFunc {

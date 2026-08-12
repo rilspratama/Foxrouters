@@ -968,12 +968,7 @@ body {
 @media (max-width: 700px) {
   body { flex-direction: column; }
   .sidebar { width: 100%; height: auto; min-height: auto; position: relative; }
-  .sidebar.collapsed { width: 100%; }
-  .sidebar.collapsed .sidebar-brand { justify-content: flex-start; padding: 18px 18px 16px; }
-  .sidebar.collapsed .sidebar-brand .title,
-  .sidebar.collapsed .sidebar-brand .version { display: inline; }
-  .sidebar.collapsed .nav-item { font-size: 13.5px; gap: 10px; justify-content: flex-start; padding: 7px 10px; }
-  .sidebar.collapsed .sidebar-footer { display: block; }
+  .sidebar.collapsed { display: none; }
   .sidebar-nav { flex-direction: row; flex-wrap: wrap; }
   .nav-section-label { display: none; }
   .content { padding: 16px; }
@@ -1222,7 +1217,16 @@ body {
 
     <!-- ════════ PAGE 2: ACCOUNTS & KEYS ════════ -->
     <div class="page" id="page-accounts">
-      <div class="panel">
+      <div class="panel" style="margin-bottom:16px">
+        <div class="panel-head">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+          <h3>Providers</h3>
+        </div>
+        <div style="padding:12px">
+          <div id="providersGrid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:8px"></div>
+        </div>
+      </div>
+      <div class="panel" id="accountsPanel" style="display:none">
         <div class="panel-head">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
           <h3>Accounts &amp; Keys</h3>
@@ -1233,11 +1237,8 @@ body {
             </button>
           </div>
         </div>
-        <div class="subtabs">
-          <button class="subtab active" onclick="showTab(event,'cb')">CodeBuddy Keys</button>
-          <button class="subtab" onclick="showTab(event,'grok')">Grok Accounts</button>
-          <button class="subtab" onclick="showTab(event,'fb')">Freebuff</button>
-          <div style="margin-left:auto;display:flex;gap:6px">
+        <div class="subtabs" style="justify-content:flex-end">
+          <div style="display:flex;gap:6px">
             <button class="btn-ghost" id="cbAddBtn" onclick="showAddCBModal()" style="padding:5px 12px;font-size:12px">+ Add Key</button>
             <button class="btn-ghost" id="cbOAuthBtn" onclick="showAddCBOAuthModal()" style="padding:5px 12px;font-size:12px">+ Add OAuth</button>
             <button class="btn-ghost" id="cbOAuthBulkBtn" onclick="showBulkCBOAuthModal()" style="padding:5px 12px;font-size:12px">Bulk OAuth</button>
@@ -1253,6 +1254,7 @@ body {
             <button class="btn-ghost" id="fbBulkBtn" onclick="showBulkFBModal()" style="padding:5px 12px;font-size:12px;display:none">Bulk Import</button>
             <button class="btn-ghost" id="fbOAuthBtn" onclick="showFBOAuthModal()" style="padding:5px 12px;font-size:12px;display:none">+ Add OAuth</button>
             <button class="btn-ghost" id="fbRefreshBtn" onclick="loadFBAccounts()" style="padding:5px 12px;font-size:12px;display:none">Refresh</button>
+            <button class="btn-ghost" id="fbStreakBtn" onclick="runFBStreakCheckin()" style="padding:5px 12px;font-size:12px;display:none">Streak check-in</button>
           </div>
         </div>
         <!-- CB selector mode (routing strategy for prompt-cache locality) -->
@@ -2082,7 +2084,12 @@ function router() {
     loadGatewayKeys();
   }
   if (hash === '#/accounts') {
-    loadCBSelectorMode();
+    if (window._selProvider) {
+      selectProvider(window._selProvider);
+    } else {
+      var ap = document.getElementById('accountsPanel');
+      if (ap) ap.style.display = 'none';
+    }
   }
   if (hash === '#/models') {
     loadModels();
@@ -2140,6 +2147,9 @@ document.addEventListener('click', function(e) {
   } else if (btn.classList.contains('test-grok-btn')) {
     v = btn.getAttribute('data-email');
     if (v) testGrokAccount(v, btn);
+  } else if (btn.classList.contains('test-fb-btn')) {
+    v = btn.getAttribute('data-token');
+    if (v) testFBAccount(v, btn);
   } else if (btn.classList.contains('delete-key-btn')) {
     v = btn.getAttribute('data-key');
     if (v) deleteKey(v);
@@ -2188,12 +2198,12 @@ document.addEventListener('click', function(e) {
     if (action === 'prev') window._grokPage = Math.max(1, (window._grokPage || 1) - 1);
     else if (action === 'next') window._grokPage = (window._grokPage || 1) + 1;
     else if (page) window._grokPage = parseInt(page, 10);
-    renderGrokPage();
+    loadGrokPage(window._grokPage, window._grokPageSize);
   } else if (btn.classList.contains('pg-cb-prev') || btn.classList.contains('pg-cb-next') || btn.classList.contains('pg-cb-num')) {
     if (action === 'prev') window._cbPage = Math.max(1, (window._cbPage || 1) - 1);
     else if (action === 'next') window._cbPage = (window._cbPage || 1) + 1;
     else if (page) window._cbPage = parseInt(page, 10);
-    renderCBPage();
+    loadCBPage(window._cbPage, window._cbPageSize);
   }
 });
 
@@ -2205,11 +2215,9 @@ async function refresh() {
   try {
     var results = await Promise.all([
       fetchJSON('/health'),
-      fetchJSON('/accounts'),
-      fetchJSON('/cb-stats'),
       fetchJSON('/v1/models')
     ]);
-    var health = results[0], accounts = results[1], cbStats = results[2], models = results[3];
+    var health = results[0], models = results[1];
 
     // Version
     var verEl = document.getElementById('version');
@@ -2233,13 +2241,11 @@ async function refresh() {
     } else if (gDeltaEl) { gDeltaEl.textContent = ''; gDeltaEl.className = 'stat-delta'; }
     document.getElementById('cbCount').textContent = health.cb_keys;
     document.getElementById('cbActive').innerHTML = '<span class="ok">' + health.cb_keys_active + ' active</span>';
-    // CB aggregate credits → delta + quota bar
+    // CB aggregate credits → delta + quota bar (from /health, no full key dump)
     var cbDeltaEl = document.getElementById('cbDelta');
     var cbBarUsedEl = document.getElementById('cbBarUsed');
     var cbBarRestEl = document.getElementById('cbBarRest');
-    var cbKeysArr = (accounts && accounts.codebuddy) || [];
-    var cbUsed = 0, cbLimit = 0;
-    cbKeysArr.forEach(function(k) { cbUsed += (k.credits_used || 0); cbLimit += (k.credit_limit || 0); });
+    var cbUsed = health.cb_credits_used || 0, cbLimit = health.cb_credits_limit || 0;
     if (cbLimit > 0 && cbBarUsedEl && cbBarRestEl) {
       var cbPct = Math.round(cbUsed / cbLimit * 100);
       var cbClass = cbPct >= 100 ? 'err' : (cbPct >= 80 ? 'warn' : 'ok');
@@ -2278,6 +2284,8 @@ async function refresh() {
       if (fbBarUsedEl) fbBarUsedEl.style.width = '0%';
       if (fbBarRestEl) fbBarRestEl.style.width = '0%';
     }
+
+    renderProviders(health);
 
     // Circuit cards
     document.getElementById('grokCircuit').innerHTML = circuitBadge(g.circuit_state);
@@ -2324,25 +2332,11 @@ async function refresh() {
     }
     document.getElementById('healthBody').innerHTML = hb;
 
-    // CB Keys table (paginated)
-    var allCB = cbStats.codebuddy_keys || [];
-    window._allCB = allCB;
-    window._cbPage = window._cbPage || 1;
-    window._cbPageSize = window._cbPageSize || 50;
-    renderCBPage();
-
-    // Grok Accounts table (paginated)
-    var allGrok = (accounts && (accounts.grok_accounts || accounts.grok)) || [];
-    var disabledCount = allGrok.filter(function(a) { return a.disabled; }).length;
-    var bannedCount = allGrok.filter(function(a) { return a.token_status === 'banned'; }).length;
-    document.getElementById('grokActive').innerHTML = '<span class="ok">' + (allGrok.length - disabledCount) + ' active</span>' + (bannedCount > 0 ? ' <span class="err">⛔ ' + bannedCount + ' banned</span>' : '');
-
-    // Store globally for pagination
-    window._allGrok = allGrok;
-    window._grokPage = window._grokPage || 1;
-    window._grokPageSize = window._grokPageSize || 50;
-    renderGrokPage();
-
+    // Grok stat sub (active/banned) from /health — no full account dump in 5s cycle
+    var gActiveEl = document.getElementById('grokActive');
+    if (gActiveEl) {
+      gActiveEl.innerHTML = '<span class="ok">' + (health.grok_active || 0) + ' active</span>';
+    }
 
     // Timestamp
     var ts_str = 'Updated ' + new Date().toLocaleTimeString();
@@ -2356,19 +2350,109 @@ async function refresh() {
 }
 
 /* ══════════════════════════════════════════════════════════
+   PROVIDERS GRID (Accounts & Keys entry point)
+   ── compact cards, click = reveal that provider's table
+   ══════════════════════════════════════════════════════════ */
+function renderProviders(health) {
+  var grid = document.getElementById('providersGrid');
+  if (!grid) return;
+  var defs = [
+    { key: 'grok', name: 'Grok', sub: 'xAI · free tier', count: health.grok_accounts || 0, icon: "data:image/png;base64,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" },
+    { key: 'cb', name: 'CodeBuddy', sub: 'Tencent · trial', count: health.cb_keys || 0, icon: "data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNDAiIGhlaWdodD0iNDAiIHZpZXdCb3g9IjAgMCA0MCA0MCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPGcgY2xpcC1wYXRoPSJ1cmwoI2NsaXAwXzUxMTBfMTQ3NzEpIj4KPHJlY3Qgd2lkdGg9IjQwIiBoZWlnaHQ9IjQwIiByeD0iMjAiIGZpbGw9InVybCgjcGFpbnQwX2xpbmVhcl81MTEwXzE0NzcxKSIvPgo8ZyBmaWx0ZXI9InVybCgjZmlsdGVyMF9mXzUxMTBfMTQ3NzEpIj4KPGNpcmNsZSBjeD0iMTIuNjA3MSIgY3k9IjM0Ljk3OTQiIHI9IjE0LjA4MSIgZmlsbD0iIzMyRTZCOSIgZmlsbC1vcGFjaXR5PSIwLjQiLz4KPC9nPgo8ZyBmaWx0ZXI9InVybCgjZmlsdGVyMV9mXzUxMTBfMTQ3NzEpIj4KPGNpcmNsZSBjeD0iMzMuMzQwNCIgY3k9IjQzLjYxODUiIHI9IjEyLjg3MDQiIGZpbGw9IiMzMkU2QjkiLz4KPC9nPgo8cGF0aCBkPSJNMjcuNjg5NyAzLjM0MjZDMjguMDU3IDMuMDEzMjIgMjguMDc5NSAyLjk5OTgzIDI4LjM0ODUgMi45ODM2NkMyOC43ODUxIDIuOTUxNzcgMjkuMTg1OCAzLjE2MTA3IDI5Ljg2NjQgMy43ODA3MkMzMS40NTY2IDUuMjI1NzQgMzMuNjcwMyA4LjE5NzI0IDM1LjA0NyAxMC43MzQzTDM1LjU3OTYgMTEuNzE5MUwzNi4zMzA5IDEyLjA5MjdDMzcuMDU2MiAxMi40NTkzIDM4LjI0NTkgMTMuMjExMSAzOC43NDI4IDEzLjYxNEMzOC45NjczIDEzLjc5OTcgMzguOTk5MiAxMy44MDMyIDM5LjIzMjYgMTMuNzEyNEM0MC4yODcyIDEzLjMwMTcgNDEuNzk4MiAxMy44NDYgNDMuMTMwNyAxNS4xMjQ0QzQ0LjMzMDIgMTYuMjc0IDQ1LjQ3OSAxOC4yMzg0IDQ1LjkxOTEgMTkuODc3OEM0NS45ODMzIDIwLjE0MTcgNDYuMDY4MyAyMC43MDkgNDYuMDk5NCAyMS4xMzE0QzQ2LjE5OTcgMjIuNjE0NCA0NS43MjQzIDIzLjc5ODYgNDQuODA4NSAyNC4zMzQ5QzQ0LjYyMTMgMjQuNDQzIDQ0LjYwODUgMjQuNDcyNSA0NC42MTM3IDI0LjkzOUM0NC42NTU5IDI3LjE2MDQgNDQuMDU3MSAyOS4zNzc3IDQyLjg1NDMgMzEuNTRDNDEuNDk2NSAzMy45Njc4IDM5LjA3OTQgMzYuNDc5OCAzNS44MDczIDM4Ljg0NkMzNC4wNTAyIDQwLjEyNDcgMjkuODkxOCA0Mi41NDY5IDI4LjAxMjIgNDMuMzk3M0MyMy41MDk2IDQ1LjQyNDQgMTkuODk5OSA0Ni4yMDIyIDE2Ljc2NDUgNDUuODE4MUMxNC44OTQzIDQ1LjU5MTUgMTIuNzc3MSA0NC44NjExIDExLjUyNDYgNDQuMDEzN0MxMS4xOTUxIDQzLjc4NiAxMS4xNDI4IDQzLjc3MTkgMTAuODkwOSA0My44NDM5QzkuNTUwMTcgNDQuMjI4OSA3Ljc5NDQyIDQzLjQzNzQgNi4zMDI3MiA0MS43ODE3QzUuNzA3NzEgNDEuMTE5NyA0Ljc0NzA5IDM5LjQ5MzkgNC40MzU3NSAzOC42MjQxQzMuNzE1NjkgMzYuNTg4NyAzLjg1ODU5IDM0Ljc1MiA0LjgxNzgzIDMzLjY1NTFDNS4wNjU3IDMzLjM3MjUgNS4wNzM4NyAzMy4zNjA3IDUuMDE5NzIgMzIuODg1NkM0LjkzMDMzIDMyLjEwNzkgNC44ODk4MiAzMC45NTY2IDQuOTMwNjYgMzAuMjEzOEw0Ljk2MzQzIDI5LjUyMDVMMy45MjA5MSAyNy42Nzc3QzIuMzA3OCAyNC44MDc0IDEuMjgzMjYgMjIuMzk2OCAwLjg4Nzk4MiAyMC41NTU0QzAuNjc5NDAyIDE5LjU0NiAwLjY5Mjc4MSAxOS4wOTgxIDAuOTQ5MDYxIDE4Ljc2NjdDMS4xMDUyOSAxOC41NjY2IDEuNjE2MjIgMTguMzU5NCAyLjIzMjUyIDE4LjI0NTVDMy43ODUxOCAxNy45NzI5IDcuMTcyMDMgMTguMjE5OCAxMC45Mzk0IDE4Ljg4NUwxMS4zMzAzIDE4Ljk1MjVMMTIuMTkwMyAxOC4xOTIxQzEzLjYxNzkgMTYuOTI3NSAxNC41NjY1IDE2LjIxNzYgMTYuMzE1IDE1LjEyNzRDMTguMTM3MyAxMy45ODcyIDIwLjE5NDMgMTMuMDQ5OCAyMi41MTAzIDEyLjMwNzFMMjMuMjUzMyAxMi4wNjg3TDIzLjY2MTUgMTAuOTk2NEMyNS4xMjM5IDcuMTM1ODcgMjYuNjIxOCA0LjI4OTY5IDI3LjY4OTcgMy4zNDI2Wk0xNS40MzkzIDIzLjEyNjFDMTMuNzg2NCAyNC4wODA0IDEyLjk2MDIgMjQuNTU4MiAxMi4zNTI5IDI1LjA5M0M5Ljg5MzY0IDI3LjI1ODUgOC45NzM4IDMwLjY4ODggMTAuMDIwOCAzMy43OTM4QzEwLjI3OTQgMzQuNTYwNiAxMC43NTY4IDM1LjM4NyAxMS43MTExIDM3LjAzOThDMTIuNjY1MyAzOC42OTI2IDEzLjE0MjQgMzkuNTE5NCAxMy42NzcxIDQwLjEyNjdDMTUuODQyNiA0Mi41ODU5IDE5LjI3MzIgNDMuNTA0NSAyMi4zNzgzIDQyLjQ1NzRDMjMuMTQ1IDQyLjE5ODkgMjMuOTcyIDQxLjcyMjMgMjUuNjI0OCA0MC43NjhMMzUuMTMzMyAzNS4yNzgzQzM2Ljc4NjIgMzQuMzI0IDM3LjYxMjQgMzMuODQ2MiAzOC4yMTk2IDMzLjMxMTRDNDAuNjc4OSAzMS4xNDU5IDQxLjU5ODggMjcuNzE1NiA0MC41NTE4IDI0LjYxMDVDNDAuMjkzMiAyMy44NDM4IDM5LjgxNTcgMjMuMDE3NCAzOC44NjE1IDIxLjM2NDZDMzcuOTA3MiAxOS43MTE3IDM3LjQzMDIgMTguODg1IDM2Ljg5NTUgMTguMjc3N0MzNC43Mjk5IDE1LjgxODUgMzEuMjk5MyAxNC44OTk5IDI4LjE5NDMgMTUuOTQ3QzI3LjQyNzUgMTYuMjA1NSAyNi42MDA2IDE2LjY4MjEgMjQuOTQ3OCAxNy42MzY0TDE1LjQzOTMgMjMuMTI2MVoiIGZpbGw9InVybCgjcGFpbnQxX2xpbmVhcl81MTEwXzE0NzcxKSIvPgo8cmVjdCB4PSIxNS44ODE2IiB5PSIzMC4wMjczIiB3aWR0aD0iNC4wMDkwNCIgaGVpZ2h0PSI4LjMyNjQ2IiByeD0iMi4wMDQ1MiIgdHJhbnNmb3JtPSJyb3RhdGUoLTMwIDE1Ljg4MTYgMzAuMDI3MykiIGZpbGw9IndoaXRlIi8+CjxyZWN0IHg9IjI2LjY5NzgiIHk9IjIzLjc4MTIiIHdpZHRoPSI0LjAwOTA0IiBoZWlnaHQ9IjguMzI2NDYiIHJ4PSIyLjAwNDUyIiB0cmFuc2Zvcm09InJvdGF0ZSgtMzAgMjYuNjk3OCAyMy43ODEyKSIgZmlsbD0id2hpdGUiLz4KPC9nPgo8ZGVmcz4KPGZpbHRlciBpZD0iZmlsdGVyMF9mXzUxMTBfMTQ3NzEiIHg9Ii0xNC45MTYzIiB5PSI3LjQ1NTk5IiB3aWR0aD0iNTUuMDQ2OCIgaGVpZ2h0PSI1NS4wNDciIGZpbHRlclVuaXRzPSJ1c2VyU3BhY2VPblVzZSIgY29sb3ItaW50ZXJwb2xhdGlvbi1maWx0ZXJzPSJzUkdCIj4KPGZlRmxvb2QgZmxvb2Qtb3BhY2l0eT0iMCIgcmVzdWx0PSJCYWNrZ3JvdW5kSW1hZ2VGaXgiLz4KPGZlQmxlbmQgbW9kZT0ibm9ybWFsIiBpbj0iU291cmNlR3JhcGhpYyIgaW4yPSJCYWNrZ3JvdW5kSW1hZ2VGaXgiIHJlc3VsdD0ic2hhcGUiLz4KPGZlR2F1c3NpYW5CbHVyIHN0ZERldmlhdGlvbj0iNi43MjEyMyIgcmVzdWx0PSJlZmZlY3QxX2ZvcmVncm91bmRCbHVyXzUxMTBfMTQ3NzEiLz4KPC9maWx0ZXI+CjxmaWx0ZXIgaWQ9ImZpbHRlcjFfZl81MTEwXzE0NzcxIiB4PSI5LjQ2OTU5IiB5PSIxOS43NDc3IiB3aWR0aD0iNDcuNzQxNyIgaGVpZ2h0PSI0Ny43NDEiIGZpbHRlclVuaXRzPSJ1c2VyU3BhY2VPblVzZSIgY29sb3ItaW50ZXJwb2xhdGlvbi1maWx0ZXJzPSJzUkdCIj4KPGZlRmxvb2QgZmxvb2Qtb3BhY2l0eT0iMCIgcmVzdWx0PSJCYWNrZ3JvdW5kSW1hZ2VGaXgiLz4KPGZlQmxlbmQgbW9kZT0ibm9ybWFsIiBpbj0iU291cmNlR3JhcGhpYyIgaW4yPSJCYWNrZ3JvdW5kSW1hZ2VGaXgiIHJlc3VsdD0ic2hhcGUiLz4KPGZlR2F1c3NpYW5CbHVyIHN0ZERldmlhdGlvbj0iNS41MDAxOSIgcmVzdWx0PSJlZmZlY3QxX2ZvcmVncm91bmRCbHVyXzUxMTBfMTQ3NzEiLz4KPC9maWx0ZXI+CjxsaW5lYXJHcmFkaWVudCBpZD0icGFpbnQwX2xpbmVhcl81MTEwXzE0NzcxIiB4MT0iMjAiIHkxPSIwIiB4Mj0iMjAiIHkyPSI0MCIgZ3JhZGllbnRVbml0cz0idXNlclNwYWNlT25Vc2UiPgo8c3RvcCBzdG9wLWNvbG9yPSIjNkM0REZGIi8+CjxzdG9wIG9mZnNldD0iMSIgc3RvcC1jb2xvcj0iIzU4M0VEMyIvPgo8L2xpbmVhckdyYWRpZW50Pgo8bGluZWFyR3JhZGllbnQgaWQ9InBhaW50MV9saW5lYXJfNTExMF8xNDc3MSIgeDE9IjE0LjYzOSIgeTE9IjEwLjc5MTciIHgyPSIzMi4xNzEyIiB5Mj0iNDEuMTU4NSIgZ3JhZGllbnRVbml0cz0idXNlclNwYWNlT25Vc2UiPgo8c3RvcCBzdG9wLWNvbG9yPSJ3aGl0ZSIgc3RvcC1vcGFjaXR5PSIwLjgiLz4KPHN0b3Agb2Zmc2V0PSIwLjQzNzY4OSIgc3RvcC1jb2xvcj0id2hpdGUiLz4KPC9saW5lYXJHcmFkaWVudD4KPGNsaXBQYXRoIGlkPSJjbGlwMF81MTEwXzE0NzcxIj4KPHJlY3Qgd2lkdGg9IjQwIiBoZWlnaHQ9IjQwIiByeD0iMjAiIGZpbGw9IndoaXRlIi8+CjwvY2xpcFBhdGg+CjwvZGVmcz4KPC9zdmc+Cg==" },
+    { key: 'fb', name: 'Freebuff', sub: 'Codebuff · free', count: health.fb_accounts || 0, icon: "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA1MTIgNTEyIj4KICA8cmVjdCB4PSIwIiB5PSIwIiB3aWR0aD0iNTEyIiBoZWlnaHQ9IjUxMiIgcng9IjQ1IiBmaWxsPSIjZmZmZmZmIi8+CiAgPHJlY3QgeD0iMzYiIHk9IjM2IiB3aWR0aD0iNDQwIiBoZWlnaHQ9IjQ0MCIgcng9IjE2IiBmaWxsPSIjMDAwMDAwIi8+CiAgPHBhdGggZD0iTSA3MiwxNjcgTCA3NSwxNjcgTCA3NiwxNjYgTCA4MSwxNjYgTCA4MiwxNjUgTCA4NSwxNjUgTCA4NiwxNjQgTCA4OCwxNjQgTCA4OSwxNjMgTCA5MSwxNjMgTCA5MiwxNjIgTCA5NCwxNjIgTCA5NSwxNjEgTCA5NywxNjEgTCA5OCwxNjAgTCA5OSwxNjAgTCAxMDAsMTU5IEwgMTAxLDE1OSBMIDEwMiwxNTggTCAxMDMsMTU4IEwgMTA1LDE1NiBMIDEwNiwxNTYgTCAxMDcsMTU1IEwgMTA4LDE1NSBMIDExMSwxNTIgTCAxMTIsMTUyIEwgMTIxLDE0MyBMIDEyMiwxNDEgTCAxMjQsMTM5IEwgMTI1LDEzNyBMIDEyNiwxMzYgTCAxMzAsMTI4IEwgMTMxLDEyNSBMIDEzMiwxMjMgTCAxMzMsMTIwIEwgMTM1LDExMiBMIDEzNywxMDIgTCAxMzgsMTAxIEwgMTQxLDEwMSBMIDE0MiwxMDIgTCAxNDMsMTA4IEwgMTQ0LDExMyBMIDE0NSwxMTcgTCAxNDgsMTI2IEwgMTUzLDEzNiBMIDE1NCwxMzcgTCAxNTUsMTM5IEwgMTU2LDE0MCBMIDE1NywxNDIgTCAxNjgsMTUzIEwgMTY5LDE1MyBMIDE3MSwxNTUgTCAxNzIsMTU1IEwgMTc0LDE1NyBMIDE3NSwxNTcgTCAxNzYsMTU4IEwgMTc3LDE1OCBMIDE3OCwxNTkgTCAxNzksMTU5IEwgMTgwLDE2MCBMIDE4MSwxNjAgTCAxODIsMTYxIEwgMTg0LDE2MSBMIDE4NSwxNjIgTCAxODcsMTYyIEwgMTg4LDE2MyBMIDE5MCwxNjMgTCAxOTEsMTY0IEwgMTkzLDE2NCBMIDE5NCwxNjUgTCAxOTcsMTY1IEwgMTk4LDE2NiBMIDIwMiwxNjYgTCAyMDMsMTY3IEwgMjA3LDE2NyBMIDIwNiwxNzEgTCAyMDUsMTcyIEwgMjAwLDE3MiBMIDE5OSwxNzMgTCAxOTUsMTczIEwgMTk0LDE3NCBMIDE5MiwxNzQgTCAxOTEsMTc1IEwgMTg4LDE3NSBMIDE4NywxNzYgTCAxODYsMTc2IEwgMTg1LDE3NyBMIDE4MywxNzcgTCAxODIsMTc4IEwgMTgxLDE3OCBMIDE4MCwxNzkgTCAxNzksMTc5IEwgMTc4LDE4MCBMIDE3NywxODAgTCAxNzYsMTgxIEwgMTc1LDE4MSBMIDE3NCwxODIgTCAxNzMsMTgyIEwgMTcxLDE4NCBMIDE3MCwxODQgTCAxNjcsMTg3IEwgMTY2LDE4NyBMIDE1OCwxOTUgTCAxNTcsMTk3IEwgMTU1LDE5OSBMIDE1NCwyMDEgTCAxNTMsMjAyIEwgMTQ5LDIxMCBMIDE0OCwyMTMgTCAxNDcsMjE1IEwgMTQ1LDIyMSBMIDE0NCwyMjUgTCAxNDMsMjMwIEwgMTQyLDIzNiBMIDE0MSwyMzcgTCAxMzcsMjM3IEwgMTM2LDIzMSBMIDEzNSwyMjYgTCAxMzQsMjIyIEwgMTMwLDIxMCBMIDEyNywyMDQgTCAxMjYsMjAzIEwgMTI1LDIwMSBMIDEyNCwyMDAgTCAxMjMsMTk4IEwgMTIxLDE5NiBMIDEyMCwxOTQgTCAxMTMsMTg3IEwgMTEyLDE4NyBMIDEwOSwxODQgTCAxMDgsMTg0IEwgMTA2LDE4MiBMIDEwNSwxODIgTCAxMDQsMTgxIEwgMTAzLDE4MSBMIDEwMiwxODAgTCAxMDEsMTgwIEwgMTAwLDE3OSBMIDk5LDE3OSBMIDk4LDE3OCBMIDk3LDE3OCBMIDk2LDE3NyBMIDk0LDE3NyBMIDkzLDE3NiBMIDkxLDE3NiBMIDkwLDE3NSBMIDg4LDE3NSBMIDg3LDE3NCBMIDg0LDE3NCBMIDgzLDE3MyBMIDgwLDE3MyBMIDc5LDE3MiBMIDc0LDE3MiBMIDczLDE3MSBMIDcyLDE3MSBaIiBmaWxsPSIjZmZmZmZmIi8+CiAgPHJlY3QgeD0iMjA4IiB5PSIyMzIiIHdpZHRoPSIxMzAiIGhlaWdodD0iMjkiIHJ4PSIxNC41IiBmaWxsPSIjZmZmZmZmIi8+Cjwvc3ZnPg==" }
+  ];
+  var sel = window._selProvider || '';
+  grid.innerHTML = defs.map(function(p) {
+    var isSel = sel === p.key;
+    var badge = p.count > 0
+      ? '<span style="display:inline-flex;align-items:center;gap:5px;padding:2px 8px;border-radius:20px;font-size:10px;color:var(--success);background:rgba(76,217,100,0.12);font-weight:600"><span style="width:5px;height:5px;border-radius:50%;background:var(--success);display:inline-block"></span>' + p.count + ' Connected</span>'
+      : '<span style="color:var(--text-tertiary);font-size:10px">No connections</span>';
+    return '<div onclick="selectProvider(\'' + p.key + '\')" data-provider="' + p.key + '" style="background:' + (isSel ? 'var(--bg-input)' : 'var(--bg-elevated)') + ';border:1px solid ' + (isSel ? 'var(--brand)' : 'var(--border)') + ';border-radius:10px;padding:10px 12px;display:flex;align-items:center;gap:10px;cursor:pointer;transition:border-color 150ms">' +
+      '<div style="width:28px;height:28px;border-radius:7px;overflow:hidden;flex-shrink:0;border:1px solid var(--border)">' +
+        (p.icon ? '<img src="' + p.icon + '" style="width:100%;height:100%;object-fit:cover" alt="" />' : '<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;background:var(--bg-input);font-size:14px">🦊</div>') +
+      '</div>' +
+      '<div style="min-width:0">' +
+        '<div style="font-size:13px;font-weight:600;color:var(--text-primary)">' + p.name + '</div>' +
+        '<div style="font-size:10px;color:var(--text-tertiary);margin-top:2px">' + badge + '</div>' +
+      '</div>' +
+    '</div>';
+  }).join('');
+}
+
+/* Click a provider card → reveal that provider's Accounts & Keys table */
+function selectProvider(key) {
+  window._selProvider = key;
+  var panel = document.getElementById('accountsPanel');
+  if (panel) panel.style.display = '';
+  var cards = document.querySelectorAll('#providersGrid > div');
+  cards.forEach(function(c) {
+    var on = c.getAttribute('data-provider') === key;
+    c.style.background = on ? 'var(--bg-input)' : 'var(--bg-elevated)';
+    c.style.borderColor = on ? 'var(--brand)' : 'var(--border)';
+  });
+  showTab(null, key);
+}
+
+/* ══════════════════════════════════════════════════════════
+   SERVER-SIDE PAGE LOADERS (Accounts & Keys)
+   ── fetch ONE page per provider from the API, render from
+      window._all* + window._*Total. No full dumps on 5s cycle.
+   ══════════════════════════════════════════════════════════ */
+async function loadGrokPage(page, size) {
+  page = page || window._grokPage || 1;
+  size = size || window._grokPageSize || 50;
+  var body = document.getElementById('grokBody');
+  if (body) body.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:24px;color:var(--text-tertiary)">Loading…</td></tr>';
+  try {
+    var d = await fetchJSON('/accounts?upstream=grok&page=' + page + '&page_size=' + size);
+    window._allGrok = d.grok || [];
+    window._grokTotal = d.grok_total || 0;
+    window._grokPage = page;
+    window._grokPageSize = size;
+  } catch (e) {
+    window._allGrok = []; window._grokTotal = 0;
+    if (body) body.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:24px;color:var(--red)">Load failed: ' + escHtml(e.message) + '</td></tr>';
+    return;
+  }
+  renderGrokPage();
+}
+
+async function loadCBPage(page, size) {
+  page = page || window._cbPage || 1;
+  size = size || window._cbPageSize || 50;
+  var body = document.getElementById('cbBody');
+  if (body) body.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:24px;color:var(--text-tertiary)">Loading…</td></tr>';
+  try {
+    var d = await fetchJSON('/cb-stats?page=' + page + '&page_size=' + size);
+    window._allCB = d.codebuddy_keys || [];
+    window._cbTotal = d.cb_total || 0;
+    window._cbPage = page;
+    window._cbPageSize = size;
+  } catch (e) {
+    window._allCB = []; window._cbTotal = 0;
+    if (body) body.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:24px;color:var(--red)">Load failed: ' + escHtml(e.message) + '</td></tr>';
+    return;
+  }
+  renderCBPage();
+}
+
+/* ══════════════════════════════════════════════════════════
    GROK PAGINATION
    ══════════════════════════════════════════════════════════ */
 function renderGrokPage() {
   var all = window._allGrok || [];
   var page = window._grokPage || 1;
   var size = window._grokPageSize || 50;
-  var totalPages = Math.max(1, Math.ceil(all.length / size));
+  var total = window._grokTotal || all.length;
+  var totalPages = Math.max(1, Math.ceil(total / size));
   if (page > totalPages) page = totalPages;
   if (page < 1) page = 1;
   window._grokPage = page;
 
-  var start = (page - 1) * size;
-  var end = Math.min(start + size, all.length);
+  var start = 0;
+  var end = all.length;
+  var dispStart = (page - 1) * size + 1;
+  var dispEnd = Math.min(dispStart + end - 1, total);
   var gRows = '';
   for (var j = start; j < end; j++) {
     var a = all[j];
@@ -2413,7 +2497,7 @@ function renderGrokPage() {
   var html = '';
   // Page size selector
   html += '<span>Show</span>';
-  html += '<select onchange="window._grokPageSize=parseInt(this.value);window._grokPage=1;renderGrokPage()" style="background:var(--bg-elevated);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text-primary);padding:3px 8px;font-size:12px">';
+  html += '<select onchange="loadGrokPage(1, parseInt(this.value))" style="background:var(--bg-elevated);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text-primary);padding:3px 8px;font-size:12px">';
   [25, 50, 100, 200].forEach(function(n) {
     html += '<option value="' + n + '"' + (size === n ? ' selected' : '') + '>' + n + '</option>';
   });
@@ -2443,7 +2527,7 @@ function renderGrokPage() {
   // Next
   html += '<button class="pg-btn pg-grok-next" data-action="next" style="padding:4px 10px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg-elevated);color:var(--text-secondary);cursor:pointer;font-size:12px"' + (page >= totalPages ? ' disabled' : '') + '>Next ›</button>';
   // Info
-  html += '<span style="margin-left:auto">' + (start + 1) + '–' + end + ' of ' + all.length + '</span>';
+  html += '<span style="margin-left:auto">' + (total > 0 ? dispStart + '–' + dispEnd + ' of ' + total : '0 of 0') + '</span>';
   pager.innerHTML = html;
 }
 
@@ -2454,13 +2538,16 @@ function renderCBPage() {
   var all = window._allCB || [];
   var page = window._cbPage || 1;
   var size = window._cbPageSize || 50;
-  var totalPages = Math.max(1, Math.ceil(all.length / size));
+  var total = window._cbTotal || all.length;
+  var totalPages = Math.max(1, Math.ceil(total / size));
   if (page > totalPages) page = totalPages;
   if (page < 1) page = 1;
   window._cbPage = page;
 
-  var start = (page - 1) * size;
-  var end = Math.min(start + size, all.length);
+  var start = 0;
+  var end = all.length;
+  var dispStart = (page - 1) * size + 1;
+  var dispEnd = Math.min(dispStart + end - 1, total);
   var cbRows = '';
   for (var j = start; j < end; j++) {
     var k = all[j];
@@ -2504,7 +2591,7 @@ function renderCBPage() {
   if (!pager) return;
   var html = '';
   html += '<span>Show</span>';
-  html += '<select onchange="window._cbPageSize=parseInt(this.value);window._cbPage=1;renderCBPage()" style="background:var(--bg-elevated);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text-primary);padding:3px 8px;font-size:12px">';
+  html += '<select onchange="loadCBPage(1, parseInt(this.value))" style="background:var(--bg-elevated);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text-primary);padding:3px 8px;font-size:12px">';
   [25, 50, 100, 200].forEach(function(n) {
     html += '<option value="' + n + '"' + (size === n ? ' selected' : '') + '>' + n + '</option>';
   });
@@ -2530,7 +2617,7 @@ function renderCBPage() {
     html += '<button class="pg-btn pg-cb-num" data-page="' + totalPages + '" style="padding:4px 10px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg-elevated);color:var(--text-secondary);cursor:pointer;font-size:12px">' + totalPages + '</button>';
   }
   html += '<button class="pg-btn pg-cb-next" data-action="next" style="padding:4px 10px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg-elevated);color:var(--text-secondary);cursor:pointer;font-size:12px"' + (page >= totalPages ? ' disabled' : '') + '>Next ›</button>';
-  html += '<span style="margin-left:auto">' + (start + 1) + '–' + end + ' of ' + all.length + '</span>';
+  html += '<span style="margin-left:auto">' + (total > 0 ? dispStart + '–' + dispEnd + ' of ' + total : '0 of 0') + '</span>';
   pager.innerHTML = html;
 }
 
@@ -2538,8 +2625,6 @@ function renderCBPage() {
    TABS (Accounts page)
    ══════════════════════════════════════════════════════════ */
 function showTab(e, tab) {
-  document.querySelectorAll('.subtab').forEach(function(t) { t.classList.remove('active'); });
-  e.target.classList.add('active');
   document.getElementById('cbPanel').style.display = tab === 'cb' ? '' : 'none';
   document.getElementById('grokPanel').style.display = tab === 'grok' ? '' : 'none';
   // Hide pager of inactive tab (cbPager sits outside grokPanel)
@@ -2563,11 +2648,11 @@ function showTab(e, tab) {
   // Selector mode bar only relevant for CodeBuddy tab
   var selBar = document.getElementById('cbSelectorBar');
   if (selBar) selBar.style.display = tab === 'cb' ? '' : 'none';
-  if (tab === 'cb') loadCBSelectorMode();
+  if (tab === 'cb') { loadCBSelectorMode(); loadCBPage(); }
   // Grok selector mode bar
   var grokSelBar = document.getElementById('grokSelectorBar');
   if (grokSelBar) grokSelBar.style.display = tab === 'grok' ? 'flex' : 'none';
-  if (tab === 'grok') loadGrokSelectorMode();
+  if (tab === 'grok') { loadGrokSelectorMode(); loadGrokPage(); }
   // Freebuff panel + buttons
   var fbPanelEl = document.getElementById('fbPanel');
   if (fbPanelEl) fbPanelEl.style.display = tab === 'fb' ? 'block' : 'none';
@@ -2575,6 +2660,8 @@ function showTab(e, tab) {
   document.getElementById('fbBulkBtn').style.display = tab === 'fb' ? '' : 'none';
   document.getElementById('fbOAuthBtn').style.display = tab === 'fb' ? '' : 'none';
   document.getElementById('fbRefreshBtn').style.display = tab === 'fb' ? '' : 'none';
+  var fbStreakBtn = document.getElementById('fbStreakBtn');
+  if (fbStreakBtn) fbStreakBtn.style.display = tab === 'fb' ? '' : 'none';
   if (tab === 'fb') loadFBAccounts();
 }
 
@@ -2611,7 +2698,7 @@ async function loadFBAccounts() {
         '<td>' + quota + '</td>' +
         '<td>' + tierBadge + (a.country_code ? ' <span class="mono" style="font-size:10px;color:var(--text-tertiary)">' + escHtml(a.country_code) + '</span>' : '') + '</td>' +
         '<td>' + statusBadge + '</td>' +
-        '<td><button class="btn-ghost" style="padding:3px 10px;font-size:11px;color:var(--danger)" onclick="deleteFBAccount(\'' + escHtml(a.token_full) + '\')">Delete</button></td>' +
+        '<td><button class="btn-ghost test-fb-btn" data-token="' + escHtml(a.token_full) + '" style="padding:3px 10px;font-size:11px;color:var(--brand);margin-right:4px">Test</button><button class="btn-ghost" style="padding:3px 10px;font-size:11px;color:var(--danger)" onclick="deleteFBAccount(\'' + escHtml(a.token_full) + '\')">Delete</button></td>' +
         '</tr>' +
         fbQuotaDetailRow(a, idx);
     }).join('');
@@ -2840,6 +2927,44 @@ async function deleteFBAccount(token) {
     loadFBAccounts();
   } catch (e) {
     alert('Delete failed: ' + e.message);
+  }
+}
+
+/* Test a Freebuff token directly against the chat upstream (fb/deepseek-v4-flash) */
+async function testFBAccount(token, btn) {
+  var orig = btn ? btn.innerHTML : 'Test';
+  if (btn) { btn.disabled = true; btn.innerHTML = 'Testing…'; }
+  try {
+    var d = await apiFetch('/fb/accounts/test', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token: token })
+    });
+    if (d.ok) {
+      var msg = '✅ OK (' + d.latency_ms + 'ms) · ' + d.model + ' → "' + (d.content || '').slice(0, 60) + '"';
+      alert(msg);
+    } else {
+      alert('❌ Failed (' + (d.status || '?') + ') · ' + (d.error || 'unknown error'));
+    }
+  } catch (e) {
+    alert('Test error: ' + e.message);
+  } finally {
+    if (btn) { btn.disabled = false; btn.innerHTML = orig; }
+  }
+}
+
+/* Fire ads + streak check-in for all Freebuff accounts (daily streak keeper) */
+async function runFBStreakCheckin() {
+  var btn = document.getElementById('fbStreakBtn');
+  var orig = btn ? btn.innerHTML : '';
+  if (btn) { btn.disabled = true; btn.innerHTML = 'Checking…'; }
+  try {
+    var d = await apiFetch('/fb/streak/checkin', { method: 'POST' });
+    alert('✅ Streak check-in done · ' + d.checked + ' ok / ' + d.failed + ' failed');
+  } catch (e) {
+    alert('Streak check-in failed: ' + e.message);
+  } finally {
+    if (btn) { btn.disabled = false; btn.innerHTML = orig; }
   }
 }
 

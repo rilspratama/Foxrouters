@@ -66,12 +66,17 @@ and log every request/response to ClickHouse — all behind a single Bearer toke
   open in browser, auto-poll tokens, import into pool. Dashboard Add OAuth: Manual | Login URL.
 - **Credential Test** (v1.6.2) — per-row Test for Grok + CodeBuddy (API key & OAuth).
   Probes upstream directly (`POST /accounts/test`, `POST /cb/keys/test`).
+  Freebuff added (v1.6.7+) — `POST /fb/accounts/test` (chat probe via
+  `fb/deepseek-v4-flash`, warms session cache).
 - **Freebuff provider** (v1.6.4) — third upstream (`fb/` prefix). Free ad-supported
   LLM via Codebuff rebrand. **Dynamic model registry** (freebuff-models.json, 6h refresh)
   with static fallback. OAuth device flow, bulk import (pipe format), per-model
   quota snapshot + access-tier detection (full/limited/blocked) + premium gating,
   Buffy prefix auto-inject, tool calling bypass, 1M context auto-clamp.
-  Dashboard: Freebuff tab + per-account expandable quota rows + overview cards.
+  **Streak worker** (v1.6.7+) — `FBStreakWorker` fires ads + streak check-in for
+  every account every 24h (`FREEBUFF_STREAK_INTERVAL` env) so daily streaks never
+  break; manual trigger `POST /fb/streak/checkin`.
+  Dashboard: Freebuff tab + per-account expandable quota rows + overview cards + Test/Streak buttons.
 - **Dynamic model registry** (v1.6.4+) — Freebuff + Grok model lists refresh from
   upstream sources every 6h (`POST /models/refresh` for manual trigger). New models
   appear without code changes; static fallback on fetch failure (zero downtime).
