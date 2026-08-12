@@ -968,7 +968,12 @@ body {
 @media (max-width: 700px) {
   body { flex-direction: column; }
   .sidebar { width: 100%; height: auto; min-height: auto; position: relative; }
-  .sidebar.collapsed { display: none; }
+  .sidebar.collapsed { width: 100%; }
+  .sidebar.collapsed .sidebar-brand { justify-content: flex-start; padding: 18px 18px 16px; }
+  .sidebar.collapsed .sidebar-brand .title,
+  .sidebar.collapsed .sidebar-brand .version { display: inline; }
+  .sidebar.collapsed .nav-item { font-size: 13.5px; gap: 10px; justify-content: flex-start; padding: 7px 10px; }
+  .sidebar.collapsed .sidebar-footer { display: block; }
   .sidebar-nav { flex-direction: row; flex-wrap: wrap; }
   .nav-section-label { display: none; }
   .content { padding: 16px; }
@@ -2241,11 +2246,13 @@ async function refresh() {
     } else if (gDeltaEl) { gDeltaEl.textContent = ''; gDeltaEl.className = 'stat-delta'; }
     document.getElementById('cbCount').textContent = health.cb_keys;
     document.getElementById('cbActive').innerHTML = '<span class="ok">' + health.cb_keys_active + ' active</span>';
-    // CB aggregate credits → delta + quota bar (from /health, no full key dump)
+    // CB aggregate credits → delta + quota bar
     var cbDeltaEl = document.getElementById('cbDelta');
     var cbBarUsedEl = document.getElementById('cbBarUsed');
     var cbBarRestEl = document.getElementById('cbBarRest');
-    var cbUsed = health.cb_credits_used || 0, cbLimit = health.cb_credits_limit || 0;
+    var cbKeysArr = (accounts && accounts.codebuddy) || [];
+    var cbUsed = 0, cbLimit = 0;
+    cbKeysArr.forEach(function(k) { cbUsed += (k.credits_used || 0); cbLimit += (k.credit_limit || 0); });
     if (cbLimit > 0 && cbBarUsedEl && cbBarRestEl) {
       var cbPct = Math.round(cbUsed / cbLimit * 100);
       var cbClass = cbPct >= 100 ? 'err' : (cbPct >= 80 ? 'warn' : 'ok');
