@@ -797,6 +797,8 @@ func HandleHistory(store *db.Store) gin.HandlerFunc {
 }
 
 // HandleRecentRequests returns recent request previews (id as string for JS).
+// Optional query filters: model, upstream, status (exact or 2xx/3xx/4xx/5xx),
+// errors=1 (only errored rows), hours=N (within last N hours), limit=N.
 func HandleRecentRequests(store *db.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		limit := 50
@@ -805,7 +807,20 @@ func HandleRecentRequests(store *db.Store) gin.HandlerFunc {
 				limit = v
 			}
 		}
-		logs, err := store.GetRecentRequests(limit)
+		f := db.RecentFilter{
+			Model:    c.Query("model"),
+			Upstream: c.Query("upstream"),
+			Status:   c.Query("status"),
+		}
+		if c.Query("errors") == "1" || c.Query("errors") == "true" {
+			f.ErrorOnly = true
+		}
+		if h := c.Query("hours"); h != "" {
+			if v, err := strconv.Atoi(h); err == nil && v > 0 && v <= 24*365 {
+				f.Hours = v
+			}
+		}
+		logs, err := store.GetRecentRequests(limit, f)
 		if err != nil {
 			slog.Error("internal error", "module", "handler", "error", err)
 			c.JSON(500, gin.H{"error": "internal server error"})

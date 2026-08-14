@@ -863,14 +863,15 @@ func (s *Store) GetModelStats(since time.Time, limit int) ([]ModelStats, error) 
 	return s.logStore.GetModelStats(ctx, since, limit)
 }
 
-// GetRecentRequests returns latest request log previews (dashboard table).
-func (s *Store) GetRecentRequests(limit int) ([]RecentRequest, error) {
+// GetRecentRequests returns latest request log previews (dashboard table),
+// optionally narrowed by f (model/upstream/status/error-only/time window).
+func (s *Store) GetRecentRequests(limit int, f RecentFilter) ([]RecentRequest, error) {
 	if s == nil || s.logStore == nil {
 		return []RecentRequest{}, nil
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	return s.logStore.GetRecentRequests(ctx, limit)
+	return s.logStore.GetRecentRequests(ctx, limit, f)
 }
 
 // GetRequestDetail returns a single request log with full JSON bodies.

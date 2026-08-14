@@ -14,6 +14,7 @@ import (
 	"log/slog"
 	"regexp"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/ClickHouse/clickhouse-go/v2"
@@ -308,21 +309,47 @@ func (c *clickhouseStore) GetModelStats(ctx context.Context, since time.Time, li
 	return out, nil
 }
 
-func (c *clickhouseStore) GetRecentRequests(ctx context.Context, limit int) ([]RecentRequest, error) {
+func (c *clickhouseStore) GetRecentRequests(ctx context.Context, limit int, f RecentFilter) ([]RecentRequest, error) {
 	if limit <= 0 {
 		limit = 50
 	}
 	if limit > 500 {
 		limit = 500
 	}
-	rows, err := c.conn.Query(ctx, `
-		SELECT id, timestamp, client_key, model, upstream, account_id,
-		       status_code, latency_ms, tokens_in, tokens_out, error_msg,
-		       input_text, output_text
-		FROM request_logs
-		ORDER BY timestamp DESC
-		LIMIT ?
-	`, limit)
+	q := `SELECT id, timestamp, client_key, model, upstream, account_id,
+	       status_code, latency_ms, tokens_in, tokens_out, error_msg,
+	       input_text, output_text
+	FROM request_logs`
+	args := make([]any, 0, 6)
+	var where []string
+	if f.Model != "" {
+		where = append(where, "model = ?")
+		args = append(args, f.Model)
+	}
+	if f.Upstream != "" {
+		where = append(where, "upstream = ?")
+		args = append(args, f.Upstream)
+	}
+	if f.Status != "" {
+		if lo, hi, ok := statusRange(f.Status); ok {
+			where = append(where, "status_code >= ? AND status_code < ?")
+			args = append(args, lo, hi)
+		}
+	}
+	if f.ErrorOnly {
+		where = append(where, "error_msg != ''")
+	}
+	if f.Hours > 0 {
+		where = append(where, "timestamp >= now() - INTERVAL ? HOUR")
+		args = append(args, f.Hours)
+	}
+	if len(where) > 0 {
+		q += " WHERE " + strings.Join(where, " AND ")
+	}
+	q += " ORDER BY timestamp DESC LIMIT ?"
+	args = append(args, limit)
+
+	rows, err := c.conn.Query(ctx, q, args...)
 	if err != nil {
 		return nil, err
 	}

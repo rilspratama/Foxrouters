@@ -1128,13 +1128,36 @@ async function runTest() {
    HISTORY
    ══════════════════════════════════════════════════════════ */
 var historyLogs = [];
+var historyFilterApplied = false;
+
+// Read the filter bar and build the /history/recent query string.
+function historyFilterQS() {
+  var p = [];
+  var m = document.getElementById('fModel');
+  var u = document.getElementById('fUpstream');
+  var s = document.getElementById('fStatus');
+  var e = document.getElementById('fErrors');
+  var h = document.getElementById('fHours');
+  if (m && m.value.trim()) p.push('model=' + encodeURIComponent(m.value.trim()));
+  if (u && u.value) p.push('upstream=' + encodeURIComponent(u.value));
+  if (s && s.value) p.push('status=' + encodeURIComponent(s.value));
+  if (e && e.checked) p.push('errors=1');
+  if (h && h.value) p.push('hours=' + encodeURIComponent(h.value));
+  return p.join('&');
+}
+
+function applyHistoryFilter() {
+  historyFilterApplied = true;
+  loadHistory();
+}
 
 async function loadHistory() {
   if (window._stopped) return; // D8: skip after session expired
   try {
+    var qs = historyFilterApplied ? '&' + historyFilterQS() : '';
     var results = await Promise.all([
       fetchJSON('/history?hours=24'),
-      fetchJSON('/history/recent?limit=50')
+      fetchJSON('/history/recent?limit=50' + qs)
     ]);
     var statsRes = results[0], recentRes = results[1];
 

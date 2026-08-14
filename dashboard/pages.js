@@ -1760,3 +1760,13 @@ loadHistory();       // initial history load
 refresh();           // initial data load
 setInterval(loadHistory, 10000);  // history every 10s
 setInterval(refresh, 5000);       // health/accounts every 5s
+
+// History filter bar: Apply button + Enter in the model box re-query.
+(function bindHistoryFilters() {
+  var btn = document.getElementById('fApply');
+  var modelInput = document.getElementById('fModel');
+  if (btn) btn.addEventListener('click', applyHistoryFilter);
+  if (modelInput) modelInput.addEventListener('keydown', function(ev) {
+    if (ev.key === 'Enter') applyHistoryFilter();
+  });
+})();
