@@ -45,6 +45,24 @@ var dashboardFS embed.FS
 // payload stays byte-identical to the old single-file version.
 var dashboardHTML = assembleDashboard()
 
+// landingHTML is the public info page served at GET / (no account/key counts).
+var landingHTML = assembleLanding()
+
+func assembleLanding() string {
+	b, err := dashboardFS.ReadFile("dashboard/landing.html")
+	if err != nil {
+		panic("dashboard embed missing landing.html: " + err.Error())
+	}
+	html := string(b)
+	// Inject the fox logo (shared with the dashboard header) and the version.
+	if i := strings.Index(html, "__LOGO__"); i >= 0 {
+		if lb, err2 := dashboardFS.ReadFile("dashboard/fox_logo.txt"); err2 == nil {
+			html = strings.Replace(html, "__LOGO__", strings.TrimSpace(string(lb)), 1)
+		}
+	}
+	return strings.ReplaceAll(html, "__VERSION__", Version)
+}
+
 func assembleDashboard() string {
 	read := func(name string) string {
 		b, err := dashboardFS.ReadFile("dashboard/" + name)
@@ -571,24 +589,10 @@ func main() {
 	})
 
 	r.GET("/", func(c *gin.Context) {
-		// Info page — deliberately omits account/key counts (info leak).
-		c.JSON(200, gin.H{
-			"service": "foxrouters",
-			"version": Version,
-			"mode":    "unified (grok + codebuddy)",
-			"endpoints": []string{
-				"POST /v1/chat/completions — grok-* → Grok, cb/* → CodeBuddy",
-				"GET  /v1/models",
-				"GET  /accounts",
-				"POST /accounts/refresh",
-				"GET  /health — upstream health + circuit breaker status",
-				"GET  /cb-stats",
-				"GET  /history — request stats + model breakdown",
-				"GET  /history/recent — recent request logs",
-				"GET  /history/detail/:id — full request/response JSON for a single log",
-				"GET  /dashboard — web UI dashboard",
-			},
-		})
+		// Public landing page — deliberately no account/key counts (info leak).
+		// Version is baked in at assembly time; health status is fetched
+		// client-side from /health.
+		c.Data(200, "text/html; charset=utf-8", []byte(landingHTML))
 	})
 
 	slog.Info("foxrouters started",
