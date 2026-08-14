@@ -206,7 +206,7 @@ function escHtml(s) {
 // on document so dynamically-rendered buttons auto-bind.
 // ══════════════════════════════════════════════════════════
 document.addEventListener('click', function(e) {
-  var btn = e.target.closest('button[data-key], button[data-email], button[data-id], button[data-alias], button[data-name], button[data-model], button[data-proxy-id]');
+  var btn = e.target.closest('button[data-key], button[data-email], button[data-id], button[data-alias], button[data-name], button[data-model], button[data-token], button[data-proxy-id]');
   if (!btn) return;
   var v;
   if (btn.classList.contains('delete-cb-btn')) {
