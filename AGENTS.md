@@ -5,7 +5,7 @@ Unified OpenAI-compatible API gateway for **Grok + CodeBuddy**. Routes by model 
 `grok-*` → cli-chat-proxy.grok.com, `cb/*` → www.codebuddy.ai/v2.
 
 Multi-account/key round-robin, auto-refresh (singleflight + pre-warm), circuit breaker,
-API key auth, per-key RPM/quota, Redis hot-state, **ClickHouse** full-body history, web dashboard.
+API key auth, per-key RPM/quota, Redis hot-state, **SQLite** full-body history, web dashboard.
 
 **Version:** v1.6.7 (`-X main.Version` build flag)
 **Port:** 20130 · **Deploy:** Docker Compose (`docker compose up -d --build foxrouters`)
@@ -40,7 +40,7 @@ Client → AuthMiddleware (Bearer) → RateLimitMiddleware
        ├── grok-* → proxyGrok (selector modes, 401 retry, 402/403 ban, 429 cooldown, 400 passthrough, billing sync, usage tracking)
        └── cb/*   → proxyCodeBuddy (stream-only transform, credit/14018 disable + Redis)
             ↓
-       async LogRequest → ClickHouse (full body, ZSTD, unlimited)
+       async LogRequest → SQLite (full body, TTL 90d)
 ```
 
 ### Data stores
@@ -166,8 +166,7 @@ endpoint — verified).
 | `proxy.go` | Routing, RequestLog build |
 | `db.go` | Redis + LogStore glue (async batch pipeline, factory) |
 | `internal/db/logstore.go` | `LogStore` interface + shared DTOs (RequestLog, RequestStats, …) |
-| `internal/db/logstore_sqlite.go` | modernc.org/sqlite backend (default) |
-| `internal/db/logstore_clickhouse.go` | ClickHouse backend (opt-in via `LOG_BACKEND=clickhouse`) |
+| `internal/db/logstore_sqlite.go` | modernc.org/sqlite backend (default; the only backend since v1.6.13 — ClickHouse removed) |
 | `handlers.go` | health, accounts, history, keys, dashboard static |
 | `auth.go` / `ratelimit.go` / `health.go` | Auth, RPM, circuit |
 | `dashboard/` | Embedded SPA (go:embed dir) — modular parts: `head.html`/`body.html`/`modals.html` (HTML+CSS) + `core.js` (block 1: auth/routing/helpers/accounts) + `pages.js` (block 2: custom/combos/proxies/tunnel/settings/media + INIT). Assembled byte-identical in `main.go assembleDashboard()`. Nav: Dashboard/Accounts/Keys/Models/Proxies/Tunnel/Settings/Media |

@@ -150,7 +150,7 @@ func (s *sqliteStore) EnsureSchema(ctx context.Context) error {
 }
 
 // retentionLoop periodically deletes rows older than 90 days across all
-// three log tables — mirrors the ClickHouse TTL 90 DAY behaviour.
+// three log tables — mirrors the old ClickHouse TTL 90 DAY behaviour.
 func (s *sqliteStore) retentionLoop() {
 	// Run once shortly after startup, then hourly.
 	first := time.NewTimer(30 * time.Second)

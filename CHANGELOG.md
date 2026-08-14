@@ -8,6 +8,23 @@ Policy: **test (`go test -race`) before build/restart**. Secrets only via `.gate
 
 ---
 
+## v1.6.13 (dev working tree) — ClickHouse removed + history filters + SQLite pool (2026-08-14)
+
+### Removed
+- **ClickHouse backend removed entirely** — too heavy (~700MB image + RAM) for the value it added. SQLite is the only log backend. `internal/db/logstore_clickhouse.go` deleted, `github.com/ClickHouse/clickhouse-go/v2` dropped from go.mod.
+  - `LOG_BACKEND=clickhouse` now logs a deprecation warning and falls back to sqlite (no crash).
+  - `docker-compose.yml`: clickhouse service + profile + `CLICKHOUSE_*` env removed.
+  - `install.sh`/`update.sh`: force sqlite; stale `foxrouters-clickhouse` container/volume auto-cleaned.
+  - `.env.example`/`README.md`/`AGENTS.md`: ClickHouse references removed.
+
+### Added
+- **Server-side history filters** — `GET /history/recent` accepts `model=`, `upstream=`, `status=` (exact `200` or range `2xx`–`5xx`), `errors=1`, `hours=N`. `RecentFilter` shared by the store interface; dashboard Request History gets a filter bar (model/upstream/status/errors/time + Apply/Enter) that re-queries server-side.
+
+### Fixed
+- **SQLite single-connection pool (`SetMaxOpenConns(1)`) serialised ALL queries** — a 5MB request-body INSERT (kimi 1M context) blocked dashboard `/history` polling for 5s → `context deadline exceeded` 500s. WAL mode allows 1 writer + N readers, so the pool is now 4 (1 writer + 3 concurrent readers). `/history/recent?limit=4` 500 resolved.
+
+---
+
 ## v1.6.8+ (dev working tree) — Dashboard modular split (2026-08-13)
 
 **Changed:** `dashboard.html` (single 6.3K-line file) split into `dashboard/` dir — `head.html`/`body.html`/`modals.html` (HTML+CSS) + `core.js` (script block 1: auth/routing/helpers/accounts/history) + `pages.js` (script block 2: custom/combos/proxies/tunnel/settings/media + INIT) + `foot.html`. `main.go` now `go:embed dashboard` (embed.FS) + `assembleDashboard()` concat — payload byte-identical (verified 345,220 bytes, 0 diff; 6,316 lines). Build/vet/test PASS. Future edits touch only the relevant part file; script-block boundary (INIT must stay at end of last block) is preserved.

@@ -9,7 +9,7 @@
 Unified **OpenAI-compatible** API gateway that fronts **Grok**, **CodeBuddy**, and
 **Freebuff** behind one `/v1/chat/completions` endpoint. Route by model prefix, round-robin
 across many upstream accounts/keys, refresh tokens automatically, enforce per-key quotas,
-and log every request/response to ClickHouse — all behind a single Bearer token.
+and log every request/response to SQLite — all behind a single Bearer token.
 
 ---
 
@@ -25,7 +25,7 @@ and log every request/response to ClickHouse — all behind a single Bearer toke
 - **Per-gateway-key** RPM, burst, token quota, model whitelist, and role
   (`admin` vs `inference`).
 - **Redis** for hot state (tokens, credits, disabled flags, rate counters,
-  gateway keys) and **ClickHouse** for cold, full-body history (ZSTD, 90-day TTL,
+  gateway keys) and **SQLite** for cold, full-body history (90-day TTL,
   unlimited body size).
 - **Embedded web dashboard** for stats, accounts, keys, and models.
 
@@ -86,8 +86,8 @@ and log every request/response to ClickHouse — all behind a single Bearer toke
 - **Per-key rate limits** — RPM, burst, and cumulative token quota.
 - **Redis hot state** — tokens, CB credits, disabled flags, gateway keys,
   rate/quota counters.
-- **ClickHouse history** — full request + response JSON, ZSTD compression,
-  90-day TTL, unlimited body length; refresh events and disable events too.
+- **SQLite history** — full request + response JSON, 90-day TTL, unlimited body
+  length; refresh events and disable events too.
 - **Web dashboard** — 5 nav items (Dashboard, Accounts & Keys, Gateway API Keys,
   Models, Proxies) with Models page containing 3 tabs (Models \| Custom \| Combos)
   and Proxies page with upstream badges + add/edit modal.
@@ -109,7 +109,7 @@ and log every request/response to ClickHouse — all behind a single Bearer toke
 ## Quick Start (One-Liner Installer — No Compose Needed)
 
 > Fastest path. Auto-installs Docker if missing, pulls all images, starts
-> Redis + ClickHouse + FoxRouters. No clone, no build, no docker-compose.
+> Redis + FoxRouters. No clone, no build, no docker-compose.
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/rilspratama/Foxrouters/master/install.sh | bash
@@ -120,7 +120,6 @@ curl -fsSL https://raw.githubusercontent.com/rilspratama/Foxrouters/master/insta
 [✓] Docker found: Docker version 29.6.1
 [✓] Secrets generated → /etc/foxrouters/.env
 [✓] Redis started (port 6379)
-[✓] ClickHouse started (HTTP 8123, Native 9000)
 [✓] FoxRouters started (port 20130)
 [✓] Gateway key captured → /etc/foxrouters/gateway-key.txt
 [✓] Gateway healthy: {"service":"foxrouters","status":"healthy","version":"v1.5.0"}
@@ -138,7 +137,7 @@ curl -fsSL https://raw.githubusercontent.com/rilspratama/Foxrouters/master/insta
   Manage:
     docker logs foxrouters -f
     docker restart foxrouters
-    docker stop foxrouters-redis foxrouters-clickhouse foxrouters
+    docker stop foxrouters-redis foxrouters
 ═══════════════════════════════════════════════════════════════
 ```
 
@@ -151,10 +150,10 @@ FOXROUTERS_PORT=8080 REDIS_PORT=6380 bash install.sh
 ```bash
 docker logs foxrouters -f                                    # tail logs
 docker restart foxrouters                                     # restart gateway
-docker stop foxrouters-redis foxrouters-clickhouse foxrouters  # stop all
-docker start foxrouters-redis foxrouters-clickhouse foxrouters  # start all
-docker rm -f foxrouters foxrouters-redis foxrouters-clickhouse  # remove (keeps data)
-docker volume rm foxrouters-redis-data foxrouters-clickhouse-data  # wipe data
+docker stop foxrouters-redis foxrouters  # stop all
+docker start foxrouters-redis foxrouters  # start all
+docker rm -f foxrouters foxrouters-redis  # remove (keeps data)
+docker volume rm foxrouters-redis-data  # wipe data
 ```
 
 **Update to a new version:**
@@ -164,7 +163,7 @@ bash update.sh              # pull latest + recreate gateway (state persists in 
 bash update.sh --check      # check for update without pulling
 bash update.sh --tag=v1.6.4 # pin to a specific tag (also works for downgrade/rollback)
 ```
-Only the gateway container is recreated — Redis/ClickHouse/SQLite volumes are untouched.
+Only the gateway container is recreated — Redis/SQLite volumes are untouched.
 
 ---
 
@@ -178,7 +177,7 @@ Open `http://localhost:20130/login`, paste the key, done.
 
 ## Quick Start (Docker — Build from Source)
 
-> One command. The compose file wires `foxrouters`, `redis`, and `clickhouse`
+> One command. The compose file wires `foxrouters` and `redis`
 > together — no `.env` editing needed for the default stack.
 
 ```bash
@@ -211,11 +210,10 @@ Then open `http://localhost:20130/login`, paste the key, done.
 
 | Scenario | Edit `.env`? |
 |----------|-------------|
-| Default docker-compose (Redis+CH+gw in same stack) | ❌ No — compose overrides everything |
+| Default docker-compose (Redis+gw in same stack) | ❌ No — compose overrides everything |
 | Custom Redis password in compose | ✅ Set `REDIS_PASSWORD` |
-| Bare metal / systemd (Redis/CH on host) | ✅ Set `REDIS_ADDR`, `CLICKHOUSE_ADDR`, etc. |
+| Bare metal / systemd (Redis on host) | ✅ Set `REDIS_ADDR` + `REDIS_PASSWORD` |
 | External Redis (managed/Cloudflare) | ✅ Set `REDIS_ADDR=host:port` + `REDIS_PASSWORD` |
-| External ClickHouse | ✅ Set `CLICKHOUSE_ADDR` + auth |
 | Custom port (20130 → 8080) | ✅ Set `PORT=8080` |
 
 See [`.env.example`](./.env.example) for the full list of tunables.
@@ -228,7 +226,6 @@ See [`.env.example`](./.env.example) for the full list of tunables.
 
 - Go **1.25+**
 - Redis (local or remote)
-- ClickHouse (local or remote; the schema is auto-migrated on boot)
 
 ```bash
 # 1. Build
@@ -342,10 +339,6 @@ startup).
 | `REDIS_ADDR` | `127.0.0.1:6379` | Redis host:port for hot state. |
 | `REDIS_PASSWORD` | *(empty)* | Redis password if AUTH is enabled. |
 | `REDIS_DB` | `0` | Redis logical DB index. |
-| `CLICKHOUSE_ADDR` | `127.0.0.1:9001` | ClickHouse native-protocol host:port. |
-| `CLICKHOUSE_DB` | `gateway` | ClickHouse database name (auto-created). |
-| `CLICKHOUSE_USER` | `default` | ClickHouse username. |
-| `CLICKHOUSE_PASSWORD` | *(empty)* | ClickHouse password. |
 | `GATEWAY_KEY_FILE` | `./gateway-key.txt` | Path to the seed admin bearer token file. |
 | `CB_KEY_FILE` | `./cb-keys.json` | Path to a JSON file of CodeBuddy keys to seed. |
 | `CPA_AUTH_DIR` | `./` | Directory scanned for `xai-*.json` Grok credential files at boot. |
@@ -619,7 +612,7 @@ proxyRequest             ── inspect "model", expand aliases
   ├── grok-*  → proxyGrok         (O(k) RR, refresh, 401 retry, 403 ban)
   └── cb/*    → proxyCodeBuddy    (dual pool api_key+oauth, meter credits, stream transform)
   ▼
-async LogRequest → ClickHouse (full request + response, ZSTD, TTL 90d)
+async LogRequest → SQLite (full request + response, TTL 90d)
 ```
 
 **Storage split**
@@ -627,7 +620,7 @@ async LogRequest → ClickHouse (full request + response, ZSTD, TTL 90d)
 | Layer | Engine | Contents |
 |---|---|---|
 | Hot | **Redis** | Tokens, CB credits, disabled flags, gateway keys, rate/quota counters. |
-| Cold | **ClickHouse** | `request_logs` (full bodies), refresh events, disable events. |
+| Cold | **SQLite** | `request_logs` (full bodies), refresh events, disable events. |
 
 **Hot-path invariants**
 
@@ -636,7 +629,7 @@ async LogRequest → ClickHouse (full request + response, ZSTD, TTL 90d)
 3. Refresh uses singleflight and never holds `acc.mu` across a network call.
 4. Any disable/enable/token mutation calls `Save*()` **after** the lock is
    released.
-5. History writes are async; credentials never land in ClickHouse.
+5. History writes are async; credentials never land in the log store.
 
 ---
 

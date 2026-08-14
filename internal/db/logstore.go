@@ -1,12 +1,12 @@
-// logstore.go — pluggable request-log storage backend.
+// logstore.go — request-log storage backend (SQLite).
 //
-// FoxRouters historically only wrote request/response history to ClickHouse.
-// ClickHouse is great for analytics but heavy (~700MB image, +RAM/disk cost)
-// which is overkill for small deployments. This file defines a LogStore
-// interface so the caller can pick between backends via LOG_BACKEND env:
+// FoxRouters historically offered ClickHouse as an analytics backend, but it
+// was heavy (~700MB image, +RAM/disk cost) and removed Aug 2026. This file
+// defines the LogStore interface so the store layer stays decoupled from the
+// concrete SQLite implementation:
 //
-//	LOG_BACKEND=sqlite      (default) → embedded modernc.org/sqlite, ~0 ops cost
-//	LOG_BACKEND=clickhouse            → existing analytics backend
+//	LOG_BACKEND=sqlite   (default) → embedded modernc.org/sqlite, ~0 ops cost
+//	LOG_BACKEND=clickhouse         → deprecated; warns and falls back to sqlite
 //
 // The interface deliberately mirrors the async-batch pattern the old CH code
 // used: producers push into channels (owned by Store), a consumer goroutine
@@ -46,7 +46,7 @@ type LogStore interface {
 	// Close releases any backing resources.
 	Close() error
 
-	// Kind returns a short label ("clickhouse"|"sqlite") for logging.
+	// Kind returns a short label ("sqlite") for logging.
 	Kind() string
 }
 

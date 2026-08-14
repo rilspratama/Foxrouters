@@ -70,8 +70,6 @@ fi
 # shellcheck disable=SC1090
 source "$ENV_FILE"
 : "${REDIS_PASSWORD:?REDIS_PASSWORD missing in .env}"
-LOG_BACKEND_VAL="${LOG_BACKEND:-sqlite}"
-CH_PASSWORD_VAL="${CLICKHOUSE_PASSWORD:-}"
 
 # ── Current state ────────────────────────────────────────────────────────────
 CURRENT_IMAGE="$(docker inspect foxrouters --format '{{.Config.Image}}')"
@@ -118,18 +116,10 @@ info "Recreating gateway container..."
 ENV_ARGS=(
   --env-file "$ENV_FILE"
   -e REDIS_ADDR=redis:6379
-  -e LOG_BACKEND="$LOG_BACKEND_VAL"
+  -e LOG_BACKEND=sqlite
   -e LOG_SQLITE_PATH=/var/lib/foxrouters/logs.db
   -e PORT=20130
 )
-if [[ "$LOG_BACKEND_VAL" == "clickhouse" ]]; then
-  ENV_ARGS+=(
-    -e CLICKHOUSE_ADDR=clickhouse:9000
-    -e CLICKHOUSE_DB="${CLICKHOUSE_DB:-gateway}"
-    -e CLICKHOUSE_USER="${CLICKHOUSE_USER:-default}"
-    -e CLICKHOUSE_PASSWORD="$CH_PASSWORD_VAL"
-  )
-fi
 
 docker rm -f foxrouters >/dev/null
 docker run -d \

@@ -756,7 +756,7 @@ func HandleDeleteAccount(grokAM *upstream.GrokAccountManager) gin.HandlerFunc {
 // HISTORY ENDPOINTS (v5.0)
 // ============================================================================
 
-// HandleHistory aggregates request stats + per-model breakdown from ClickHouse.
+// HandleHistory aggregates request stats + per-model breakdown.
 func HandleHistory(store *db.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		hours := 24

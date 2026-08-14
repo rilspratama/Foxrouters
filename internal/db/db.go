@@ -1,8 +1,8 @@
-// Package db is the Redis (hot state) + ClickHouse (persistent history)
+// Package db is the Redis (hot state) + SQLite (persistent history) store.
 // integration layer for FoxRouters.
 //
 //	Redis: account tokens, CB key credits, rate limit buckets — sub-ms reads.
-//	ClickHouse: request_logs, token_refresh_history, account_events — full-body history.
+//	SQLite: request_logs, token_refresh_history, account_events — full-body history.
 //
 // This package deliberately does NOT depend on the concrete domain types
 // (GrokAccount, GatewayKeyInfo, CBKey). Instead it defines a small set of
@@ -88,23 +88,21 @@ func redisConfig() (addr, password string, database int) {
 	return
 }
 
-// clickhouseAddr returns host:port for native protocol (default 127.0.0.1:9000).
-func clickhouseAddr() string { return envOr("CLICKHOUSE_ADDR", "127.0.0.1:9000") }
-
-func clickhouseDatabase() string { return envOr("CLICKHOUSE_DB", "gateway") }
-
 // NewLogStore selects the log backend based on LOG_BACKEND:
 //
-//	LOG_BACKEND=sqlite      (default) → local file DB via modernc.org/sqlite
-//	LOG_BACKEND=clickhouse            → external ClickHouse (opt-in)
+//	LOG_BACKEND=sqlite   (default) → local file DB via modernc.org/sqlite
 //
-// Unknown values fall through to sqlite so a typo can't take the gateway
-// down. Exposed at package scope so tests can substitute a fake LogStore.
+// The ClickHouse backend was REMOVED (deprecated Aug 2026 — too heavy for
+// the value it added). Anyone still setting LOG_BACKEND=clickhouse gets a
+// warning and falls back to sqlite instead of failing. Unknown values also
+// fall through to sqlite so a typo can't take the gateway down. Exposed at
+// package scope so tests can substitute a fake LogStore.
 func NewLogStore() (LogStore, error) {
 	backend := strings.ToLower(strings.TrimSpace(envOr("LOG_BACKEND", "sqlite")))
 	switch backend {
 	case "clickhouse", "ch":
-		return newClickhouseStore()
+		slog.Warn("LOG_BACKEND=clickhouse is deprecated (removed) — falling back to sqlite", "module", "db")
+		return newSqliteStore()
 	case "sqlite", "sqlite3", "":
 		return newSqliteStore()
 	default:
@@ -118,8 +116,7 @@ func NewLogStore() (LogStore, error) {
 // ============================================================================
 
 // Store is the unified Redis + LogStore manager. It owns the async batching
-// pipeline that feeds any LogStore backend (ClickHouse or SQLite) without
-// blocking the request path.
+// pipeline that feeds the LogStore backend without blocking the request path.
 type Store struct {
 	rdb      *redis.Client
 	logStore LogStore
@@ -694,10 +691,10 @@ func atollSafe(s string) int64 {
 }
 
 // ============================================================================
-// CLICKHOUSE — async log writers (non-blocking via channels)
+// LOG STORE — async log writers (non-blocking via channels)
 // ============================================================================
 
-// LogRequest queues a request log for async ClickHouse insert.
+// LogRequest queues a request log for async insert.
 // Non-blocking: drops if buffer full (never blocks request processing).
 func (s *Store) LogRequest(r RequestLog) {
 	if s == nil {

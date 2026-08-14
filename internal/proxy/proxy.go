@@ -1,6 +1,6 @@
 // Package proxy wires the HTTP entrypoint (/v1/chat/completions, /v1/models)
 // to the correct upstream — Grok or CodeBuddy — and emits Prometheus metrics
-// + async ClickHouse audit rows for every proxied call.
+// + async log audit rows for every proxied call.
 //
 // Dependencies:
 //   - internal/upstream  (isGrokModel, expandGrokAlias, proxyGrok, proxyCodeBuddy, MAX_REQUEST_BODY)
@@ -100,7 +100,7 @@ func toString(v interface{}) string {
 // ProxyRequest routes /v1/chat/completions to Grok or CodeBuddy based on the
 // requested model, expands Grok aliases, enforces per-key model whitelists,
 // records Prometheus metrics, updates per-key token quotas, and emits an
-// async RequestLog to ClickHouse for chat completions only.
+// async RequestLog for chat completions only.
 //
 // The optional `registry` argument (may be nil) resolves runtime-configured
 // custom models + aliases (see internal/proxy/custom.go). Aliases are
@@ -529,7 +529,7 @@ func ProxyRequest(grokAM *upstream.GrokAccountManager, cbKM *upstream.CBKeyManag
 			}
 		}
 
-		// Async log to ClickHouse — only for chat completion endpoint,
+		// Async log — only for chat completion endpoint,
 		// not for probes to /v1/models, /health, /props, etc.
 		if grokAM.DB() != nil && path == "/v1/chat/completions" {
 			inputText := extractInputText(bodyMap)
@@ -538,7 +538,7 @@ func ProxyRequest(grokAM *upstream.GrokAccountManager, cbKM *upstream.CBKeyManag
 			tokensOut, _ := c.Get("tokens_out")
 			responseBody, _ := c.Get("response_body")
 
-			// Full request/response JSON stored in ClickHouse (ZSTD) — unlimited.
+			// Full request/response JSON stored in SQLite — unlimited.
 			rl := db.RequestLog{
 				Timestamp:  startTime,
 				RequestID:  c.GetString("request_id"),

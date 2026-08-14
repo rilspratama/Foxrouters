@@ -9,15 +9,14 @@
 #
 # What it does:
 #   1. Checks/installs Docker
-#   2. Prompts for log backend (SQLite default; ClickHouse optional)
-#   3. Creates dedicated network + volumes
-#   4. Pulls and starts Redis (+ ClickHouse if selected) + FoxRouters containers
-#   5. Generates random Redis password + bootstraps gateway admin key
-#   6. Prints gateway key + dashboard URL
+#   2. Creates dedicated network + volumes
+#   3. Pulls and starts Redis + FoxRouters containers
+#   4. Generates random Redis password + bootstraps gateway admin key
+#   5. Prints gateway key + dashboard URL
 #
-# Non-interactive mode:
-#   Set LOG_BACKEND=sqlite     (default) or LOG_BACKEND=clickhouse before piping to bash.
-#     curl -fsSL … | LOG_BACKEND=clickhouse bash
+# Log backend is SQLite (only). The ClickHouse backend was removed (Aug 2026).
+# Legacy LOG_BACKEND=clickhouse values are ignored with a notice and any stale
+# foxrouters-clickhouse container is cleaned up.
 #
 # Development mode (isolated stack, own Redis, port 20131):
 #   curl -fsSL … | DEV_MODE=1 bash
@@ -32,21 +31,17 @@
 # Manage after install:
 #   docker logs foxrouters -f
 #   docker restart foxrouters
-#   docker rm -f foxrouters foxrouters-redis [foxrouters-clickhouse]   # remove (keeps volumes)
+#   docker rm -f foxrouters foxrouters-redis   # remove (keeps volumes)
 #
 set -euo pipefail
 
 # ── Config ──────────────────────────────────────────────────────────────────
 IMAGE_GATEWAY="${IMAGE_GATEWAY:-ghcr.io/rilspratama/foxrouters:latest}"
 IMAGE_REDIS="redis:7-alpine"
-IMAGE_CLICKHOUSE="clickhouse/clickhouse-server:latest"
 GATEWAY_PORT="${FOXROUTERS_PORT:-20130}"
 REDIS_PORT="${REDIS_PORT:-6379}"
-CH_HTTP_PORT="${CH_HTTP_PORT:-8123}"
-CH_NATIVE_PORT="${CH_NATIVE_PORT:-9000}"
 NETWORK="foxrouters-net"
 VOL_REDIS="foxrouters-redis-data"
-VOL_CH="foxrouters-clickhouse-data"
 VOL_SQLITE="foxrouters-sqlite-data"
 CONFIG_DIR="/etc/foxrouters"
 ENV_FILE="${CONFIG_DIR}/.env"
@@ -90,49 +85,23 @@ if ! docker info &>/dev/null; then
     exit 1
 fi
 
-# ── Step 2: Prompt for log backend ──────────────────────────────────────────
-# Priority:
-#   1. LOG_BACKEND env var (non-interactive install)
-#   2. Auto-detect existing ClickHouse install (upgrade safety)
-#   3. Interactive prompt (only if stdin is a TTY)
-#   4. Default: sqlite
-LOG_BACKEND="${LOG_BACKEND:-}"
-if [[ -z "${LOG_BACKEND}" ]]; then
-    # Auto-detect: existing .env with LOG_BACKEND=clickhouse OR running CH container
-    if [[ -f "${CONFIG_DIR}/.env" ]] && grep -q '^LOG_BACKEND=clickhouse' "${CONFIG_DIR}/.env" 2>/dev/null; then
-        LOG_BACKEND="clickhouse"
-        info "Auto-detected existing ClickHouse config — keeping LOG_BACKEND=clickhouse"
-    elif docker ps -a --format '{{.Names}}' 2>/dev/null | grep -q 'foxrouters-clickhouse'; then
-        LOG_BACKEND="clickhouse"
-        info "Auto-detected existing ClickHouse container — using LOG_BACKEND=clickhouse"
-    elif [[ -t 0 ]]; then
-        echo ""
-        bold "Log backend"
-        echo "  [1] SQLite     (default, lightweight, ~0 ops cost — recommended)"
-        echo "  [2] ClickHouse (analytics; adds ~700MB image + a service to maintain)"
-        echo ""
-        read -r -p "Choice [1]: " CHOICE || CHOICE=""
-        case "${CHOICE}" in
-            2|ch|clickhouse) LOG_BACKEND="clickhouse" ;;
-            *)               LOG_BACKEND="sqlite"     ;;
-        esac
-    else
-        # Piped install with no LOG_BACKEND set → default to sqlite.
-        LOG_BACKEND="sqlite"
-    fi
+# ── Step 2: Log backend ─────────────────────────────────────────────────────
+# SQLite is the only backend (ClickHouse removed Aug 2026). Accept legacy
+# LOG_BACKEND=clickhouse silently but always run sqlite; clean up a stale CH
+# container if one exists from an older install.
+if [[ -n "${LOG_BACKEND:-}" && "${LOG_BACKEND}" != "sqlite" && "${LOG_BACKEND}" != "sqlite3" ]]; then
+    info "LOG_BACKEND=${LOG_BACKEND} is deprecated (ClickHouse removed) — using sqlite"
 fi
-case "${LOG_BACKEND}" in
-    sqlite|clickhouse) ok "Log backend: ${LOG_BACKEND}" ;;
-    *)
-        err "Unknown LOG_BACKEND=${LOG_BACKEND} — must be sqlite or clickhouse"
-        exit 1
-        ;;
-esac
+LOG_BACKEND="sqlite"
+if docker ps -a --format '{{.Names}}' 2>/dev/null | grep -q 'foxrouters-clickhouse'; then
+    info "Removing stale foxrouters-clickhouse container (backend removed)"
+    docker rm -f foxrouters-clickhouse 2>/dev/null || true
+fi
+ok "Log backend: sqlite"
 
 # ── Step 3: Generate secrets ────────────────────────────────────────────────
 info "Generating secrets..."
 REDIS_PASSWORD=$(openssl rand -hex 16 2>/dev/null || head -c 16 /dev/urandom | xxd -p)
-CH_PASSWORD=""  # ClickHouse default user has no password by default
 
 mkdir -p "${CONFIG_DIR}"
 chmod 700 "${CONFIG_DIR}"
@@ -144,12 +113,8 @@ cat > "${ENV_FILE}" << EOF
 REDIS_ADDR=redis:6379
 REDIS_PASSWORD=${REDIS_PASSWORD}
 REDIS_DB=0
-LOG_BACKEND=${LOG_BACKEND}
+LOG_BACKEND=sqlite
 LOG_SQLITE_PATH=/var/lib/foxrouters/logs.db
-CLICKHOUSE_ADDR=clickhouse:9000
-CLICKHOUSE_DB=gateway
-CLICKHOUSE_USER=default
-CLICKHOUSE_PASSWORD=${CH_PASSWORD}
 PORT=${GATEWAY_PORT}
 EOF
 chmod 600 "${ENV_FILE}"
@@ -164,16 +129,10 @@ docker volume  create "${VOL_SQLITE}" 2>/dev/null || ok "Volume ${VOL_SQLITE} al
 # Fix volume ownership: gateway runs as UID 1000 (non-root).
 # Without this, SQLite can't write to /var/lib/foxrouters/logs.db.
 docker run --rm -v "${VOL_SQLITE}:/data" alpine chown -R 1000:1000 /data 2>/dev/null || true
-if [[ "${LOG_BACKEND}" == "clickhouse" ]]; then
-    docker volume create "${VOL_CH}" 2>/dev/null || ok "Volume ${VOL_CH} already exists"
-fi
 
 # ── Step 5: Pull images ─────────────────────────────────────────────────────
 info "Pulling images (this may take a few minutes on first run)..."
 docker pull "${IMAGE_REDIS}"      2>&1 | tail -1
-if [[ "${LOG_BACKEND}" == "clickhouse" ]]; then
-    docker pull "${IMAGE_CLICKHOUSE}"  2>&1 | tail -1
-fi
 # Only pull gateway if not already present locally (avoid overwriting local builds)
 if ! docker image inspect "${IMAGE_GATEWAY}" &>/dev/null; then
     docker pull "${IMAGE_GATEWAY}"    2>&1 | tail -1
@@ -196,40 +155,18 @@ docker run -d \
     redis-server --requirepass "${REDIS_PASSWORD}" --appendonly no
 ok "Redis started (port ${REDIS_PORT})"
 
-# ── Step 7: Start ClickHouse (only if selected) ─────────────────────────────
-if [[ "${LOG_BACKEND}" == "clickhouse" ]]; then
-    info "Starting ClickHouse..."
+# ── Step 7: Cleanup legacy ClickHouse (backend removed Aug 2026) ────────────
+if docker ps -a --format '{{.Names}}' 2>/dev/null | grep -q 'foxrouters-clickhouse'; then
+    info "Removing stale foxrouters-clickhouse container (backend removed)"
     docker rm -f foxrouters-clickhouse 2>/dev/null || true
-    docker run -d \
-        --name foxrouters-clickhouse \
-        --network "${NETWORK}" \
-        --network-alias clickhouse \
-        -p "127.0.0.1:${CH_HTTP_PORT}:8123" \
-        -p "127.0.0.1:${CH_NATIVE_PORT}:9000" \
-        -v "${VOL_CH}:/var/lib/clickhouse" \
-        --ulimit nofile=262144:262144 \
-        --restart unless-stopped \
-        -e CLICKHOUSE_USER=default \
-        -e CLICKHOUSE_PASSWORD="${CH_PASSWORD}" \
-        -e CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT=1 \
-        "${IMAGE_CLICKHOUSE}"
-    ok "ClickHouse started (HTTP ${CH_HTTP_PORT}, Native ${CH_NATIVE_PORT})"
-else
-    info "SQLite mode — skipping ClickHouse container"
-    # Best-effort cleanup of a stale CH container from a prior CH install.
-    docker rm -f foxrouters-clickhouse 2>/dev/null || true
+    docker volume rm foxrouters-clickhouse-data 2>/dev/null || true
 fi
 
 # ── Step 8: Wait for dependencies healthy ───────────────────────────────────
-info "Waiting for Redis${LOG_BACKEND:+ + ${LOG_BACKEND}} to be healthy..."
+info "Waiting for Redis to be healthy..."
 for i in $(seq 1 30); do
     REDIS_OK=$(docker exec foxrouters-redis redis-cli -a "${REDIS_PASSWORD}" ping 2>/dev/null || echo "FAIL")
-    if [[ "${LOG_BACKEND}" == "clickhouse" ]]; then
-        CH_OK=$(curl -sf "http://127.0.0.1:${CH_HTTP_PORT}/ping" 2>/dev/null || echo "FAIL")
-    else
-        CH_OK="Ok."
-    fi
-    if [[ "${REDIS_OK}" == "PONG" && "${CH_OK}" == "Ok." ]]; then
+    if [[ "${REDIS_OK}" == "PONG" ]]; then
         ok "Dependencies healthy"
         break
     fi
@@ -238,7 +175,6 @@ for i in $(seq 1 30); do
     if [[ $i -eq 30 ]]; then
         err "Timeout waiting for dependencies"
         docker logs foxrouters-redis --tail 5
-        [[ "${LOG_BACKEND}" == "clickhouse" ]] && docker logs foxrouters-clickhouse --tail 5
         exit 1
     fi
 done
@@ -254,15 +190,11 @@ docker run -d \
     --restart unless-stopped \
     --env-file "${ENV_FILE}" \
     -e REDIS_ADDR=redis:6379 \
-    -e LOG_BACKEND="${LOG_BACKEND}" \
+    -e LOG_BACKEND=sqlite \
     -e LOG_SQLITE_PATH=/var/lib/foxrouters/logs.db \
-    -e CLICKHOUSE_ADDR=clickhouse:9000 \
-    -e CLICKHOUSE_DB=gateway \
-    -e CLICKHOUSE_USER=default \
-    -e CLICKHOUSE_PASSWORD="${CH_PASSWORD}" \
     -e PORT=20130 \
     "${IMAGE_GATEWAY}"
-ok "FoxRouters started (port ${GATEWAY_PORT}, log backend: ${LOG_BACKEND})"
+ok "FoxRouters started (port ${GATEWAY_PORT}, log backend: sqlite)"
 
 # ── Step 10: Capture gateway key from Redis ─────────────────────────────────
 info "Waiting for gateway to write key to Redis (up to 30s)..."

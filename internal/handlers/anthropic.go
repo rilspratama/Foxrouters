@@ -1,11 +1,11 @@
 // Package handlers — Anthropic Messages API adapter.
 //
 // POST /v1/messages endpoint that:
-//   1. Parses Anthropic-format request (system field, content blocks, x-api-key)
-//   2. Converts to OpenAI /v1/chat/completions format
-//   3. Forwards through the existing proxy.ProxyRequest (Grok/CodeBuddy routing,
-//      auth, rate-limit, metrics, ClickHouse audit — all reused)
-//   4. Translates the OpenAI response (JSON or SSE) back to Anthropic format
+//  1. Parses Anthropic-format request (system field, content blocks, x-api-key)
+//  2. Converts to OpenAI /v1/chat/completions format
+//  3. Forwards through the existing proxy.ProxyRequest (Grok/CodeBuddy routing,
+//     auth, rate-limit, metrics, log audit — all reused)
+//  4. Translates the OpenAI response (JSON or SSE) back to Anthropic format
 //
 // This lets Claude Code point at FoxRouters with ANTHROPIC_BASE_URL and get
 // Grok / CodeBuddy behind the scenes.
@@ -48,9 +48,9 @@ type anthropicRequest struct {
 	TopK          *int               `json:"top_k,omitempty"`
 	StopSequences []string           `json:"stop_sequences,omitempty"`
 	Metadata      json.RawMessage    `json:"metadata,omitempty"`
-	Tools         json.RawMessage    `json:"tools,omitempty"`      // pass-through — best effort
+	Tools         json.RawMessage    `json:"tools,omitempty"` // pass-through — best effort
 	ToolChoice    json.RawMessage    `json:"tool_choice,omitempty"`
-	Thinking      json.RawMessage    `json:"thinking,omitempty"`   // {type:"enabled", budget_tokens:N} or {type:"adaptive"}
+	Thinking      json.RawMessage    `json:"thinking,omitempty"` // {type:"enabled", budget_tokens:N} or {type:"adaptive"}
 }
 
 type anthropicMessage struct {
@@ -68,9 +68,9 @@ type contentBlockIn struct {
 	Name  string          `json:"name,omitempty"`
 	Input json.RawMessage `json:"input,omitempty"`
 	// tool_result fields (appear in user messages)
-	ToolUseID     string          `json:"tool_use_id,omitempty"`
-	ToolContent   json.RawMessage `json:"content,omitempty"`
-	IsError       bool            `json:"is_error,omitempty"`
+	ToolUseID   string          `json:"tool_use_id,omitempty"`
+	ToolContent json.RawMessage `json:"content,omitempty"`
+	IsError     bool            `json:"is_error,omitempty"`
 }
 
 // ============================================================================
@@ -338,10 +338,12 @@ func translateTools(raw json.RawMessage) []map[string]any {
 
 // translateToolChoice converts Anthropic tool_choice to OpenAI tool_choice.
 // Anthropic shapes:
-//   {"type":"auto"}                          → "auto"
-//   {"type":"any"}                           → "required"
-//   {"type":"none"}                          → "none"
-//   {"type":"tool", "name":"get_weather"}    → {"type":"function","function":{"name":"get_weather"}}
+//
+//	{"type":"auto"}                          → "auto"
+//	{"type":"any"}                           → "required"
+//	{"type":"none"}                          → "none"
+//	{"type":"tool", "name":"get_weather"}    → {"type":"function","function":{"name":"get_weather"}}
+//
 // Also accepts a bare string ("auto"/"any"/"none").
 func translateToolChoice(raw json.RawMessage) any {
 	if len(raw) == 0 {
@@ -498,9 +500,9 @@ func newCaptureWriter(orig gin.ResponseWriter) *captureWriter {
 	}
 }
 
-func (w *captureWriter) Header() http.Header       { return w.header }
-func (w *captureWriter) WriteHeader(code int)      { w.status = code }
-func (w *captureWriter) WriteHeaderNow()           {}
+func (w *captureWriter) Header() http.Header         { return w.header }
+func (w *captureWriter) WriteHeader(code int)        { w.status = code }
+func (w *captureWriter) WriteHeaderNow()             {}
 func (w *captureWriter) Write(p []byte) (int, error) { return w.buf.Write(p) }
 func (w *captureWriter) WriteString(s string) (int, error) {
 	return w.buf.WriteString(s)
@@ -519,29 +521,29 @@ func (w *captureWriter) Flush()        { /* swallow — we translate at the end 
 // the form `data: {json}` and the terminator `data: [DONE]`.
 type streamWriter struct {
 	gin.ResponseWriter
-	real          gin.ResponseWriter
-	flusher       http.Flusher
-	msgID         string
-	model         string
-	started       bool // message_start already sent
-	thinkingOpen  bool // content_block_start for thinking (index 0) already sent
+	real           gin.ResponseWriter
+	flusher        http.Flusher
+	msgID          string
+	model          string
+	started        bool // message_start already sent
+	thinkingOpen   bool // content_block_start for thinking (index 0) already sent
 	thinkingClosed bool // content_block_stop for thinking emitted
-	textOpen      bool // content_block_start for text already sent
-	textClosed    bool // content_block_stop for text emitted
-	textBlockIdx  int  // 0 when no thinking, 1 when thinking present
-	stopped       bool // message_stop already sent
-	finish        string
-	inputToks     int
-	outputToks    int
-	textBuf       strings.Builder
-	carry         string // partial line from previous Write
-	errBuf        []byte // upstream error body captured before streaming started
+	textOpen       bool // content_block_start for text already sent
+	textClosed     bool // content_block_stop for text emitted
+	textBlockIdx   int  // 0 when no thinking, 1 when thinking present
+	stopped        bool // message_stop already sent
+	finish         string
+	inputToks      int
+	outputToks     int
+	textBuf        strings.Builder
+	carry          string // partial line from previous Write
+	errBuf         []byte // upstream error body captured before streaming started
 	// Tool-use tracking. OpenAI streams tool_calls with an `index` field
 	// (0-based within tool_calls array). We map each OpenAI tool_call index
 	// to a distinct Anthropic content_block index (starting after the text
 	// block). We buffer arguments per tool so we can emit input_json_delta
 	// as they stream in.
-	toolBlocks  map[int]*streamToolBlock
+	toolBlocks   map[int]*streamToolBlock
 	nextBlockIdx int // next Anthropic content-block index to assign
 	// Headers set by the downstream proxy — we don't forward them; we set our own.
 	sinkHeader http.Header
@@ -561,23 +563,23 @@ func newStreamWriter(real gin.ResponseWriter, msgID, model string) *streamWriter
 	fl, _ := real.(http.Flusher)
 	return &streamWriter{
 		ResponseWriter: real,
-		real:            real,
-		flusher:         fl,
-		msgID:           msgID,
-		model:           model,
-		toolBlocks:      make(map[int]*streamToolBlock),
-		textBlockIdx:    0, // no thinking yet → text gets index 0
-		nextBlockIdx:    1, // tools start at 1
-		sinkHeader:      http.Header{},
-		statusCode:      200,
+		real:           real,
+		flusher:        fl,
+		msgID:          msgID,
+		model:          model,
+		toolBlocks:     make(map[int]*streamToolBlock),
+		textBlockIdx:   0, // no thinking yet → text gets index 0
+		nextBlockIdx:   1, // tools start at 1
+		sinkHeader:     http.Header{},
+		statusCode:     200,
 	}
 }
 
-func (w *streamWriter) Header() http.Header  { return w.sinkHeader }
-func (w *streamWriter) Status() int          { return w.statusCode }
-func (w *streamWriter) Size() int            { return -1 }
-func (w *streamWriter) Written() bool        { return w.started }
-func (w *streamWriter) WriteHeaderNow()      {}
+func (w *streamWriter) Header() http.Header { return w.sinkHeader }
+func (w *streamWriter) Status() int         { return w.statusCode }
+func (w *streamWriter) Size() int           { return -1 }
+func (w *streamWriter) Written() bool       { return w.started }
+func (w *streamWriter) WriteHeaderNow()     {}
 
 func (w *streamWriter) WriteHeader(code int) {
 	// Capture status but DON'T commit to real writer yet.
@@ -789,7 +791,7 @@ func (w *streamWriter) processLine(line string) {
 				Content          string `json:"content"`
 				ReasoningContent string `json:"reasoning_content"`
 				Role             string `json:"role"`
-				ToolCalls []struct {
+				ToolCalls        []struct {
 					Index    int    `json:"index"`
 					ID       string `json:"id,omitempty"`
 					Type     string `json:"type,omitempty"`
@@ -942,7 +944,7 @@ func AnthropicAuthMiddleware() gin.HandlerFunc {
 
 // HandleMessages implements POST /v1/messages (Anthropic Messages API).
 // It reuses proxy.ProxyRequest for the actual upstream call — routing, auth
-// (Bearer/x-api-key), rate limiting, metrics, and ClickHouse audit all
+// (Bearer/x-api-key), rate limiting, metrics, and log audit all
 // continue to work unchanged; we just translate request/response formats.
 func HandleMessages(grokAM *upstream.GrokAccountManager, cbKM *upstream.CBKeyManager, fbAM *upstream.FreebuffAccountManager, hc *upstream.HealthChecker, authMgr *auth.Manager, reg *proxy.CustomRegistry, combos *proxy.ComboRegistry) gin.HandlerFunc {
 	inner := proxy.ProxyRequest(grokAM, cbKM, fbAM, hc, authMgr, reg, combos)
@@ -1061,10 +1063,10 @@ func HandleMessages(grokAM *upstream.GrokAccountManager, cbKM *upstream.CBKeyMan
 		// the reduction, but be defensive: prefer c.Get("output_text") +
 		// c.Get("tokens_in/out") which the proxy populates in BOTH modes).
 		var (
-			outputText  string
-			inputToks   int
-			outputToks  int
-			finish      string
+			outputText string
+			inputToks  int
+			outputToks int
+			finish     string
 		)
 		if v, ok := c.Get("output_text"); ok {
 			outputText, _ = v.(string)
@@ -1270,7 +1272,7 @@ func extractFromCapturedBody(b []byte) (text, finishReason, reasoning string, to
 				Delta struct {
 					Content          string `json:"content"`
 					ReasoningContent string `json:"reasoning_content"`
-					ToolCalls []struct {
+					ToolCalls        []struct {
 						Index    int    `json:"index"`
 						ID       string `json:"id,omitempty"`
 						Function struct {

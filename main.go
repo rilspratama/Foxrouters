@@ -4,6 +4,7 @@
 // v4.2: Web UI dashboard (/dashboard) — real-time stats, health, accounts, quick test.
 // v5.0: Redis (hot state) + history DB — persistent accounts, request logs, analytics.
 // v5.9: ClickHouse history (full request body, ZSTD) — PostgreSQL history retired.
+// v1.7.0: ClickHouse removed — SQLite is the only history backend (deprecated Aug 2026).
 // Routes by model name: grok-* → cli-chat-proxy.grok.com, cb-* → www.codebuddy.ai/v2.
 // Grok: multi-account round-robin + auto refresh_token.
 // CodeBuddy: multi-API-key round-robin, stream-only, auto system message injection.
@@ -143,7 +144,7 @@ func main() {
 		port = DEFAULT_PORT
 	}
 
-	// Initialize Redis + ClickHouse
+	// Initialize Redis + SQLite log store
 	db, err := db.NewStore()
 	if err != nil {
 		slog.Error("DB init failed", "module", "main", "error", err)
