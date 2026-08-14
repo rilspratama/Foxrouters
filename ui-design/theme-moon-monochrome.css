@@ -1,0 +1,26 @@
+/* 21st.dev — MoonCalendar Theme (byjuananguirao)
+   https://21st.dev/community/themes/mooncalendar-theme-1784252439566
+   Dark: bg oklch(0 0 0) = PURE BLACK · card oklch(0.14) ≈ #171717 · primary = WHITE
+   Full monochrome (black/white/grey), Geist Sans + Geist Mono fonts.
+   Ultra-minimal "ops/terminal" aesthetic — fits AI gateway/network tooling. */
+.dark-theme-moon-monochrome {
+  --bg: #000000;
+  --fg: #ffffff;
+  --card: #171717;
+  --popover: #1f1f1f;
+  --primary: #ffffff;
+  --primary-fg: #000000;
+  --secondary: #262626;
+  --secondary-fg: #ffffff;
+  --muted: #242424;
+  --muted-fg: #b3b3b3;
+  --accent: #333333;
+  --accent-fg: #ffffff;
+  --destructive: #b3211f;
+  --border: #2a2a2a;
+  --input: #333333;
+  --ring: #b3b3b3;
+  --sidebar: #1f1f1f;
+  --sidebar-fg: #ffffff;
+  --radius: 6px;
+}

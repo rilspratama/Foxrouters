@@ -1,0 +1,26 @@
+/* 21st.dev — Darkmatter (serafimcloud)
+   https://21st.dev/community/themes/darkmatter
+   Dark: bg #121113 · card #121212 · primary #e78a53 (ORANGE) · secondary #5f8787 (teal)
+   Fonts: Geist Mono + JetBrains Mono — terminal/ops premium vibe.
+   radius 0.75rem. */
+.dark-theme-darkmatter-orange {
+  --bg: #121113;
+  --fg: #c1c1c1;
+  --card: #121212;
+  --popover: #121113;
+  --primary: #e78a53;
+  --primary-fg: #121113;
+  --secondary: #5f8787;
+  --secondary-fg: #121113;
+  --muted: #222222;
+  --muted-fg: #888888;
+  --accent: #333333;
+  --accent-fg: #c1c1c1;
+  --destructive: #5f8787;
+  --border: #222222;
+  --input: #222222;
+  --ring: #e78a53;
+  --sidebar: #121212;
+  --sidebar-fg: #c1c1c1;
+  --radius: 12px;
+}

@@ -1,6 +1,7 @@
-// proxy_adapter.go — thin bridge from package-main call sites to internal/proxy.
-// main.go still writes `proxyRequest(...)` as a route handler; that name now
-// forwards into the extracted internal/proxy package.
+// proxy_pool_bridge.go — concrete *proxy.ProxyPool bridged over to the abstract
+// upstream.ProxyPool interface. The interface exists because internal/upstream
+// cannot import internal/proxy (proxy already imports upstream — cycle). This
+// adapter is real logic, not a migration alias: it must live in package main.
 package main
 
 import (
@@ -10,32 +11,6 @@ import (
 	"foxrouters/internal/upstream"
 )
 
-// proxyRequest preserves the lowercase name used by main.go's routes wiring.
-var proxyRequest = proxy.ProxyRequest
-
-// v1.3.0 — custom models + aliases registry.
-type CustomRegistry = proxy.CustomRegistry
-
-// NewCustomRegistry preserves the constructor name in package main.
-var NewCustomRegistry = proxy.NewCustomRegistry
-
-// v1.4.0 — combos registry.
-type ComboRegistry = proxy.ComboRegistry
-
-// NewComboRegistry preserves the constructor name in package main.
-var NewComboRegistry = proxy.NewComboRegistry
-
-// v1.5.0 — proxy pool.
-type ProxyPool = proxy.ProxyPool
-
-// NewProxyPool preserves the constructor name in package main.
-var NewProxyPool = proxy.NewProxyPool
-
-// upstreamProxyPoolAdapter bridges the concrete *proxy.ProxyPool over to the
-// abstract upstream.ProxyPool interface. The interface exists because
-// internal/upstream cannot import internal/proxy (proxy already imports
-// upstream — cycle). The adapter is trivial: forward each method and rewrap
-// the entry struct.
 type upstreamProxyPoolAdapter struct {
 	pool *proxy.ProxyPool
 }

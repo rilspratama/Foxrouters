@@ -3,11 +3,11 @@
 // Selected when LOG_BACKEND=sqlite (the default). Pure Go, no CGO, works
 // in the alpine runtime image without pulling gcc.
 //
-//   File location: LOG_SQLITE_PATH (default /var/lib/foxrouters/logs.db)
-//   Retention:     rows older than 90 days pruned by a background goroutine
-//                  once per hour (mirrors the CH TTL semantics)
-//   Concurrency:   sqlite serialises writes; we run WAL mode + a 5s busy
-//                  timeout so reads and writes don't deadlock under load
+//	File location: LOG_SQLITE_PATH (default /var/lib/foxrouters/logs.db)
+//	Retention:     rows older than 90 days pruned by a background goroutine
+//	               once per hour (mirrors the CH TTL semantics)
+//	Concurrency:   sqlite serialises writes; we run WAL mode + a 5s busy
+//	               timeout so reads and writes don't deadlock under load
 //
 // modernc.org/sqlite registers itself as the "sqlite" driver in database/sql.
 package db
@@ -59,9 +59,13 @@ func newSqliteStore() (LogStore, error) {
 	if err != nil {
 		return nil, fmt.Errorf("sqlite open %s: %w", path, err)
 	}
-	// SQLite writes serialise on a single connection — cap the pool.
-	sdb.SetMaxOpenConns(1)
-	sdb.SetMaxIdleConns(1)
+	// WAL mode allows ONE writer + multiple concurrent readers. Capping the
+	// pool at 1 serialised EVERY query (SELECTs included) behind a slow
+	// 5MB-body INSERT, so dashboard /history polling hit busy_timeout and
+	// returned 500 "context deadline exceeded". Use a small pool: writes
+	// still serialise via busy_timeout, reads run in parallel.
+	sdb.SetMaxOpenConns(4)
+	sdb.SetMaxIdleConns(4)
 	// Verify the DB is actually reachable.
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()

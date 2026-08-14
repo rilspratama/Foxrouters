@@ -1,0 +1,1192 @@
+<body>
+
+<!-- ═══════════════════ SIDEBAR ═══════════════════ -->
+<aside class="sidebar">
+  <div class="sidebar-brand">
+    <div class="logo">
+      <img src="data:image/png;base64,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" width="24" height="24" alt="FoxRouters" style="display:block;border-radius:6px" />
+    </div>
+    <span class="title">FoxRouters</span>
+    <span class="version" id="version">v5.7</span>
+  </div>
+  <nav class="sidebar-nav">
+    <div class="nav-section-label">Monitor</div>
+    <button class="nav-item active" data-route="#/" onclick="navigateTo('#/')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9"/><rect x="14" y="3" width="7" height="5"/><rect x="14" y="12" width="7" height="9"/><rect x="3" y="16" width="7" height="5"/></svg>
+      Dashboard
+    </button>
+    <button class="nav-item" data-route="#/accounts" onclick="navigateTo('#/accounts')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+      Accounts &amp; Keys
+    </button>
+    <button class="nav-item" data-route="#/keys" onclick="navigateTo('#/keys')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg>
+      Gateway API Keys
+    </button>
+    <button class="nav-item" data-route="#/models" onclick="navigateTo('#/models')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
+      Models
+    </button>
+    <button class="nav-item" data-route="#/proxies" onclick="navigateTo('#/proxies')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+      Proxies
+    </button>
+    <button class="nav-item" data-route="#/tunnel" onclick="navigateTo('#/tunnel')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3-8 10-8 10 8 10 8-3 8-10 8S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>
+      Tunnel
+    </button>
+    <div class="nav-section-label" style="margin-top:14px">Media</div>
+    <button class="nav-item" data-route="#/media" onclick="navigateTo('#/media')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><polygon points="10 9 15 12 10 15 10 9"/></svg>
+      Media Studio
+    </button>
+    <div class="nav-section-label" style="margin-top:14px">System</div>
+    <button class="nav-item" data-route="#/settings" onclick="navigateTo('#/settings')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+      Settings
+    </button>
+  </nav>
+  <div class="sidebar-footer">
+    <div class="status-row">
+      <span class="status-dot" id="sidebarDot"></span>
+      <span id="sidebarStatus">Connected</span>
+    </div>
+    <div style="margin-top:4px;display:flex;align-items:center;justify-content:space-between">
+      <span id="lastUpdate">—</span>
+      <a href="#" onclick="doLogout();return false" style="color:var(--text-tertiary);font-size:11px;text-decoration:none" onmouseover="this.style.color='var(--red)'" onmouseout="this.style.color='var(--text-tertiary)'">Logout</a>
+    </div>
+  </div>
+</aside>
+
+<!-- ═══════════════════ MAIN ═══════════════════ -->
+<div class="main">
+  <div class="topbar">
+    <button class="sidebar-toggle" onclick="toggleSidebar()" title="Toggle sidebar">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="3" x2="9" y2="21"/></svg>
+    </button>
+    <span class="topbar-title" id="pageTitle">Dashboard</span>
+    <div class="topbar-spacer"></div>
+    <div class="topbar-meta">
+      <span class="pulse-dot"></span>
+      <span id="topbarMeta">Live · auto-refresh 5s</span>
+    </div>
+  </div>
+
+  <div class="content">
+
+    <!-- ════════ PAGE 1: DASHBOARD HOME ════════ -->
+    <div class="page active" id="page-dashboard">
+      <!-- Stats Grid -->
+      <div class="stats-grid" id="statsGrid">
+        <div class="stats-section">Pool</div>
+        <div class="stats-cards">
+        <div class="stat-card">
+          <div class="stat-label">Grok Accounts</div>
+          <div class="stat-value-row">
+            <div class="stat-value" id="grokCount">—</div>
+            <span class="stat-delta" id="grokDelta"></span>
+          </div>
+          <div class="stat-bar" id="grokBar"><div class="stat-bar-seg used" id="grokBarUsed" style="width:0%"></div><div class="stat-bar-seg rest" id="grokBarRest" style="width:0%"></div></div>
+          <div class="stat-sub" id="grokActive"></div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">CB Keys</div>
+          <div class="stat-value-row">
+            <div class="stat-value" id="cbCount">—</div>
+            <span class="stat-delta" id="cbDelta"></span>
+          </div>
+          <div class="stat-bar" id="cbBar"><div class="stat-bar-seg used" id="cbBarUsed" style="width:0%"></div><div class="stat-bar-seg rest" id="cbBarRest" style="width:0%"></div></div>
+          <div class="stat-sub" id="cbActive"></div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Freebuff</div>
+          <div class="stat-value-row">
+            <div class="stat-value" id="fbCount">—</div>
+            <span class="stat-delta" id="fbDelta"></span>
+          </div>
+          <div class="stat-bar" id="fbBar"><div class="stat-bar-seg used" id="fbBarUsed" style="width:0%"></div><div class="stat-bar-seg rest" id="fbBarRest" style="width:0%"></div></div>
+          <div class="stat-sub" id="fbQuota"></div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Models</div>
+          <div class="stat-value" id="models">—</div>
+          <div class="stat-sub">available</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Cache Hit (24h)</div>
+          <div class="stat-value" id="cacheHitAvg">—</div>
+          <div class="stat-bar" id="cacheBar"><div class="stat-bar-seg neutral" id="cacheBarSeg" style="width:0%"></div></div>
+          <div class="stat-sub" id="cacheHitSub">prompt cache</div>
+        </div>
+        </div>
+
+        <div class="stats-section">Performance (24h)</div>
+        <div class="stats-cards">
+        <div class="stat-card">
+          <div class="stat-label">Total Tokens</div>
+          <div class="stat-value" id="totalTokens">—</div>
+          <div class="stat-sub" id="totalTokensSub">24h usage</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Grok Latency</div>
+          <div class="stat-value" id="grokLatencyVal" style="font-size:15px;padding-top:2px">—</div>
+          <div class="stat-sub" id="grokLatency"></div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">CB Latency</div>
+          <div class="stat-value" id="cbLatencyVal" style="font-size:15px;padding-top:2px">—</div>
+          <div class="stat-sub" id="cbLatency"></div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">FB Latency</div>
+          <div class="stat-value" id="fbLatencyVal" style="font-size:15px;padding-top:2px">—</div>
+          <div class="stat-sub" id="fbLatency"></div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Avg Latency</div>
+          <div class="stat-value" id="avgLatencyVal">—</div>
+          <div class="stat-sub">all requests</div>
+        </div>
+        </div>
+
+        <div class="stats-section">Health</div>
+        <div class="stats-cards">
+        <div class="stat-card">
+          <div class="stat-label">Grok Circuit</div>
+          <div class="stat-value" id="grokCircuit" style="font-size:15px;padding-top:2px">—</div>
+          <div class="stat-sub" id="grokCircuitSub"></div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">CB Circuit</div>
+          <div class="stat-value" id="cbCircuit" style="font-size:15px;padding-top:2px">—</div>
+          <div class="stat-sub" id="cbCircuitSub"></div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">FB Circuit</div>
+          <div class="stat-value" id="fbCircuit" style="font-size:15px;padding-top:2px">—</div>
+          <div class="stat-sub" id="fbCircuitSub"></div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Grok Errors</div>
+          <div class="stat-value" id="grokErrors">—</div>
+          <div class="stat-sub" id="grokErrRate"></div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">CB Errors</div>
+          <div class="stat-value" id="cbErrors">—</div>
+          <div class="stat-sub" id="cbErrRate"></div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">FB Errors</div>
+          <div class="stat-value" id="fbErrors">—</div>
+          <div class="stat-sub" id="fbErrRate"></div>
+        </div>
+        </div>
+      </div>
+
+      <!-- Upstream Health -->
+      <div class="panel">
+        <div class="panel-head">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+          <h3>Upstream Health</h3>
+        </div>
+        <div class="panel-body">
+          <div class="tbl-scroll" style="max-height:200px">
+            <table class="tbl">
+              <thead><tr>
+                <th>Upstream</th><th>Circuit</th><th>Check</th><th>Latency</th><th>Requests</th><th>Errors</th><th>Error Rate</th><th>Last Error</th>
+              </tr></thead>
+              <tbody id="healthBody"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- Quick Test -->
+      <div class="panel">
+        <div class="panel-head">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 9V5a3 3 0 0 0-6 0v4"/><rect x="2" y="9" width="20" height="12" rx="2"/></svg>
+          <h3>Quick Test</h3>
+        </div>
+        <div class="test-row">
+          <select id="testModel">
+            <option value="glm-5.2">glm-5.2</option>
+            <option value="gpt-5.5">gpt-5.5</option>
+            <option value="claude-sonnet-4.6">claude-sonnet-4.6</option>
+            <option value="kimi-k3">kimi-k3</option>
+            <option value="gemini-3.1-pro">gemini-3.1-pro</option>
+            <option value="grok-4.5">grok-4.5</option>
+            <option value="fb/deepseek-v4-flash">fb/deepseek-v4-flash</option>
+            <option value="fb/mimo-v2.5">fb/mimo-v2.5</option>
+          </select>
+          <input id="testPrompt" type="text" placeholder="Send a test message..." value="Say hello in one sentence." />
+          <button class="btn-primary" onclick="runTest()" id="testBtn">Send</button>
+        </div>
+        <div class="test-result" id="testResult"></div>
+      </div>
+
+      <!-- Request History -->
+      <div class="panel">
+        <div class="panel-head">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M7 14l4-4 4 4 5-5"/></svg>
+          <h3>Request History</h3>
+          <span class="head-meta" id="historyPeriod">Last 24h</span>
+        </div>
+        <div id="historyStats" class="history-stats"></div>
+        <div class="tbl-scroll" style="max-height:400px;margin:0 0 4px">
+          <table class="tbl" id="historyTable">
+            <thead><tr>
+              <th>Time</th><th>Model</th><th>Upstream</th><th>Status</th><th>Latency</th><th>Tokens</th><th>Cache%</th>
+            </tr></thead>
+            <tbody id="historyBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- ════════ PAGE 2: ACCOUNTS & KEYS ════════ -->
+    <div class="page" id="page-accounts">
+      <div class="panel" style="margin-bottom:16px">
+        <div class="panel-head">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+          <h3>Providers</h3>
+        </div>
+        <div style="padding:12px">
+          <div id="providersGrid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:8px"></div>
+        </div>
+      </div>
+      <div class="panel" id="accountsPanel" style="display:none">
+        <div class="panel-head">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+          <h3>Accounts &amp; Keys</h3>
+          <div style="margin-left:auto">
+            <button class="btn-ghost" onclick="refreshAccounts()">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+              Refresh Tokens
+            </button>
+          </div>
+        </div>
+        <div class="subtabs" style="justify-content:flex-end">
+          <div style="display:flex;gap:6px">
+            <button class="btn-ghost" id="cbAddBtn" onclick="showAddCBModal()" style="padding:5px 12px;font-size:12px">+ Add Key</button>
+            <button class="btn-ghost" id="cbOAuthBtn" onclick="showAddCBOAuthModal()" style="padding:5px 12px;font-size:12px">+ Add OAuth</button>
+            <button class="btn-ghost" id="cbOAuthBulkBtn" onclick="showBulkCBOAuthModal()" style="padding:5px 12px;font-size:12px">Bulk OAuth</button>
+            <button class="btn-ghost" id="cbBulkBtn" onclick="showBulkCBModal()" style="padding:5px 12px;font-size:12px">Bulk Import</button>
+            <button class="btn-ghost" id="cbSyncCreditsBtn" onclick="syncCBCredits()" style="padding:5px 12px;font-size:12px">Sync credits</button>
+            <button class="btn-ghost" id="cbCleanupBtn" onclick="cleanupDisabled('cb')" style="padding:5px 12px;font-size:12px;color:var(--danger)">Cleanup Disabled</button>
+            <button class="btn-ghost" id="grokAddBtn" onclick="showAddGrokModal()" style="padding:5px 12px;font-size:12px;display:none">+ Add Account</button>
+            <button class="btn-ghost" id="grokBulkBtn" onclick="showBulkGrokModal()" style="padding:5px 12px;font-size:12px;display:none">Bulk Import</button>
+            <button class="btn-ghost" id="grokCleanupBtn" onclick="cleanupDisabled('grok')" style="padding:5px 12px;font-size:12px;color:var(--danger);display:none">Cleanup Disabled</button>
+            <button class="btn-ghost" id="grokCleanupBannedBtn" onclick="cleanupBanned('grok')" style="padding:5px 12px;font-size:12px;color:var(--danger);display:none">Cleanup Banned</button>
+            <button class="btn-ghost" id="grokSyncBillingBtn" onclick="syncGrokBilling()" style="padding:5px 12px;font-size:12px;display:none">Sync Billing</button>
+            <button class="btn-ghost" id="fbAddBtn" onclick="showAddFBModal()" style="padding:5px 12px;font-size:12px;display:none">+ Add Token</button>
+            <button class="btn-ghost" id="fbBulkBtn" onclick="showBulkFBModal()" style="padding:5px 12px;font-size:12px;display:none">Bulk Import</button>
+            <button class="btn-ghost" id="fbOAuthBtn" onclick="showFBOAuthModal()" style="padding:5px 12px;font-size:12px;display:none">+ Add OAuth</button>
+            <button class="btn-ghost" id="fbRefreshBtn" onclick="loadFBAccounts()" style="padding:5px 12px;font-size:12px;display:none">Refresh</button>
+            <button class="btn-ghost" id="fbStreakBtn" onclick="runFBStreakCheckin()" style="padding:5px 12px;font-size:12px;display:none">Streak check-in</button>
+          </div>
+        </div>
+        <!-- CB selector mode (routing strategy for prompt-cache locality) -->
+        <div id="cbSelectorBar" style="display:flex;align-items:center;gap:10px;padding:8px 16px;border-bottom:1px solid var(--border);font-size:12px;color:var(--text-tertiary)">
+          <span style="font-weight:600;color:var(--text-secondary)">Key Selection:</span>
+          <select id="cbSelectorMode" onchange="changeCBSelectorMode(this.value)" style="background:var(--bg-input);color:var(--text-primary);border:1px solid var(--border);border-radius:6px;padding:3px 8px;font-size:12px">
+            <option value="rr">Round Robin</option>
+            <option value="sticky">Sticky Session</option>
+            <option value="content-hash">Content Hash</option>
+            <option value="hybrid">Hybrid (bucket)</option>
+          </select>
+          <span id="cbSelectorSticky" style="opacity:0.6"></span>
+        </div>
+        <div id="cbPanel" class="tbl-scroll" style="max-height:500px">
+          <table class="tbl">
+            <thead><tr>
+              <th>Type</th><th>Key / Email</th><th>Credits</th><th>Usage</th><th>Requests</th><th>Expires</th><th>Status</th><th>Actions</th>
+            </tr></thead>
+            <tbody id="cbBody"></tbody>
+          </table>
+        </div>
+        <div id="cbPager" style="display:flex;align-items:center;gap:8px;padding:10px 16px;border-top:1px solid var(--border);font-size:13px;color:var(--text-tertiary)"></div>
+        <!-- Grok selector mode (routing strategy for prompt-cache locality) -->
+        <div id="grokSelectorBar" style="display:none;align-items:center;gap:10px;padding:8px 16px;border-bottom:1px solid var(--border);font-size:12px;color:var(--text-tertiary)">
+          <span style="font-weight:600;color:var(--text-secondary)">Account Selection:</span>
+          <select id="grokSelectorMode" onchange="changeGrokSelectorMode(this.value)" style="background:var(--bg-input);color:var(--text-primary);border:1px solid var(--border);border-radius:6px;padding:3px 8px;font-size:12px">
+            <option value="rr">Round Robin</option>
+            <option value="sticky">Sticky Session</option>
+            <option value="content-hash">Content Hash</option>
+            <option value="hybrid">Hybrid (bucket)</option>
+          </select>
+          <span id="grokSelectorSticky" style="opacity:0.6"></span>
+        </div>
+        <div id="grokPanel" style="display:none">
+          <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 16px;border-bottom:1px solid var(--border)">
+            <span style="font-size:12px;color:var(--text-tertiary)">Free-tier quota (console.x.ai): 🖼️ 5 img · 🎬 2 vid · 💬 10 chat per account — klik ▶ buat detail</span>
+            <button class="btn-ghost" onclick="syncGrokQuota()" style="padding:4px 12px;font-size:12px;color:var(--brand)">⟳ Sync Quota</button>
+          </div>
+          <div class="tbl-scroll" style="max-height:500px">
+            <table class="tbl">
+              <thead><tr>
+                <th>Email</th><th>Token Status</th><th>Period End</th><th>Usage</th><th>Expires At</th><th>Last Refresh</th><th>Actions</th>
+              </tr></thead>
+              <tbody id="grokBody"></tbody>
+            </table>
+          </div>
+          <div id="grokPager" style="display:flex;align-items:center;gap:8px;padding:10px 16px;border-top:1px solid var(--border);font-size:13px;color:var(--text-tertiary)"></div>
+        </div>
+        <!-- Freebuff panel -->
+        <div id="fbPanel" style="display:none;padding:16px">
+          <p style="font-size:13px;color:var(--text-tertiary);margin-bottom:12px;line-height:1.6">
+            Freebuff (Codebuff rebrand) free-tier tokens. Models: <code style="font-family:var(--mono);color:var(--text-secondary);background:var(--bg-elevated);padding:1px 5px;border-radius:3px;font-size:12px">fb/deepseek-v4-flash</code>, <code style="font-family:var(--mono);color:var(--text-secondary);background:var(--bg-elevated);padding:1px 5px;border-radius:3px;font-size:12px">fb/mimo-v2.5</code>. Each account: 6 sessions/day, 1hr each.
+          </p>
+          <div class="tbl-scroll" style="max-height:500px">
+            <table class="tbl">
+              <thead><tr>
+                <th>Token</th><th>Email</th><th>User ID</th><th>Quota</th><th>Tier</th><th>Status</th><th>Actions</th>
+              </tr></thead>
+              <tbody id="fbBody">
+                <tr><td colspan="7" style="text-align:center;padding:24px;color:var(--text-tertiary);font-size:13px">No Freebuff tokens. Click "+ Add Token" to import.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ════════ PAGE 3: GATEWAY API KEYS ════════ -->
+    <div class="page" id="page-keys">
+      <div class="panel">
+        <div class="panel-head">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg>
+          <h3>Gateway API Keys</h3>
+          <div style="margin-left:auto;display:flex;gap:8px">
+            <button class="btn-primary" onclick="showCreateKeyModal()" style="display:flex;align-items:center;gap:6px;padding:6px 14px;border-radius:var(--radius-sm);background:var(--brand);color:#000;border:none;font-size:13px;font-weight:500;cursor:pointer">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>
+              Create Key
+            </button>
+          </div>
+        </div>
+        <div style="padding:16px">
+          <p style="font-size:13px;color:var(--text-tertiary);margin-bottom:16px;line-height:1.6">
+            Gateway API keys are stored in Redis with per-key RPM limits, token quotas, and usage tracking.
+            Bootstrap keys from <code style="font-family:var(--mono);color:var(--text-secondary);background:var(--bg-elevated);padding:1px 5px;border-radius:3px;font-size:12px">gateway-key.txt</code> have unlimited RPM/quota by default.
+          </p>
+          <div id="keysContainer">
+            <div style="text-align:center;padding:32px;color:var(--text-tertiary);font-size:13px">Loading keys...</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
+          <h3>Authentication</h3>
+        </div>
+        <div style="padding:16px">
+          <p style="font-size:13px;color:var(--text-tertiary);line-height:1.6;margin-bottom:12px">
+            Your browser is authenticated via an <strong style="color:var(--text-secondary)">HttpOnly session cookie</strong> set by the login page.
+            The key never enters JavaScript — protected from XSS. Logout clears the cookie.
+          </p>
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+            <button class="btn-ghost" onclick="window.location.href='/login'">New Session</button>
+            <button class="btn-ghost" onclick="doLogout()">Logout</button>
+            <span style="font-size:12px;color:var(--text-tertiary);font-family:var(--mono)" id="currentKeyDisplay"></span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ════════ PAGE 4: MODELS ════════ -->
+    <div class="page" id="page-models">
+      <div style="display:flex;gap:0;margin-bottom:16px;border-bottom:1px solid var(--border-strong)">
+        <button id="mtab-models" onclick="switchMTab('models')" style="padding:10px 18px;background:none;border:none;border-bottom:2px solid var(--brand);color:var(--text-primary);font-size:13px;font-weight:500;cursor:pointer">Models</button>
+        <button id="mtab-custom" onclick="switchMTab('custom')" style="padding:10px 18px;background:none;border:none;border-bottom:2px solid transparent;color:var(--text-tertiary);font-size:13px;font-weight:500;cursor:pointer">Custom</button>
+        <button id="mtab-combos" onclick="switchMTab('combos')" style="padding:10px 18px;background:none;border:none;border-bottom:2px solid transparent;color:var(--text-tertiary);font-size:13px;font-weight:500;cursor:pointer">Combos</button>
+      </div>
+
+      <div id="mtab-pane-models">
+      <div class="panel">
+        <div class="panel-head">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
+          <h3>Available Models</h3>
+          <div style="margin-left:auto;display:flex;gap:8px;align-items:center">
+            <select id="modelHours" onchange="loadModels()" style="padding:5px 10px;background:var(--bg);border:1px solid var(--border-strong);border-radius:var(--radius-sm);color:var(--text-primary);font-size:12px;font-family:var(--font)">
+              <option value="24">24h</option>
+              <option value="168">7d</option>
+              <option value="720">30d</option>
+            </select>
+            <button class="btn-ghost" onclick="loadModels()" style="padding:5px 12px;font-size:12px">Refresh</button>
+          </div>
+        </div>
+        <div style="padding:16px">
+          <div id="modelsContainer">
+            <div style="text-align:center;padding:32px;color:var(--text-tertiary);font-size:13px">Loading models...</div>
+          </div>
+        </div>
+      </div>
+      </div>
+
+      <div id="mtab-pane-combos" style="display:none">
+      <div class="panel">
+        <div class="panel-head">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M21 8V5a2 2 0 0 0-2-2h-3"/><path d="M3 16v3a2 2 0 0 0 2 2h3"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/><rect x="7" y="7" width="10" height="10" rx="1"/></svg>
+          <h3>Combos</h3>
+          <div style="margin-left:auto">
+            <button class="btn-ghost" onclick="loadCombos()" style="padding:5px 12px;font-size:12px">Refresh</button>
+          </div>
+        </div>
+        <div style="padding:16px">
+          <div style="font-size:12px;color:var(--text-tertiary);margin-bottom:14px;line-height:1.5">
+            Group models under a single virtual name — call it as <code>combo/&lt;name&gt;</code>.
+            <strong>Fallback</strong> tries models in order (retry on 5xx). <strong>Round Robin</strong> rotates models across requests.
+          </div>
+          <div style="display:grid;grid-template-columns:1.5fr 1fr 2fr auto;gap:8px;margin-bottom:12px;align-items:end">
+            <div>
+              <label style="font-size:11px;color:var(--text-tertiary);display:block;margin-bottom:4px">Name</label>
+              <input type="text" id="cbxName" placeholder="smart-fallback" style="width:100%;padding:6px 10px;background:var(--bg);border:1px solid var(--border-strong);border-radius:var(--radius-sm);color:var(--text-primary);font-size:12px;font-family:var(--mono)" />
+            </div>
+            <div>
+              <label style="font-size:11px;color:var(--text-tertiary);display:block;margin-bottom:4px">Strategy</label>
+              <select id="cbxStrategy" style="width:100%;padding:6px 10px;background:var(--bg);border:1px solid var(--border-strong);border-radius:var(--radius-sm);color:var(--text-primary);font-size:12px">
+                <option value="fallback">Fallback</option>
+                <option value="round_robin">Round Robin</option>
+              </select>
+            </div>
+            <div>
+              <label style="font-size:11px;color:var(--text-tertiary);display:block;margin-bottom:4px">Description (optional)</label>
+              <input type="text" id="cbxDesc" placeholder="GPT then Claude" style="width:100%;padding:6px 10px;background:var(--bg);border:1px solid var(--border-strong);border-radius:var(--radius-sm);color:var(--text-primary);font-size:12px" />
+            </div>
+            <button class="btn-primary" onclick="addCombo()" style="padding:7px 14px;border-radius:var(--radius-sm);background:var(--brand);color:#000;border:none;font-size:12px;font-weight:500;cursor:pointer">+ Create</button>
+          </div>
+          <div style="margin-bottom:12px">
+            <label style="font-size:11px;color:var(--text-tertiary);display:block;margin-bottom:4px">Models</label>
+            <div style="display:flex;gap:6px;margin-bottom:4px">
+              <button type="button" class="btn-ghost" onclick="toggleAllComboModels(true)" style="padding:3px 8px;font-size:11px">Select All</button>
+              <button type="button" class="btn-ghost" onclick="toggleAllComboModels(false)" style="padding:3px 8px;font-size:11px">Clear</button>
+              <button type="button" class="btn-ghost" onclick="toggleComboGroup('grok')" style="padding:3px 8px;font-size:11px">Grok only</button>
+              <button type="button" class="btn-ghost" onclick="toggleComboGroup('cb')" style="padding:3px 8px;font-size:11px">CodeBuddy only</button>
+              <span id="cbxSelectedCount" style="margin-left:auto;font-size:11px;color:var(--text-tertiary);align-self:center">0 selected</span>
+            </div>
+            <div id="cbxModelSelector" style="border:1px solid var(--border-strong);border-radius:var(--radius-sm);background:var(--bg);max-height:200px;overflow-y:auto;padding:8px">
+              <div style="text-align:center;padding:8px;color:var(--text-tertiary);font-size:12px">Loading models...</div>
+            </div>
+          </div>
+          <div id="cbxError" style="display:none;color:var(--red);font-size:12px;padding:6px 10px;background:rgba(255,80,80,0.08);border-radius:var(--radius-sm);margin-bottom:8px"></div>
+          <table style="width:100%;border-collapse:collapse;font-size:12px">
+            <thead>
+              <tr style="background:var(--bg);color:var(--text-tertiary);text-align:left">
+                <th style="padding:8px;border-bottom:1px solid var(--border-strong)">Name</th>
+                <th style="padding:8px;border-bottom:1px solid var(--border-strong)">Strategy</th>
+                <th style="padding:8px;border-bottom:1px solid var(--border-strong)">Models</th>
+                <th style="padding:8px;border-bottom:1px solid var(--border-strong)">Description</th>
+                <th style="padding:8px;border-bottom:1px solid var(--border-strong);width:1%"></th>
+              </tr>
+            </thead>
+            <tbody id="cbxTableBody">
+              <tr><td colspan="5" style="text-align:center;padding:20px;color:var(--text-tertiary)">Loading...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+      </div>
+    </div>
+
+      <div id="mtab-pane-custom" style="display:none">
+      <!-- Custom Models -->
+      <div class="panel" style="margin-bottom:20px">
+        <div class="panel-head">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/></svg>
+          <h3>Custom Models</h3>
+          <div style="margin-left:auto">
+            <button class="btn-ghost" onclick="loadCustomModels()" style="padding:5px 12px;font-size:12px">Refresh</button>
+          </div>
+        </div>
+        <div style="padding:16px">
+          <div style="display:grid;grid-template-columns:2fr 1fr 2fr 1.5fr auto;gap:8px;margin-bottom:12px;align-items:end">
+            <div>
+              <label style="font-size:11px;color:var(--text-tertiary);display:block;margin-bottom:4px">Model ID</label>
+              <input type="text" id="cmId" placeholder="cb/kimi-k3" style="width:100%;padding:6px 10px;background:var(--bg);border:1px solid var(--border-strong);border-radius:var(--radius-sm);color:var(--text-primary);font-size:12px;font-family:var(--mono)" />
+            </div>
+            <div>
+              <label style="font-size:11px;color:var(--text-tertiary);display:block;margin-bottom:4px">Upstream</label>
+              <select id="cmUpstream" style="width:100%;padding:6px 10px;background:var(--bg);border:1px solid var(--border-strong);border-radius:var(--radius-sm);color:var(--text-primary);font-size:12px">
+                <option value="codebuddy">codebuddy</option>
+                <option value="grok">grok</option>
+              </select>
+            </div>
+            <div>
+              <label style="font-size:11px;color:var(--text-tertiary);display:block;margin-bottom:4px">Model Name (upstream)</label>
+              <input type="text" id="cmModelName" placeholder="kimi-k3 (auto-derived if empty)" style="width:100%;padding:6px 10px;background:var(--bg);border:1px solid var(--border-strong);border-radius:var(--radius-sm);color:var(--text-primary);font-size:12px;font-family:var(--mono)" />
+            </div>
+            <div>
+              <label style="font-size:11px;color:var(--text-tertiary);display:block;margin-bottom:4px">Owned By</label>
+              <input type="text" id="cmOwnedBy" placeholder="codebuddy" style="width:100%;padding:6px 10px;background:var(--bg);border:1px solid var(--border-strong);border-radius:var(--radius-sm);color:var(--text-primary);font-size:12px" />
+            </div>
+            <button class="btn-primary" onclick="addCustomModel()" style="padding:7px 14px;border-radius:var(--radius-sm);background:var(--brand);color:#000;border:none;font-size:12px;font-weight:500;cursor:pointer">+ Add</button>
+          </div>
+          <div id="cmError" style="display:none;color:var(--red);font-size:12px;padding:6px 10px;background:rgba(255,80,80,0.08);border-radius:var(--radius-sm);margin-bottom:8px"></div>
+          <table style="width:100%;border-collapse:collapse;font-size:12px">
+            <thead>
+              <tr style="background:var(--bg);color:var(--text-tertiary);text-align:left">
+                <th style="padding:8px;border-bottom:1px solid var(--border-strong)">Model ID</th>
+                <th style="padding:8px;border-bottom:1px solid var(--border-strong)">Upstream</th>
+                <th style="padding:8px;border-bottom:1px solid var(--border-strong)">Model Name</th>
+                <th style="padding:8px;border-bottom:1px solid var(--border-strong)">Owned By</th>
+                <th style="padding:8px;border-bottom:1px solid var(--border-strong);width:1%"></th>
+              </tr>
+            </thead>
+            <tbody id="cmTableBody">
+              <tr><td colspan="5" style="text-align:center;padding:20px;color:var(--text-tertiary)">Loading...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Aliases -->
+      <div class="panel">
+        <div class="panel-head">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+          <h3>Model Aliases</h3>
+          <div style="margin-left:auto">
+            <button class="btn-ghost" onclick="loadAliases()" style="padding:5px 12px;font-size:12px">Refresh</button>
+          </div>
+        </div>
+        <div style="padding:16px">
+          <div style="display:grid;grid-template-columns:2fr 2fr auto;gap:8px;margin-bottom:12px;align-items:end">
+            <div>
+              <label style="font-size:11px;color:var(--text-tertiary);display:block;margin-bottom:4px">Alias (client-facing)</label>
+              <input type="text" id="alAlias" placeholder="my-claude" style="width:100%;padding:6px 10px;background:var(--bg);border:1px solid var(--border-strong);border-radius:var(--radius-sm);color:var(--text-primary);font-size:12px;font-family:var(--mono)" />
+            </div>
+            <div>
+              <label style="font-size:11px;color:var(--text-tertiary);display:block;margin-bottom:4px">Target Model ID</label>
+              <input type="text" id="alTarget" placeholder="cb/claude-sonnet-4.6" style="width:100%;padding:6px 10px;background:var(--bg);border:1px solid var(--border-strong);border-radius:var(--radius-sm);color:var(--text-primary);font-size:12px;font-family:var(--mono)" />
+            </div>
+            <button class="btn-primary" onclick="addAlias()" style="padding:7px 14px;border-radius:var(--radius-sm);background:var(--brand);color:#000;border:none;font-size:12px;font-weight:500;cursor:pointer">+ Add</button>
+          </div>
+          <div id="alError" style="display:none;color:var(--red);font-size:12px;padding:6px 10px;background:rgba(255,80,80,0.08);border-radius:var(--radius-sm);margin-bottom:8px"></div>
+          <table style="width:100%;border-collapse:collapse;font-size:12px">
+            <thead>
+              <tr style="background:var(--bg);color:var(--text-tertiary);text-align:left">
+                <th style="padding:8px;border-bottom:1px solid var(--border-strong)">Alias</th>
+                <th style="padding:8px;border-bottom:1px solid var(--border-strong)">Target</th>
+                <th style="padding:8px;border-bottom:1px solid var(--border-strong);width:1%"></th>
+              </tr>
+            </thead>
+            <tbody id="alTableBody">
+              <tr><td colspan="3" style="text-align:center;padding:20px;color:var(--text-tertiary)">Loading...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+      </div>
+
+    <!-- Key Modal -->
+    <div class="modal-overlay" id="keyModal" onclick="if(event.target===this)closeKeyModal()">
+      <div class="modal-box" style="max-width:480px">
+        <div class="modal-head">
+          <h3 id="keyModalTitle">Create Gateway Key</h3>
+          <button class="modal-close" onclick="closeKeyModal()">×</button>
+        </div>
+        <div style="padding:20px">
+          <div id="keyModalContent">
+            <div style="display:flex;flex-direction:column;gap:14px">
+              <div>
+                <label style="font-size:12px;color:var(--text-tertiary);display:block;margin-bottom:6px">Name</label>
+                <input type="text" id="keyName" placeholder="e.g. production, test" style="width:100%;padding:8px 12px;background:var(--bg);border:1px solid var(--border-strong);border-radius:var(--radius-sm);color:var(--text-primary);font-size:13px;font-family:var(--font)" />
+              </div>
+              <div>
+                <label style="font-size:12px;color:var(--text-tertiary);display:block;margin-bottom:6px">Role</label>
+                <select id="keyRole" style="width:100%;padding:8px 12px;background:var(--bg);border:1px solid var(--border-strong);border-radius:var(--radius-sm);color:var(--text-primary);font-size:13px">
+                  <option value="inference">inference (default — /v1/* only)</option>
+                  <option value="admin">admin (all endpoints)</option>
+                </select>
+              </div>
+              <div>
+                <label style="font-size:12px;color:var(--text-tertiary);display:block;margin-bottom:6px">Allowed Models <span style="color:var(--text-tertiary)">(empty = all models allowed)</span></label>
+                <div id="keyModelSelector" style="border:1px solid var(--border-strong);border-radius:var(--radius-sm);background:var(--bg);max-height:200px;overflow-y:auto;padding:8px">
+                  <div style="text-align:center;padding:8px;color:var(--text-tertiary);font-size:12px">Loading models...</div>
+                </div>
+                <div style="display:flex;gap:6px;margin-top:4px">
+                  <button type="button" class="btn-ghost" onclick="toggleAllModels(true)" style="padding:3px 8px;font-size:11px">Select All</button>
+                  <button type="button" class="btn-ghost" onclick="toggleAllModels(false)" style="padding:3px 8px;font-size:11px">Clear</button>
+                  <button type="button" class="btn-ghost" onclick="toggleModelGroup('grok')" style="padding:3px 8px;font-size:11px">Grok only</button>
+                  <button type="button" class="btn-ghost" onclick="toggleModelGroup('cb')" style="padding:3px 8px;font-size:11px">CodeBuddy only</button>
+                </div>
+              </div>
+              <div style="display:flex;gap:12px">
+                <div style="flex:1">
+                  <label style="font-size:12px;color:var(--text-tertiary);display:block;margin-bottom:6px">RPM (0 = unlimited)</label>
+                  <input type="number" id="keyRPM" value="0" min="0" style="width:100%;padding:8px 12px;background:var(--bg);border:1px solid var(--border-strong);border-radius:var(--radius-sm);color:var(--text-primary);font-size:13px;font-family:var(--mono)" />
+                </div>
+                <div style="flex:1">
+                  <label style="font-size:12px;color:var(--text-tertiary);display:block;margin-bottom:6px">Burst (0 = use RPM)</label>
+                  <input type="number" id="keyBurst" value="0" min="0" style="width:100%;padding:8px 12px;background:var(--bg);border:1px solid var(--border-strong);border-radius:var(--radius-sm);color:var(--text-primary);font-size:13px;font-family:var(--mono)" />
+                </div>
+              </div>
+              <div>
+                <label style="font-size:12px;color:var(--text-tertiary);display:block;margin-bottom:6px">Token Quota (0 = unlimited)</label>
+                <input type="number" id="keyQuota" value="0" min="0" style="width:100%;padding:8px 12px;background:var(--bg);border:1px solid var(--border-strong);border-radius:var(--radius-sm);color:var(--text-primary);font-size:13px;font-family:var(--mono)" />
+              </div>
+              <div id="keyEditDisabled" style="display:none">
+                <label style="font-size:12px;color:var(--text-tertiary);display:flex;align-items:center;gap:6px;cursor:pointer">
+                  <input type="checkbox" id="keyDisabled" style="accent-color:var(--brand)" /> Disabled
+                </label>
+              </div>
+              <div id="keyCreateResult" style="display:none">
+                <div style="background:var(--bg);border:1px solid var(--border-strong);border-radius:var(--radius-sm);padding:12px;margin-bottom:8px">
+                  <div style="font-size:11px;color:var(--text-tertiary);margin-bottom:4px">New API Key (shown once):</div>
+                  <div style="display:flex;align-items:center;gap:8px">
+                    <code id="newKeyValue" style="font-family:var(--mono);font-size:13px;color:var(--emerald);word-break:break-all;flex:1"></code>
+                    <button class="btn-ghost" onclick="copyNewKey()" style="flex-shrink:0;padding:4px 8px;font-size:12px">Copy</button>
+                  </div>
+                </div>
+                <div style="font-size:12px;color:var(--orange)">⚠ Save this key now — it will not be shown again.</div>
+              </div>
+            </div>
+            <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:20px">
+              <button class="btn-ghost" onclick="closeKeyModal()">Cancel</button>
+              <button id="keyModalSave" class="btn-primary" onclick="saveKeyModal()" style="padding:8px 16px;border-radius:var(--radius-sm);background:var(--brand);color:#000;border:none;font-size:13px;font-weight:500;cursor:pointer">Create</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ════════ PAGE 5: PROXIES (v1.5.0) ════════ -->
+    <div class="page" id="page-proxies">
+      <div class="stats-grid" id="proxyStatsGrid">
+        <div class="stats-cards">
+        <div class="stat-card">
+          <div class="stat-label">Total Proxies</div>
+          <div class="stat-value" id="proxyTotal">—</div>
+          <div class="stat-sub">http + socks5</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Enabled</div>
+          <div class="stat-value" id="proxyEnabled">—</div>
+          <div class="stat-sub">round-robin pool</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Disabled</div>
+          <div class="stat-value" id="proxyDisabled">—</div>
+          <div class="stat-sub">bypassed</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Active (5m)</div>
+          <div class="stat-value" id="proxyActive">—</div>
+          <div class="stat-sub">recently routed</div>
+        </div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+          <h3>Proxy Pool</h3>
+          <span class="head-meta" id="proxyPoolMeta"></span>
+          <div style="margin-left:auto;display:flex;gap:8px">
+            <button class="btn-primary" onclick="showAddProxyModal()" style="padding:6px 14px;border-radius:var(--radius-sm);background:var(--brand);color:#000;border:none;font-size:12px;font-weight:500;cursor:pointer">+ Add Proxy</button>
+            <button class="btn-ghost" onclick="loadProxies()" style="padding:6px 12px;font-size:12px">Refresh</button>
+          </div>
+        </div>
+        <div class="tbl-scroll" style="max-height:520px">
+          <table class="tbl" id="proxyTable">
+            <thead><tr>
+              <th>Label</th><th>Protocol</th><th>Host:Port</th><th>Auth</th><th>Upstreams</th><th>Status</th><th>Fails</th><th>Last Used</th><th>Actions</th>
+            </tr></thead>
+            <tbody id="proxyBody"><tr><td colspan="9" style="text-align:center;padding:24px;color:var(--text-tertiary)">Loading…</td></tr></tbody>
+          </table>
+        </div>
+        <div id="proxyTestResult" style="padding:8px 16px;font-size:12px;color:var(--text-tertiary);border-top:1px solid var(--border-strong);display:none"></div>
+      </div>
+    </div>
+
+    <!-- ════════ ADD PROXY MODAL ════════ -->
+    <div class="modal-overlay" id="addProxyModal" onclick="if(event.target===this)closeAddProxyModal()">
+      <div class="modal-box" style="max-width:520px">
+        <div class="modal-head">
+          <h3>Add Proxy</h3>
+          <button class="modal-close" onclick="closeAddProxyModal()">×</button>
+        </div>
+        <div style="padding:16px;display:grid;gap:12px">
+          <div>
+            <label style="font-size:11px;color:var(--text-tertiary);display:block;margin-bottom:4px">Protocol</label>
+            <select id="pxProtocol" style="width:100%;padding:8px 10px;background:var(--bg);border:1px solid var(--border-strong);border-radius:var(--radius-sm);color:var(--text-primary);font-size:13px">
+              <option value="http">HTTP</option>
+              <option value="socks5">SOCKS5</option>
+            </select>
+          </div>
+          <div style="display:grid;grid-template-columns:2fr 1fr;gap:8px">
+            <div>
+              <label style="font-size:11px;color:var(--text-tertiary);display:block;margin-bottom:4px">Host</label>
+              <input type="text" id="pxHost" placeholder="proxy.example.com" style="width:100%;padding:8px 10px;background:var(--bg);border:1px solid var(--border-strong);border-radius:var(--radius-sm);color:var(--text-primary);font-size:13px;font-family:var(--mono)" />
+            </div>
+            <div>
+              <label style="font-size:11px;color:var(--text-tertiary);display:block;margin-bottom:4px">Port</label>
+              <input type="number" id="pxPort" placeholder="8080" min="1" max="65535" style="width:100%;padding:8px 10px;background:var(--bg);border:1px solid var(--border-strong);border-radius:var(--radius-sm);color:var(--text-primary);font-size:13px;font-family:var(--mono)" />
+            </div>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+            <div>
+              <label style="font-size:11px;color:var(--text-tertiary);display:block;margin-bottom:4px">Username (optional)</label>
+              <input type="text" id="pxUsername" style="width:100%;padding:8px 10px;background:var(--bg);border:1px solid var(--border-strong);border-radius:var(--radius-sm);color:var(--text-primary);font-size:13px" />
+            </div>
+            <div>
+              <label style="font-size:11px;color:var(--text-tertiary);display:block;margin-bottom:4px">Password (optional)</label>
+              <input type="password" id="pxPassword" style="width:100%;padding:8px 10px;background:var(--bg);border:1px solid var(--border-strong);border-radius:var(--radius-sm);color:var(--text-primary);font-size:13px" />
+            </div>
+          </div>
+          <div>
+            <label style="font-size:11px;color:var(--text-tertiary);display:block;margin-bottom:4px">Label (optional)</label>
+            <input type="text" id="pxLabel" placeholder="datacenter-us-east" style="width:100%;padding:8px 10px;background:var(--bg);border:1px solid var(--border-strong);border-radius:var(--radius-sm);color:var(--text-primary);font-size:13px" />
+          </div>
+          <div>
+            <label style="font-size:11px;color:var(--text-tertiary);display:block;margin-bottom:6px">Route for upstreams</label>
+            <div style="display:flex;gap:14px;align-items:center;padding:8px 10px;background:var(--bg);border:1px solid var(--border-strong);border-radius:var(--radius-sm)">
+              <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer">
+                <input type="checkbox" class="px-upstream" data-scope="all" data-target="add" checked /> All
+              </label>
+              <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer">
+                <input type="checkbox" class="px-upstream" data-scope="grok" data-target="add" /> Grok
+              </label>
+              <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer">
+                <input type="checkbox" class="px-upstream" data-scope="codebuddy" data-target="add" /> CodeBuddy
+              </label>
+              <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer">
+                <input type="checkbox" class="px-upstream" data-scope="freebuff" data-target="add" /> Freebuff
+              </label>
+            </div>
+          </div>
+          <div id="pxError" style="display:none;color:var(--red);font-size:12px;padding:6px 10px;background:rgba(255,80,80,0.08);border-radius:var(--radius-sm)"></div>
+          <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:8px">
+            <button class="btn-ghost" onclick="closeAddProxyModal()" style="padding:8px 14px;font-size:12px">Cancel</button>
+            <button class="btn-primary" onclick="addProxy()" style="padding:8px 14px;border-radius:var(--radius-sm);background:var(--brand);color:#000;border:none;font-size:12px;font-weight:500;cursor:pointer">Add Proxy</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ════════ EDIT PROXY MODAL ════════ -->
+    <div class="modal-overlay" id="editProxyModal" onclick="if(event.target===this)closeEditProxyModal()">
+      <div class="modal-box" style="max-width:520px">
+        <div class="modal-head">
+          <h3>Edit Proxy</h3>
+          <button class="modal-close" onclick="closeEditProxyModal()">×</button>
+        </div>
+        <div style="padding:16px;display:grid;gap:12px">
+          <input type="hidden" id="epxId" />
+          <div>
+            <label style="font-size:11px;color:var(--text-tertiary);display:block;margin-bottom:4px">Protocol</label>
+            <select id="epxProtocol" style="width:100%;padding:8px 10px;background:var(--bg);border:1px solid var(--border-strong);border-radius:var(--radius-sm);color:var(--text-primary);font-size:13px">
+              <option value="http">HTTP</option>
+              <option value="socks5">SOCKS5</option>
+            </select>
+          </div>
+          <div style="display:grid;grid-template-columns:2fr 1fr;gap:8px">
+            <div>
+              <label style="font-size:11px;color:var(--text-tertiary);display:block;margin-bottom:4px">Host</label>
+              <input type="text" id="epxHost" style="width:100%;padding:8px 10px;background:var(--bg);border:1px solid var(--border-strong);border-radius:var(--radius-sm);color:var(--text-primary);font-size:13px;font-family:var(--mono)" />
+            </div>
+            <div>
+              <label style="font-size:11px;color:var(--text-tertiary);display:block;margin-bottom:4px">Port</label>
+              <input type="number" id="epxPort" min="1" max="65535" style="width:100%;padding:8px 10px;background:var(--bg);border:1px solid var(--border-strong);border-radius:var(--radius-sm);color:var(--text-primary);font-size:13px;font-family:var(--mono)" />
+            </div>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+            <div>
+              <label style="font-size:11px;color:var(--text-tertiary);display:block;margin-bottom:4px">Username</label>
+              <input type="text" id="epxUsername" style="width:100%;padding:8px 10px;background:var(--bg);border:1px solid var(--border-strong);border-radius:var(--radius-sm);color:var(--text-primary);font-size:13px" />
+            </div>
+            <div>
+              <label style="font-size:11px;color:var(--text-tertiary);display:block;margin-bottom:4px">Password (blank = keep)</label>
+              <input type="password" id="epxPassword" placeholder="***" style="width:100%;padding:8px 10px;background:var(--bg);border:1px solid var(--border-strong);border-radius:var(--radius-sm);color:var(--text-primary);font-size:13px" />
+            </div>
+          </div>
+          <div>
+            <label style="font-size:11px;color:var(--text-tertiary);display:block;margin-bottom:4px">Label</label>
+            <input type="text" id="epxLabel" style="width:100%;padding:8px 10px;background:var(--bg);border:1px solid var(--border-strong);border-radius:var(--radius-sm);color:var(--text-primary);font-size:13px" />
+          </div>
+          <div>
+            <label style="font-size:11px;color:var(--text-tertiary);display:block;margin-bottom:6px">Route for upstreams</label>
+            <div style="display:flex;gap:14px;align-items:center;padding:8px 10px;background:var(--bg);border:1px solid var(--border-strong);border-radius:var(--radius-sm)">
+              <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer">
+                <input type="checkbox" class="px-upstream" data-scope="all" data-target="edit" /> All
+              </label>
+              <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer">
+                <input type="checkbox" class="px-upstream" data-scope="grok" data-target="edit" /> Grok
+              </label>
+              <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer">
+                <input type="checkbox" class="px-upstream" data-scope="codebuddy" data-target="edit" /> CodeBuddy
+              </label>
+              <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer">
+                <input type="checkbox" class="px-upstream" data-scope="freebuff" data-target="edit" /> Freebuff
+              </label>
+            </div>
+          </div>
+          <div id="epxError" style="display:none;color:var(--red);font-size:12px;padding:6px 10px;background:rgba(255,80,80,0.08);border-radius:var(--radius-sm)"></div>
+          <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:8px">
+            <button class="btn-ghost" onclick="closeEditProxyModal()" style="padding:8px 14px;font-size:12px">Cancel</button>
+            <button class="btn-primary" onclick="saveEditProxy()" style="padding:8px 14px;border-radius:var(--radius-sm);background:var(--brand);color:#000;border:none;font-size:12px;font-weight:500;cursor:pointer">Save</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ════════ PAGE 6: TUNNEL (v1.6.0) ════════ -->
+    <div class="page" id="page-tunnel">
+      <div class="stats-grid">
+        <div class="stats-cards">
+        <div class="stat-card">
+          <div class="stat-label">Mode</div>
+          <div class="stat-value" id="tunModeVal" style="font-size:20px">—</div>
+          <div class="stat-sub" id="tunModeSub">off · click Enable to start</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Quick Tunnel</div>
+          <div class="stat-value" id="tunQuickVal" style="font-size:20px">—</div>
+          <div class="stat-sub" id="tunQuickSub">ephemeral trycloudflare.com</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Named Tunnel</div>
+          <div class="stat-value" id="tunNamedVal" style="font-size:20px">—</div>
+          <div class="stat-sub" id="tunNamedSub">persistent custom domain</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Upstream</div>
+          <div class="stat-value" id="tunUpstreamVal" style="font-size:14px;font-family:var(--mono)">—</div>
+          <div class="stat-sub">cloudflared → gateway</div>
+        </div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3-8 10-8 10 8 10 8-3 8-10 8S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>
+          <h3>Cloudflare Tunnel</h3>
+          <span class="head-meta" id="tunPanelMeta">SDK-driven · embedded cloudflared</span>
+          <div style="margin-left:auto;display:flex;gap:8px">
+            <button class="btn-ghost" onclick="loadTunnelStatus()" style="padding:6px 12px;font-size:12px">Refresh</button>
+            <button class="btn-ghost" onclick="tunnelRestart()" style="padding:6px 12px;font-size:12px">Restart</button>
+            <button class="btn-ghost" onclick="tunnelDisable()" style="padding:6px 12px;font-size:12px;color:var(--red)">Disable</button>
+          </div>
+        </div>
+
+        <div style="padding:16px;display:grid;gap:14px">
+          <!-- Quick actions row -->
+          <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+            <span style="font-size:12px;color:var(--text-tertiary)">Enable:</span>
+            <button class="btn-primary" onclick="tunnelEnableQuick()" style="padding:6px 14px;border-radius:var(--radius-sm);background:var(--brand);color:#000;border:none;font-size:12px;font-weight:500;cursor:pointer">Quick</button>
+            <button class="btn-primary" onclick="showTunnelNamedModal(false)" style="padding:6px 14px;border-radius:var(--radius-sm);background:var(--brand);color:#000;border:none;font-size:12px;font-weight:500;cursor:pointer">Named…</button>
+            <button class="btn-primary" onclick="showTunnelNamedModal(true)" style="padding:6px 14px;border-radius:var(--radius-sm);background:var(--brand);color:#000;border:none;font-size:12px;font-weight:500;cursor:pointer">Hybrid…</button>
+            <span id="tunActionResult" style="font-size:12px;color:var(--text-tertiary);margin-left:auto"></span>
+          </div>
+
+          <!-- URLs / status row -->
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+            <div style="background:var(--bg);border:1px solid var(--border-strong);border-radius:var(--radius-sm);padding:12px">
+              <div style="font-size:11px;color:var(--text-tertiary);margin-bottom:6px">Quick URL</div>
+              <div id="tunQuickURL" style="font-size:13px;font-family:var(--mono);color:var(--emerald);word-break:break-all">—</div>
+            </div>
+            <div style="background:var(--bg);border:1px solid var(--border-strong);border-radius:var(--radius-sm);padding:12px">
+              <div style="font-size:11px;color:var(--text-tertiary);margin-bottom:6px">Named Domain</div>
+              <div id="tunNamedURL" style="font-size:13px;font-family:var(--mono);color:var(--emerald);word-break:break-all">—</div>
+            </div>
+          </div>
+
+          <!-- Credentials summary -->
+          <div style="background:var(--bg);border:1px solid var(--border-strong);border-radius:var(--radius-sm);padding:12px">
+            <div style="font-size:11px;color:var(--text-tertiary);margin-bottom:8px">Cloudflare Credentials (stored in Redis, never displayed)</div>
+            <div id="tunCredSummary" style="display:flex;gap:14px;flex-wrap:wrap;font-size:12px">—</div>
+          </div>
+        </div>
+
+        <!-- Logs -->
+        <div style="border-top:1px solid var(--border-strong);padding:12px 16px">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+            <span style="font-size:11px;color:var(--text-tertiary)">Recent cloudflared logs (last 400 lines per subprocess)</span>
+            <span id="tunLogsMeta" style="font-size:11px;color:var(--text-tertiary)"></span>
+          </div>
+          <pre id="tunLogs" style="max-height:220px;overflow:auto;background:var(--bg);border:1px solid var(--border-strong);border-radius:var(--radius-sm);padding:10px;font-family:var(--mono);font-size:11px;color:var(--text-secondary);margin:0;white-space:pre-wrap;word-break:break-word">no output yet</pre>
+        </div>
+      </div>
+    </div>
+
+    <!-- ════════ TUNNEL NAMED CONFIG MODAL ════════ -->
+    <div class="modal-overlay" id="tunnelNamedModal" onclick="if(event.target===this)closeTunnelNamedModal()">
+      <div class="modal-box" style="max-width:560px">
+        <div class="modal-head">
+          <h3 id="tunnelNamedModalTitle">Named Tunnel — Cloudflare Credentials</h3>
+          <button class="modal-close" onclick="closeTunnelNamedModal()">×</button>
+        </div>
+        <div style="padding:16px;display:grid;gap:12px">
+          <div style="font-size:12px;color:var(--text-tertiary);line-height:1.5">
+            The gateway creates the tunnel + configures ingress + routes DNS via the Cloudflare API,
+            then runs <code>cloudflared</code> as a child process. Empty fields keep the current
+            Redis value, so you can flip modes without re-entering credentials.
+          </div>
+          <div id="tunSavedCreds" style="display:none;padding:8px 12px;background:rgba(52,211,153,0.06);border:1px solid rgba(52,211,153,0.15);border-radius:var(--radius-sm)"></div>
+          <div>
+            <label style="font-size:11px;color:var(--text-tertiary);display:block;margin-bottom:4px">API Token <span style="color:var(--red)">*</span></label>
+            <input type="password" id="tunAPIToken" placeholder="Tunnel:Edit + DNS:Edit scope" style="width:100%;padding:8px 10px;background:var(--bg);border:1px solid var(--border-strong);border-radius:var(--radius-sm);color:var(--text-primary);font-size:13px;font-family:var(--mono)" />
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+            <div>
+              <label style="font-size:11px;color:var(--text-tertiary);display:block;margin-bottom:4px">Account ID <span style="color:var(--red)">*</span></label>
+              <input type="text" id="tunAccountID" style="width:100%;padding:8px 10px;background:var(--bg);border:1px solid var(--border-strong);border-radius:var(--radius-sm);color:var(--text-primary);font-size:13px;font-family:var(--mono)" />
+            </div>
+            <div>
+              <label style="font-size:11px;color:var(--text-tertiary);display:block;margin-bottom:4px">Zone ID <span style="color:var(--red)">*</span></label>
+              <input type="text" id="tunZoneID" style="width:100%;padding:8px 10px;background:var(--bg);border:1px solid var(--border-strong);border-radius:var(--radius-sm);color:var(--text-primary);font-size:13px;font-family:var(--mono)" />
+            </div>
+          </div>
+          <div>
+            <label style="font-size:11px;color:var(--text-tertiary);display:block;margin-bottom:4px">Hostname <span style="color:var(--red)">*</span></label>
+            <input type="text" id="tunDomain" placeholder="gateway.example.com" style="width:100%;padding:8px 10px;background:var(--bg);border:1px solid var(--border-strong);border-radius:var(--radius-sm);color:var(--text-primary);font-size:13px;font-family:var(--mono)" />
+          </div>
+          <input type="hidden" id="tunModalMode" value="named" />
+          <div id="tunModalError" style="display:none;color:var(--red);font-size:12px;padding:6px 10px;background:rgba(255,80,80,0.08);border-radius:var(--radius-sm)"></div>
+          <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:8px">
+            <button class="btn-ghost" onclick="closeTunnelNamedModal()" style="padding:8px 14px;font-size:12px">Cancel</button>
+            <button class="btn-primary" onclick="tunnelEnableNamed()" style="padding:8px 14px;border-radius:var(--radius-sm);background:var(--brand);color:#000;border:none;font-size:12px;font-weight:500;cursor:pointer">Enable</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="page" id="page-media">
+      <div class="panel">
+        <div class="panel-head">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><polygon points="10 9 15 12 10 15 10 9"/></svg>
+          <h3>Media Studio</h3>
+          <span class="head-meta" id="mediaPanelMeta">Grok free tier · image gen/edit 5 per akun · video 2 per akun · lazy SSO + rotate</span>
+        </div>
+
+        <div style="display:flex;gap:8px;padding:12px 16px 0;border-bottom:1px solid var(--border-strong)">
+          <button class="media-tab active" data-mtab="chat" onclick="mediaTab('chat')">Chat</button>
+          <button class="media-tab" data-mtab="gen" onclick="mediaTab('gen')">Generate</button>
+          <button class="media-tab" data-mtab="edit" onclick="mediaTab('edit')">Edit</button>
+          <button class="media-tab" data-mtab="vid" onclick="mediaTab('vid')">Video</button>
+        </div>
+
+        <!-- CHAT (LLM prompt engineer) — Simple UI style -->
+        <div id="mediaChat" class="media-pane" style="padding:16px;display:grid;gap:12px">
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+            <span style="font-size:11px;color:var(--text-tertiary)">AI compose</span>
+            <select id="mcModel" style="flex:1;min-width:140px;max-width:230px;color-scheme:dark;background:var(--bg);border:1px solid var(--border-strong);border-radius:var(--radius-sm);padding:7px 10px;font-size:12px;color:var(--text-primary);outline:none"></select>
+            <span style="font-size:11px;color:var(--text-tertiary)">History</span>
+            <select id="mcHistory" onchange="mediaHistorySelect(this.value)" style="flex:1;min-width:160px;max-width:240px;color-scheme:dark;background:var(--bg);border:1px solid var(--border-strong);border-radius:var(--radius-sm);padding:7px 10px;font-size:12px;color:var(--text-primary);outline:none">
+              <option value="">— saved chats —</option>
+            </select>
+            <span style="font-size:11px;color:var(--text-tertiary)">Reasoning</span>
+            <select id="mcReasoning" title="reasoning_effort — high = lebih dipikirkan, lebih lambat & mahal" style="min-width:84px;max-width:110px;color-scheme:dark;background:var(--bg-input);border:1px solid var(--border-strong);border-radius:var(--radius-sm);padding:7px 10px;font-size:12px;color:var(--text-primary);outline:none">
+              <option value="high">High</option>
+              <option value="medium" selected>Medium</option>
+              <option value="low">Low</option>
+              <option value="">None</option>
+            </select>
+            <button class="btn-ghost" onclick="mediaChatNew()" title="Start a new chat (current is saved)" style="padding:7px 12px;font-size:11px">+ New</button>
+            <button class="btn-ghost" onclick="mediaChatClear()" title="Clear messages (current is saved)" style="padding:7px 12px;font-size:11px">Clear</button>
+          </div>
+
+          <!-- hero greeting (Simple UI) — shows while no messages -->
+          <div id="mcHero" style="text-align:center;padding:24px 10px 6px">
+            <div id="mcGreeting" style="font-size:26px;font-weight:800;letter-spacing:-0.02em;color:var(--text-primary)"></div>
+            <div style="font-size:13px;font-style:italic;color:var(--text-tertiary);margin-top:6px">Ready to turn your ideas into art?</div>
+          </div>
+
+          <!-- composer card (Simple UI) -->
+          <div style="background:var(--bg);border:1px solid var(--border-strong);border-radius:16px;padding:14px 16px 10px;display:grid;gap:10px">
+            <textarea id="mcInput" rows="2" spellcheck="false" placeholder="e.g. a cyberpunk samurai cat on a neon rooftop, dramatic rim light…" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();mediaChatSend()}" style="width:100%;background:transparent;border:none;outline:none;resize:none;font-size:13px;line-height:1.5;color:var(--text-primary);font-family:inherit"></textarea>
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+              <div style="display:flex;gap:6px;align-items:center">
+                <button class="mc-round" onclick="mediaChatGen()" title="Generate image langsung dari teks ini (tanpa pindah tab)">🎨</button>
+              </div>
+              <div style="display:flex;gap:10px;align-items:center">
+                <span style="font-size:10px;color:var(--text-tertiary)">⏎ kirim · ⇧⏎ baris baru</span>
+                <button id="mcSendBtn" class="mc-round mc-round-send" onclick="mediaChatSend()" title="Kirim ke LLM prompt engineer">➤</button>
+              </div>
+            </div>
+          </div>
+
+          <div id="mcMessages" style="background:var(--bg);border:1px solid var(--border-strong);border-radius:var(--radius-sm);padding:12px;min-height:180px;max-height:300px;overflow-y:auto;display:flex;flex-direction:column;gap:8px;font-size:12px">
+            <div style="color:var(--text-tertiary);padding:6px 0">Describe what you want to create — the LLM turns it into an optimized prompt for Grok Imagine. Keep chatting to refine; the last assistant reply becomes the image prompt.</div>
+          </div>
+          <div style="background:var(--bg);border:1px solid var(--border-strong);border-radius:var(--radius-sm);padding:12px;display:grid;gap:8px">
+            <div style="font-size:11px;color:var(--text-tertiary)">Current image prompt (last LLM reply)</div>
+            <div id="mcCurPrompt" style="font-size:12px;color:var(--text-primary);white-space:pre-wrap;min-height:18px"></div>
+            <div style="display:flex;gap:8px">
+              <button class="btn-primary" onclick="mediaGenerateFromChat()" style="padding:8px 16px;border-radius:var(--radius-sm);background:var(--brand);color:#000;border:none;font-size:12px;font-weight:600;cursor:pointer">Generate Image →</button>
+              <button class="btn-ghost" onclick="mediaUsePromptInEdit()" style="padding:8px 12px;font-size:11px">Use in Edit</button>
+            </div>
+          </div>
+
+          <!-- recent generated images (Simple UI gallery) -->
+          <div id="mcGalleryWrap" style="display:none;background:var(--bg);border:1px solid var(--border-strong);border-radius:var(--radius-sm);padding:12px">
+            <div style="font-size:11px;color:var(--text-tertiary);margin-bottom:8px">Created With Art <span style="color:var(--text-tertiary)">· klik kartu → kirim ke Edit</span></div>
+            <div id="mcGallery" style="display:flex;gap:10px;overflow-x:auto;padding-bottom:4px"></div>
+          </div>
+        </div>
+
+        <!-- GENERATE -->
+        <div id="mediaGen" class="media-pane" style="padding:16px;display:grid;gap:12px">
+          <div>
+            <label style="font-size:11px;color:var(--text-tertiary);display:block;margin-bottom:5px">Prompt</label>
+            <textarea id="mgPrompt" rows="3" spellcheck="false" placeholder="a tiny red panda wearing sunglasses, flat vector illustration" style="width:100%;background:var(--bg);border:1px solid var(--border-strong);border-radius:var(--radius-sm);padding:9px 11px;font-size:12px;font-family:var(--mono);color:var(--text-primary);outline:none;resize:vertical"></textarea>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px">
+            <div>
+              <label style="font-size:11px;color:var(--text-tertiary);display:block;margin-bottom:5px">Aspect ratio</label>
+              <select id="mgAspect" style="width:100%;background:var(--bg);border:1px solid var(--border-strong);border-radius:var(--radius-sm);padding:8px 10px;font-size:12px;color:var(--text-primary);outline:none">
+                <option value="1:1">1:1 (square)</option>
+                <option value="3:2">3:2 (landscape)</option>
+                <option value="2:3">2:3 (portrait)</option>
+                <option value="16:9">16:9 (widescreen)</option>
+              </select>
+            </div>
+            <div>
+              <label style="font-size:11px;color:var(--text-tertiary);display:block;margin-bottom:5px">Count</label>
+              <select id="mgN" style="width:100%;background:var(--bg);border:1px solid var(--border-strong);border-radius:var(--radius-sm);padding:8px 10px;font-size:12px;color:var(--text-primary);outline:none">
+                <option value="1">1</option>
+                <option value="2">2</option>
+                <option value="4">4</option>
+              </select>
+            </div>
+            <div style="display:flex;align-items:flex-end">
+              <button class="btn-primary" onclick="mediaGenerate()" style="width:100%;padding:9px 16px;border-radius:var(--radius-sm);background:var(--brand);color:#000;border:none;font-size:12px;font-weight:600;cursor:pointer">Generate</button>
+            </div>
+          </div>
+          <div id="mgResult" style="display:grid;gap:10px"></div>
+        </div>
+
+        <!-- EDIT -->
+        <div id="mediaEdit" class="media-pane" style="padding:16px;display:none;gap:12px">
+          <div>
+            <label style="font-size:11px;color:var(--text-tertiary);display:block;margin-bottom:5px">Prompt (what to change)</label>
+            <textarea id="mePrompt" rows="2" spellcheck="false" placeholder="make it night time, neon lights" style="width:100%;background:var(--bg);border:1px solid var(--border-strong);border-radius:var(--radius-sm);padding:9px 11px;font-size:12px;font-family:var(--mono);color:var(--text-primary);outline:none;resize:vertical"></textarea>
+          </div>
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+            <input id="meAiHint" placeholder="AI vision: describe the edit in plain words — e.g. 'add a red hot air balloon top right'" style="flex:1;min-width:200px;background:var(--bg);border:1px solid var(--border-strong);border-radius:var(--radius-sm);padding:8px 11px;font-size:12px;color:var(--text-primary);outline:none" />
+            <select id="meAiModel" title="vision model — must see the image" style="background:var(--bg);border:1px solid var(--border-strong);border-radius:var(--radius-sm);padding:8px 6px;font-size:11px;color:var(--text-primary);color-scheme:dark">
+              <option value="glm-5.2">glm-5.2</option>
+              <option value="gpt-5.5">gpt-5.5</option>
+              <option value="claude-opus-4.6">claude-opus-4.6</option>
+              <option value="gemini-3.1-pro">gemini-3.1-pro</option>
+              <option value="grok-4.5">grok-4.5</option>
+            </select>
+            <button id="meAiBtn" class="btn-ghost" onclick="mediaAiCompose()" title="LLM looks at the image (vision), then writes a precise preservation edit prompt" style="padding:8px 12px;font-size:11px">✨ AI Compose</button>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;align-items:end">
+            <div>
+              <label style="font-size:11px;color:var(--text-tertiary);display:block;margin-bottom:5px">Source image</label>
+              <input type="file" id="meFile" accept="image/*" style="font-size:12px;color:var(--text-tertiary);width:100%" />
+            </div>
+            <div style="display:flex;gap:8px;align-items:flex-end">
+              <button class="btn-primary" onclick="mediaEditRun()" style="padding:9px 16px;border-radius:var(--radius-sm);background:var(--brand);color:#000;border:none;font-size:12px;font-weight:600;cursor:pointer">Edit Image</button>
+            </div>
+          </div>
+          <div id="meSrcPrev" style="display:none;gap:8px;align-items:center;font-size:12px;color:var(--text-tertiary)">
+            <img id="meSrcImg" style="max-height:96px;border-radius:6px;border:1px solid var(--border-strong)" />
+            <span>from Generate tab — click <b style="color:var(--text-primary)">✕</b> to clear</span>
+            <button class="btn-ghost" onclick="mediaClearEditSrc()" style="padding:4px 10px;font-size:11px">✕</button>
+          </div>
+          <div id="meResult" style="display:grid;gap:10px"></div>
+        </div>
+
+        <!-- VIDEO -->
+        <div id="mediaVid" class="media-pane" style="padding:16px;display:none;gap:12px">
+          <div>
+            <label style="font-size:11px;color:var(--text-tertiary);display:block;margin-bottom:5px">Prompt</label>
+            <textarea id="mvPrompt" rows="3" spellcheck="false" placeholder="a cat walking through a neon-lit city street, cinematic" style="width:100%;background:var(--bg);border:1px solid var(--border-strong);border-radius:var(--radius-sm);padding:9px 11px;font-size:12px;font-family:var(--mono);color:var(--text-primary);outline:none;resize:vertical"></textarea>
+          </div>
+          <div style="display:flex;gap:8px;align-items:center">
+            <button class="btn-primary" onclick="mediaVideo()" style="padding:9px 16px;border-radius:var(--radius-sm);background:var(--brand);color:#000;border:none;font-size:12px;font-weight:600;cursor:pointer">Generate Video</button>
+            <span id="mvProgress" style="font-size:12px;color:var(--text-tertiary)"></span>
+          </div>
+          <div id="mvResult" style="display:grid;gap:10px"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="page" id="page-settings">
+      <div class="panel">
+        <div class="panel-head">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+          <h3>Settings</h3>
+          <span class="head-meta" id="settingsPanelMeta">Turnstile Solver · lazy SSO refresh</span>
+        </div>
+
+        <div style="padding:16px;display:grid;gap:16px">
+          <!-- Turnstile Solver config -->
+          <div class="panel-head" style="border:none;padding:0">
+            <h4 style="margin:0;font-size:13px;font-weight:600">Turnstile Solver</h4>
+            <span class="head-meta">used by Grok image-gen lazy SSO re-login (401 → solve → sign-in)</span>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+            <div>
+              <label style="font-size:11px;color:var(--text-tertiary);display:block;margin-bottom:5px">Solver URL</label>
+              <input id="setSolverUrl" type="text" spellcheck="false" style="width:100%;background:var(--bg);border:1px solid var(--border-strong);border-radius:var(--radius-sm);padding:9px 11px;font-size:12px;font-family:var(--mono);color:var(--text-primary);outline:none" placeholder="http://127.0.0.1:8742/cloudflare" />
+            </div>
+            <div>
+              <label style="font-size:11px;color:var(--text-tertiary);display:block;margin-bottom:5px">Turnstile Sitekey</label>
+              <input id="setSiteKey" type="text" spellcheck="false" style="width:100%;background:var(--bg);border:1px solid var(--border-strong);border-radius:var(--radius-sm);padding:9px 11px;font-size:12px;font-family:var(--mono);color:var(--text-primary);outline:none" placeholder="0x4AAAAAAAhr9JGVDZbrZOo0" />
+            </div>
+          </div>
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+            <button class="btn-primary" onclick="saveTurnstileSettings()" style="padding:7px 16px;border-radius:var(--radius-sm);background:var(--brand);color:#000;border:none;font-size:12px;font-weight:600;cursor:pointer">Save</button>
+            <button class="btn-ghost" onclick="testTurnstileSettings()" style="padding:7px 16px;font-size:12px">Test Solver</button>
+            <span id="settingsResult" style="font-size:12px;color:var(--text-tertiary)"></span>
+          </div>
+
+          <!-- Status strip -->
+          <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px">
+            <div style="background:var(--bg);border:1px solid var(--border-strong);border-radius:var(--radius-sm);padding:12px">
+              <div style="font-size:11px;color:var(--text-tertiary);margin-bottom:6px">Solver Reachable</div>
+              <div id="setReachVal" style="font-size:14px;font-weight:600;color:var(--text-tertiary)">—</div>
+            </div>
+            <div style="background:var(--bg);border:1px solid var(--border-strong);border-radius:var(--radius-sm);padding:12px">
+              <div style="font-size:11px;color:var(--text-tertiary);margin-bottom:6px">Last Solve</div>
+              <div id="setLastSolve" style="font-size:14px;font-weight:600;color:var(--text-tertiary)">—</div>
+            </div>
+            <div style="background:var(--bg);border:1px solid var(--border-strong);border-radius:var(--radius-sm);padding:12px">
+              <div style="font-size:11px;color:var(--text-tertiary);margin-bottom:6px">Elapsed</div>
+              <div id="setElapsedVal" style="font-size:14px;font-weight:600;color:var(--text-tertiary)">—</div>
+            </div>
+          </div>
+
+          <!-- Content Filters (strip agent identities before CodeBuddy upstream) -->
+          <div class="panel-head" style="border:none;padding:0">
+            <h4 style="margin:0;font-size:13px;font-weight:600">Content Filters</h4>
+            <span class="head-meta">strip agent identities &amp; billing headers before CodeBuddy upstream (anti-moderation)</span>
+          </div>
+          <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+            <label style="font-size:12px;color:var(--text-secondary);cursor:pointer">Master switch</label>
+            <input type="checkbox" id="setFiltersEnabled" style="width:16px;height:16px;accent-color:var(--brand);cursor:pointer" />
+            <button class="btn-primary" onclick="saveFilterSettings()" style="padding:7px 16px;border-radius:var(--radius-sm);background:var(--brand);color:#000;border:none;font-size:12px;font-weight:600;cursor:pointer">Save Filters</button>
+            <span id="filtersResult" style="font-size:12px;color:var(--text-tertiary)"></span>
+          </div>
+          <div id="setFiltersList" style="display:grid;gap:6px;background:var(--bg);border:1px solid var(--border-strong);border-radius:var(--radius-sm);padding:12px;max-height:280px;overflow-y:auto">
+            <div style="font-size:12px;color:var(--text-tertiary)">loading rules…</div>
+          </div>
+
+          <!-- Info -->
+          <div style="background:rgba(255,255,255,0.03);border:1px solid var(--border-strong);border-radius:var(--radius-sm);padding:12px;font-size:12px;color:var(--text-tertiary);line-height:1.6">
+            <b style="color:var(--text-primary)">Lazy SSO auth (Grok image gen):</b> cookies cached in Redis, never proactively refreshed. On 401 the gateway re-logs into console.x.ai via this solver + <code style="font-family:var(--mono);font-size:11px">POST /api/auth/sign-in</code> (~3s, no browser) and retries once. On 429 the account is marked exhausted (5-img quota counted locally) and rotation moves to the next account.
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /content -->
+
+  <div class="footer-bar" id="footerUpdate" style="padding:0 28px 16px"></div>
+</div><!-- /main -->
+
+<!-- ═══════════════════ DETAIL MODAL ═══════════════════ -->
+<div class="modal-overlay" id="detailModal" onclick="if(event.target===this)closeModal()">
+  <div class="modal-box">
+    <div class="modal-head">
+      <h3>Request Detail</h3>
+      <button class="modal-close" onclick="closeModal()">×</button>
+    </div>
+    <div id="detailContent"></div>
+  </div>
+</div>
+

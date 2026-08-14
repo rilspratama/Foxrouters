@@ -116,8 +116,10 @@ func ProxyRequest(grokAM *upstream.GrokAccountManager, cbKM *upstream.CBKeyManag
 	return func(c *gin.Context) {
 		path := c.Request.URL.Path
 
-		// /v1/models — local
-		if path == "/v1/models" || path == "/models" {
+		// /v1/models — local (list + single lookup). Models are built by
+		// buildModels() so GET /v1/models/:id (used by Hermes/OpenAI SDKs
+		// for model resolution) shares the exact same list.
+		buildModels := func() []gin.H {
 			models := []gin.H{
 				// CodeBuddy — GPT
 				{"id": "gpt-5.6-sol", "object": "model", "owned_by": "codebuddy", "reasoning": true},
@@ -129,6 +131,7 @@ func ProxyRequest(grokAM *upstream.GrokAccountManager, cbKM *upstream.CBKeyManag
 				{"id": "gpt-5.3-codex", "object": "model", "owned_by": "codebuddy", "reasoning": true},
 				// CodeBuddy — Claude
 				{"id": "claude-opus-4.7-1m", "object": "model", "owned_by": "codebuddy", "reasoning": true},
+				{"id": "claude-opus-5", "object": "model", "owned_by": "codebuddy", "reasoning": true},
 				{"id": "claude-opus-4.6", "object": "model", "owned_by": "codebuddy", "reasoning": true},
 				{"id": "claude-sonnet-4.6", "object": "model", "owned_by": "codebuddy", "reasoning": true},
 				// CodeBuddy — Gemini
@@ -230,7 +233,24 @@ func ProxyRequest(grokAM *upstream.GrokAccountManager, cbKM *upstream.CBKeyManag
 					models[i]["created_at"] = "2025-01-01T00:00:00Z"
 				}
 			}
-			c.JSON(200, gin.H{"object": "list", "data": models})
+			return models
+		}
+		// /v1/models — local (list)
+		if path == "/v1/models" || path == "/models" {
+			c.JSON(200, gin.H{"object": "list", "data": buildModels()})
+			return
+		}
+		// /v1/models/:id — single model lookup (Hermes/OpenAI SDK resolve
+		// models this way; a 404 here makes clients fall back silently).
+		if strings.HasPrefix(path, "/v1/models/") {
+			id := strings.TrimPrefix(path, "/v1/models/")
+			for _, m := range buildModels() {
+				if mid, _ := m["id"].(string); mid == id {
+					c.JSON(200, m)
+					return
+				}
+			}
+			c.JSON(404, gin.H{"error": "model not found"})
 			return
 		}
 

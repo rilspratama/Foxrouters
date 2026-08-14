@@ -1,0 +1,23 @@
+/* 21st.dev — Respec theme (ey.lee)
+   https://21st.dev/community/themes/respec-theme-1785489378764
+   Dark: bg #121212 · card #171717 · primary #006239 (emerald) · ring #4ade80
+   Light: primary #42ff91 (neon green) — fresh/hacker vibe */
+.dark-theme-respec-green {
+  --bg: #121212;
+  --fg: #e2e8f0;
+  --card: #171717;
+  --popover: #242424;
+  --primary: #006239;
+  --primary-fg: #dde8e3;
+  --secondary: #242424;
+  --muted: #1f1f1f;
+  --muted-fg: #a2a2a2;
+  --accent: #313131;
+  --destructive: #541c15;
+  --border: #292929;
+  --input: #242424;
+  --ring: #4ade80;
+  --sidebar: #121212;
+  --sidebar-fg: #898989;
+  --radius: 6px;
+}

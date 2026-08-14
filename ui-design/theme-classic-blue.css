@@ -1,0 +1,24 @@
+/* 21st.dev — Classic blue and dark theme (eliaszaki)
+   https://21st.dev/community/themes/classic-blue-and-dark-theme-1785167003696
+   Dark: bg #131313 · card #171717 · primary #008ff5 (blue) · sidebar #121212
+   Light: bg #fcfcfc · primary #0095ff · ring #72e3ad
+   Font: Montserrat (dark) / Outfit (light) */
+.dark-theme-classic-blue {
+  --bg: #131313;
+  --fg: #e2e8f0;
+  --card: #171717;
+  --popover: #242424;
+  --primary: #008ff5;
+  --primary-fg: #ffffff;
+  --secondary: #1c1c1c;
+  --muted: #303030;
+  --muted-fg: #a2a2a2;
+  --accent: #303030;
+  --destructive: #541c15;
+  --border: #202020;
+  --input: #2c2c2c;
+  --ring: #0095ff;
+  --sidebar: #121212;
+  --sidebar-fg: #898989;
+  --radius: 6px;
+}

@@ -162,7 +162,7 @@ func HandleHealth(grokAM *upstream.GrokAccountManager, cbKM *upstream.CBKeyManag
 				}
 				return total
 			}(),
-			"cb_keys":       cbKM.Len(),
+			"cb_keys": cbKM.Len(),
 			"cb_keys_active": func() int {
 				active := 0
 				for _, k := range cbKM.GetAll() {
@@ -172,7 +172,7 @@ func HandleHealth(grokAM *upstream.GrokAccountManager, cbKM *upstream.CBKeyManag
 				}
 				return active
 			}(),
-			"fb_accounts":       fbAM.Len(),
+			"fb_accounts": fbAM.Len(),
 			"fb_tier_full": func() int {
 				count := 0
 				for _, a := range fbAM.ListAccounts() {
@@ -200,8 +200,8 @@ func HandleHealth(grokAM *upstream.GrokAccountManager, cbKM *upstream.CBKeyManag
 				}
 				return count
 			}(),
-			"fb_quota_used":     func() float64 { t, _, _ := fbAM.QuotaSummary(); return t }(),
-			"fb_quota_limit":    func() float64 { _, t, _ := fbAM.QuotaSummary(); return t }(),
+			"fb_quota_used":  func() float64 { t, _, _ := fbAM.QuotaSummary(); return t }(),
+			"fb_quota_limit": func() float64 { _, t, _ := fbAM.QuotaSummary(); return t }(),
 			"fb_quota_exhausted": func() int {
 				count := 0
 				for _, a := range fbAM.ListAccounts() {
@@ -257,6 +257,13 @@ func HandleAccounts(grokAM *upstream.GrokAccountManager, cbKM *upstream.CBKeyMan
 					"completion_tokens": s.CompletionTokens,
 					"usage_reset_at":    s.UsageResetAt,
 					"quota":             upstream.GROK_FREE_TIER_QUOTA,
+					"img_quota_used":    s.ImgQuotaUsed,
+					"img_quota_limit":   s.ImgQuotaLimit,
+					"vid_quota_used":    s.VidQuotaUsed,
+					"vid_quota_limit":   s.VidQuotaLimit,
+					"chat_quota_used":   s.ChatQuotaUsed,
+					"chat_quota_limit":  s.ChatQuotaLimit,
+					"quota_synced_at":   s.QuotaSyncedAt,
 				})
 			}
 			result["grok"] = grokResult
@@ -347,7 +354,6 @@ func PageRange(page, pageSize, total int) (int, int) {
 	}
 	return start, end
 }
-
 
 // HandleRefresh forces a refresh on every Grok account (admin only).
 func HandleRefresh(grokAM *upstream.GrokAccountManager) gin.HandlerFunc {
@@ -591,6 +597,9 @@ func HandleImportAccount(grokAM *upstream.GrokAccountManager) gin.HandlerFunc {
 			IDToken      string `json:"id_token"`
 			ExpiresIn    int    `json:"expires_in"`
 			Sub          string `json:"sub"`
+			SSO          string `json:"sso"`
+			SSORW        string `json:"sso_rw"`
+			Password     string `json:"password"`
 		}
 		if err := c.ShouldBindJSON(&req); err != nil {
 			c.JSON(400, gin.H{"error": "invalid JSON body"})
@@ -601,7 +610,13 @@ func HandleImportAccount(grokAM *upstream.GrokAccountManager) gin.HandlerFunc {
 			return
 		}
 		_, total, acc := grokAM.UpsertAccount(req.Email, req.AccessToken, req.RefreshToken, req.IDToken, req.Sub, req.ExpiresIn)
-		slog.Info("imported account", "module", "grok", "email", req.Email, "total", total)
+		if req.SSO != "" {
+			grokAM.SetSSO(req.Email, req.SSO, req.SSORW)
+		}
+		if req.Password != "" {
+			grokAM.SetPassword(req.Email, req.Password)
+		}
+		slog.Info("imported account", "module", "grok", "email", req.Email, "total", total, "sso", req.SSO != "")
 		c.JSON(200, gin.H{
 			"status":  "imported",
 			"email":   req.Email,
@@ -675,6 +690,9 @@ func HandleImportAccountBulk(grokAM *upstream.GrokAccountManager) gin.HandlerFun
 				IDToken      string `json:"id_token"`
 				ExpiresIn    int    `json:"expires_in"`
 				Sub          string `json:"sub"`
+				SSO          string `json:"sso"`
+				SSORW        string `json:"sso_rw"`
+				Password     string `json:"password"`
 			} `json:"accounts"`
 		}
 		if err := c.ShouldBindJSON(&req); err != nil {
@@ -694,6 +712,12 @@ func HandleImportAccountBulk(grokAM *upstream.GrokAccountManager) gin.HandlerFun
 				continue
 			}
 			created, _, _ := grokAM.UpsertAccount(a.Email, a.AccessToken, a.RefreshToken, a.IDToken, a.Sub, a.ExpiresIn)
+			if a.SSO != "" {
+				grokAM.SetSSO(a.Email, a.SSO, a.SSORW)
+			}
+			if a.Password != "" {
+				grokAM.SetPassword(a.Email, a.Password)
+			}
 			if created {
 				added++
 			} else {
@@ -841,12 +865,12 @@ func HandleListKeys(am *auth.Manager) gin.HandlerFunc {
 func HandleCreateKey(am *auth.Manager) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var req struct {
-			Name          string        `json:"name"`
-			Role          auth.KeyRole  `json:"role"`
-			AllowedModels []string      `json:"allowed_models"`
-			RPM           int           `json:"rpm"`
-			Burst         int           `json:"burst"`
-			TokenQuota    int64         `json:"token_quota"`
+			Name          string       `json:"name"`
+			Role          auth.KeyRole `json:"role"`
+			AllowedModels []string     `json:"allowed_models"`
+			RPM           int          `json:"rpm"`
+			Burst         int          `json:"burst"`
+			TokenQuota    int64        `json:"token_quota"`
 		}
 		if err := c.ShouldBindJSON(&req); err != nil {
 			c.JSON(400, gin.H{"error": "invalid JSON body"})
@@ -869,6 +893,20 @@ func HandleCreateKey(am *auth.Manager) gin.HandlerFunc {
 				c.JSON(400, gin.H{"error": "name contains control characters"})
 				return
 			}
+		}
+		// AK-1: reject negative / absurd rate & quota values (would break the
+		// limiter math or overflow the token counter).
+		if req.RPM < 0 || req.Burst < 0 || req.TokenQuota < 0 {
+			c.JSON(400, gin.H{"error": "rpm, burst, and token_quota must be non-negative"})
+			return
+		}
+		if req.RPM > 1_000_000 || req.Burst > 1_000_000 {
+			c.JSON(400, gin.H{"error": "rpm and burst too large (max 1000000)"})
+			return
+		}
+		if req.TokenQuota > 1_000_000_000_000_000 {
+			c.JSON(400, gin.H{"error": "token_quota too large (max 1e15)"})
+			return
 		}
 		key := auth.GenerateGatewayKey()
 		info := am.AddWithRole(key, req.Name, req.Role, req.AllowedModels, req.RPM, req.Burst, req.TokenQuota)
@@ -944,8 +982,8 @@ func HandleUpdateKey(am *auth.Manager) gin.HandlerFunc {
 			return
 		}
 		name := ""
-		var role auth.KeyRole = ""    // empty = no change
-		var allowedModels []string    // nil = no change, empty slice = clear whitelist
+		var role auth.KeyRole = "" // empty = no change
+		var allowedModels []string // nil = no change, empty slice = clear whitelist
 		rpm := -1
 		burst := -1
 		var quota int64 = -1
@@ -977,6 +1015,20 @@ func HandleUpdateKey(am *auth.Manager) gin.HandlerFunc {
 		}
 		if req.TokenQuota != nil {
 			quota = *req.TokenQuota
+		}
+		// AK-1: validate rate/quota on update too. -1 is the "no change" sentinel;
+		// any other negative value is rejected, huge values are capped.
+		if (rpm != -1 && rpm < 0) || (burst != -1 && burst < 0) || (quota != -1 && quota < 0) {
+			c.JSON(400, gin.H{"error": "rpm, burst, and token_quota must be non-negative"})
+			return
+		}
+		if rpm > 1_000_000 || burst > 1_000_000 {
+			c.JSON(400, gin.H{"error": "rpm and burst too large (max 1000000)"})
+			return
+		}
+		if quota > 1_000_000_000_000_000 {
+			c.JSON(400, gin.H{"error": "token_quota too large (max 1e15)"})
+			return
 		}
 		if !am.Update(fullKey, name, role, allowedModels, rpm, burst, quota, req.Disabled) {
 			c.JSON(404, gin.H{"error": "key not found"})
@@ -1213,6 +1265,67 @@ func HandleDeleteCBKey(cbKM *upstream.CBKeyManager) gin.HandlerFunc {
 		slog.Info("deleted cb key", "module", "cb", "remaining", remaining)
 		c.JSON(200, gin.H{"status": "deleted", "remaining": remaining})
 	}
+}
+
+// HandleDisableCBKey permanently disables a CodeBuddy key (full or masked).
+// Body: {"key":"...", "reason":"..."} — reason optional, persisted to Redis.
+// Uses the in-manager disable path so the state is consistent in memory + Redis
+// and survives the credit-sync worker (unlike raw Redis HSET disables).
+func HandleDisableCBKey(cbKM *upstream.CBKeyManager) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var req struct {
+			Key    string `json:"key"`
+			Reason string `json:"reason"`
+		}
+		if err := c.ShouldBindJSON(&req); err != nil || req.Key == "" {
+			c.JSON(400, gin.H{"error": "key required"})
+			return
+		}
+		fullKey := cbKM.ResolveKey(req.Key)
+		if fullKey == "" {
+			c.JSON(404, gin.H{"error": "cb key not found"})
+			return
+		}
+		if !cbKM.DisableKey(fullKey, req.Reason) {
+			c.JSON(404, gin.H{"error": "cb key not found"})
+			return
+		}
+		slog.Info("disabled cb key via api", "module", "cb", "key", maskSecret(fullKey), "reason", req.Reason)
+		c.JSON(200, gin.H{"status": "disabled", "remaining": cbKM.Len()})
+	}
+}
+
+// HandleEnableCBKey re-enables a previously disabled CodeBuddy key (full or masked).
+// Body: {"key":"..."} — uses the in-manager path so memory + Redis stay consistent.
+func HandleEnableCBKey(cbKM *upstream.CBKeyManager) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var req struct {
+			Key string `json:"key"`
+		}
+		if err := c.ShouldBindJSON(&req); err != nil || req.Key == "" {
+			c.JSON(400, gin.H{"error": "key required"})
+			return
+		}
+		fullKey := cbKM.ResolveKey(req.Key)
+		if fullKey == "" {
+			c.JSON(404, gin.H{"error": "cb key not found"})
+			return
+		}
+		if !cbKM.EnableKey(fullKey) {
+			c.JSON(404, gin.H{"error": "cb key not found"})
+			return
+		}
+		slog.Info("enabled cb key via api", "module", "cb", "key", maskSecret(fullKey))
+		c.JSON(200, gin.H{"status": "enabled", "remaining": cbKM.Len()})
+	}
+}
+
+// maskSecret masks a secret for logs: first 8 chars + "..." + last 4.
+func maskSecret(s string) string {
+	if len(s) <= 12 {
+		return "***"
+	}
+	return s[:8] + "..." + s[len(s)-4:]
 }
 
 // HandleCleanupDisabled removes all permanently disabled keys/accounts.

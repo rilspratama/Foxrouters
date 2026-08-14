@@ -699,7 +699,7 @@ curl -s http://127.0.0.1:20130/health
 | `health.go` | Health endpoint + active health checks. |
 | `handlers.go` | Account, key, history, dashboard handlers. |
 | `db.go` | Redis + LogStore clients and schema. |
-| `dashboard.html` | Embedded SPA (`go:embed`) — Type badge, OAuth/Bulk OAuth, Sync credits. |
+| `dashboard/` | Embedded SPA (`go:embed` dir, assembled in `main.go`) — modular: head/body/modals HTML + core/pages JS. Type badge, OAuth/Bulk OAuth, Sync credits. |
 | `dev.sh` | Isolated dev stack (own Redis, port 20131, safety gates). |
 
 **Patch order (please follow):** `test → build → restart → smoke`.

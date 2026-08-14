@@ -8,6 +8,92 @@ Policy: **test (`go test -race`) before build/restart**. Secrets only via `.gate
 
 ---
 
+## v1.6.8+ (dev working tree) — Dashboard modular split (2026-08-13)
+
+**Changed:** `dashboard.html` (single 6.3K-line file) split into `dashboard/` dir — `head.html`/`body.html`/`modals.html` (HTML+CSS) + `core.js` (script block 1: auth/routing/helpers/accounts/history) + `pages.js` (script block 2: custom/combos/proxies/tunnel/settings/media + INIT) + `foot.html`. `main.go` now `go:embed dashboard` (embed.FS) + `assembleDashboard()` concat — payload byte-identical (verified 345,220 bytes, 0 diff; 6,316 lines). Build/vet/test PASS. Future edits touch only the relevant part file; script-block boundary (INIT must stay at end of last block) is preserved.
+
+## v1.6.7+ (dev working tree) — Grok free image generation (2026-08-12)
+
+### Added
+- **Media Studio Chat tab (first tab)** — LLM prompt engineer before generation:
+  - Chat with any gateway model (dropdown, default glm-5.2) with an image-prompt-engineer system prompt
+  - Multi-turn refine; last assistant reply = current image prompt (auto-fills Generate tab)
+  - **Generate Image →** (runs gen with the LLM prompt) + **Use in Edit** buttons
+- **Fix preview edit/video broken** — CSP img-src/media-src cuma allow self+data: → imgen.x.ai & vidgen.x.ai ditambahkan (hasil edit/video Media Studio adalah URL external; URL langsung OK, di dashboard ke-blok CSP).
+- **Content Filters toggle di Settings** — master switch + per-rule checkbox (21 rule), GET/PUT `/settings/filters`, Redis `gw:config` (`filters_enabled` + `filters_active_rules` JSON), runtime tanpa restart. `compileFilters` sekarang compile SEMUA rule (gating di apply-time). Label per rule buat UI.
+- **Reasoning select di Chat tab** — reasoning_effort high/medium/low/none (default medium). Verified: gateway forwards it, reasoning_content muncul (tetap hidden dari prompt — prompt cuma ambil message.content).
+- **Chat fixes**: model dropdown black → `color-scheme:dark` + immediate fallback seeding (MEDIA_FALLBACK_MODELS) so it's never empty; History dropdown (localStorage-persisted sessions, cap 25, + New / Clear saves current) — survives refresh/navigation; LLM context window raised slice(-20)→slice(-30).
+- **Media Studio page (#/media)** — 3 tabs (Generate / Edit / Video):
+  - Generate: prompt + aspect ratio (1:1/3:2/2:3/16:9) + count → base64 preview → Download / Send to Edit
+  - Edit: prompt + source image (file upload OR from Generate tab) → edited image URL (imgen.x.ai)
+  - Video: prompt → async job → auto-poll every 5s with progress bar → <video> player + download (vidgen.x.ai)
+- **`POST /v1/images/edits`** — OpenAI edits shape ({model, prompt, image(b64)} → {created, data:[{url}]}). Shares image quota (5/account) + lazy-auth rotation.
+- **`POST /v1/videos/generations`** — {model, prompt} → {id, status:pending}. Model `grok-imagine-video` (NOT image model — wrong model hangs upstream). Video quota 2/account (lazy local count).
+- **`GET /v1/videos/:id`** — poll: 202 {status, progress} → 200 {data:[{url}]}. DPoP GET proof (htm:"GET"). Parses console.x.ai done shape `{"status":"done","video":{"url":...}}`.
+- **Video owner persistence** — `grok:video:<id>` → owner email in Redis (24h TTL) so polling survives gateway restarts.
+- Settings page (#/settings) — Turnstile Solver config (GET/PUT /settings/turnstile + POST test).
+
+### Fixed
+- proof() now takes htm param (GET vs POST) — video poll DPoP proof was hardcoded POST.
+- clampErr() helper — `x[:200]` on short bodies panicked (index out of range).
+
+## v1.6.7+ (dev working tree) — Grok free image generation (2026-08-12) legacy
+
+### Added
+- **Settings page (#/settings)** — Turnstile Solver config: `GET/PUT /settings/turnstile`
+  (solver URL + sitekey, Redis `gw:config` persisted, env `TURNSTILE_SOLVER_URL`/
+  `TURNSTILE_SITEKEY` fallback) + `POST /settings/turnstile/test` (live solve →
+  token len + elapsed). Containers reach the host solver via
+  `host.docker.internal` (`extra_hosts: host-gateway` in compose + dev.sh).
+  Verified on dev: corrupt-ALL-SSO → 401 → auto re-login via configured solver → 200.
+- **`POST /v1/images/generations`** — OpenAI Images API endpoint backed by Grok free-tier
+  image gen via console.x.ai DPoP (SSO cookie + DPoP proof). **Pure Go** — verified
+  end-to-end: import account with `sso`/`sso_rw` → generate → 200 b64 image.
+- **Lazy SSO auth (per operator directive)** — cookies are CACHED in Redis, never
+  proactively refreshed. 401 invalid SSO → **pure-HTTP re-login in-gateway**
+  (`LoginSSO`: local Turnstile solver `127.0.0.1:8742` + `POST /api/auth/sign-in`,
+  ~3s, no browser — verified Go TLS is accepted by console.x.ai) → retry once.
+  429 resource-exhausted → `MarkImgExhausted` (lazy local count, limit 5) + rotate.
+  Account `password` field (json:"-", never serialized) imported via
+  `/accounts/import` + `/accounts/import/bulk` for the re-login path.
+- **GrokAccount image fields** — `sso`, `sso_rw`, `password` (console SSO cookies +
+  login password) + `img_cooldown_until` persisted to Redis (`grok:account:<email>`);
+  import (single + bulk) accepts `sso`/`sso_rw`/`password`.
+- **Account rotation** — `PickImageAccount()` RR over accounts with SSO/not-disabled/
+  cooldown-passed/quota-not-exhausted; skips lazily-counted-exhausted accounts.
+- **DPoP client** — `internal/upstream/grok_dpop.go`: ECDSA P-256 JWK mint
+  (`POST /v1/dpop/token`) → ES256 proof (`typ: dpop+jwt`, jti/htm/htu/iat/ath, raw r||s)
+  → `POST /v1/images/generations` (`grok-imagine-image`, b64_json). Plain net/http.
+- **Quota tracking (lazy)** — image quota counted LOCALLY (`IncrImgUsed` on 200,
+  `MarkImgExhausted` on 429, limit 5). **`GrokImageQuotaWorker` 5min /v1/usage
+  round-trip REMOVED** — cookies die too often for proactive sync to be reliable.
+  `POST /grok/quota/sync` remains as best-effort on-demand diagnostics only.
+- **output_text extraction bug (v1.6.7, Aug 12):** `fbStreamToNonStream` builds
+  `choices` as `[]map[string]any`, but the Freebuff handler asserted `agg["choices"].([]any)`
+  → assertion ALWAYS failed → `output_text` never set → dashboard preview empty for every
+  Freebuff request (status 200, response_body had content). Fixed with `setFBOutputText()` /
+  `fbExtractContent()` handling BOTH shapes (stream + non-stream paths).
+- **Dashboard `accounts is not defined` (v1.6.7, Aug 12):** `refresh()` stopped fetching
+  `/accounts` (only `/health` + `/v1/models`), but a leftover `accounts.codebuddy` reference
+  crashed the whole refresh → ReferenceError. Fixed: CB credits card now reads
+  `health.cb_credits_used` / `health.cb_credits_limit` (already in /health).
+- **SQLite cold-start quirk:** on a multi-GB logs.db, the FIRST `/history/recent` queries
+  after container restart can take 10+s (WAL/shm recovery) and trip the 5s handler deadline →
+  transient 500 `context deadline exceeded`. Warm queries are 0ms. Not a code bug; retry after
+  ~30s. `ORDER BY id DESC` is the fast path (PK index); `ORDER BY timestamp DESC` uses the
+  covering index + temp btree (fine when warm).
+- **Tool-call turns have legitimately empty `output_text`** (content="" + finish_reason=tool_calls).
+  Not a capture bug — the model emitted only tool calls, no text. Stream clients get the real
+  SSE; only the dashboard preview shows empty.
+
+### Notes
+- **Root-cause lesson:** an earlier "console.x.ai rejects Go TLS" conclusion was WRONG —
+  the 401s were a missing `sso-rw` cookie value (pool JSON key `sso-rw` DASH vs struct tag
+  `sso_rw` underscore silently drops the value). With the complete cookie, plain Go
+  net/http works. Check cookie/JSON key spelling before blaming TLS fingerprints.
+
+---
+
 ## v1.6.7+ (working tree, not released) — Freebuff test + streak worker, CLI header sync, provider grid (2026-08-12)
 
 ### Added

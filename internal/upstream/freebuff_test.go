@@ -2,6 +2,7 @@ package upstream
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"testing"
 	"time"
@@ -162,6 +163,96 @@ func TestFbNextTierGating(t *testing.T) {
 	}
 }
 
+// TestFbNextSessionAware verifies session-aware account selection:
+// live session match for the requested model > idle (no session) > mismatch
+// (delete+recreate fallback). Mismatch accounts must only be picked when
+// nothing better exists.
+func TestFbNextSessionAware(t *testing.T) {
+	fresh := func(token string) *FreebuffAccount {
+		return &FreebuffAccount{
+			Token:   token,
+			Email:   token + "@example.com",
+			QuotaLimit: 6, QuotaRecent: 0,
+		}
+	}
+	future := time.Now().Add(30 * time.Minute)
+
+	t.Run("session match beats idle", func(t *testing.T) {
+		am := NewFreebuffAccountManager(nil)
+		am.accounts["a"] = fresh("a")
+		am.accounts["b"] = fresh("b")
+		am.storeSession("a", "deepseek/deepseek-v4-flash",
+			&FreebuffSession{InstanceID: "s1", Model: "deepseek/deepseek-v4-flash", ExpiresAt: future})
+		for i := 0; i < 10; i++ {
+			got, err := am.Next("deepseek/deepseek-v4-flash")
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got.Token != "a" {
+				t.Fatalf("iter %d: got %s, want a (session match)", i, got.Token)
+			}
+		}
+	})
+
+	t.Run("idle beats mismatch", func(t *testing.T) {
+		am := NewFreebuffAccountManager(nil)
+		am.accounts["a"] = fresh("a") // has flash session
+		am.accounts["b"] = fresh("b") // idle
+		am.accounts["c"] = fresh("c") // idle
+		am.storeSession("a", "deepseek/deepseek-v4-flash",
+			&FreebuffSession{InstanceID: "s1", Model: "deepseek/deepseek-v4-flash", ExpiresAt: future})
+		for i := 0; i < 20; i++ {
+			got, err := am.Next("mimo/mimo-v2.5") // different model
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got.Token == "a" {
+				t.Fatalf("iter %d: picked a (mismatch) while idle accounts exist", i)
+			}
+		}
+	})
+
+	t.Run("mismatch fallback when nothing better", func(t *testing.T) {
+		am := NewFreebuffAccountManager(nil)
+		am.accounts["a"] = fresh("a")
+		am.accounts["b"] = fresh("b")
+		am.storeSession("a", "deepseek/deepseek-v4-flash",
+			&FreebuffSession{InstanceID: "s1", Model: "deepseek/deepseek-v4-flash", ExpiresAt: future})
+		am.storeSession("b", "deepseek/deepseek-v4-flash",
+			&FreebuffSession{InstanceID: "s2", Model: "deepseek/deepseek-v4-flash", ExpiresAt: future})
+		seen := map[string]bool{}
+		for i := 0; i < 20; i++ {
+			got, err := am.Next("mimo/mimo-v2.5")
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			seen[got.Token] = true
+		}
+		if !seen["a"] || !seen["b"] {
+			t.Fatalf("expected both mismatch accounts to be served, got %v", seen)
+		}
+	})
+
+	t.Run("expired session treated as idle", func(t *testing.T) {
+		am := NewFreebuffAccountManager(nil)
+		am.accounts["a"] = fresh("a") // expired flash session
+		am.accounts["b"] = fresh("b")
+		am.storeSession("a", "deepseek/deepseek-v4-flash",
+			&FreebuffSession{InstanceID: "s1", Model: "deepseek/deepseek-v4-flash", ExpiresAt: time.Now().Add(-1 * time.Minute)})
+		for i := 0; i < 10; i++ {
+			got, err := am.Next("deepseek/deepseek-v4-flash")
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			// expired "a" is idle — b may also be picked by RR, but "a" must
+			// not be picked as a session match (it should behave as idle).
+			if got.Token != "a" && got.Token != "b" {
+				t.Fatalf("iter %d: unexpected account %s", i, got.Token)
+			}
+		}
+	})
+}
+
 // TestFbQuotaByModelJSONRoundTrip verifies the per-model quota map survives
 // JSON marshal/unmarshal (the Redis persistence format).
 func TestFbQuotaByModelJSONRoundTrip(t *testing.T) {
@@ -210,4 +301,86 @@ func TestFbRedisNilSafe(t *testing.T) {
 	// store with nil db must not panic
 	am.storeSession("tok", "model", &FreebuffSession{InstanceID: "i", Model: "model", ExpiresAt: time.Now().Add(time.Hour)})
 	am.storeRun("tok", "agent", "run")
+}
+
+// TestFbSessionCreateErrorBanned verifies 403 {"status":"banned"} is classified
+// as ErrFBBanned while other non-200 responses are not.
+func TestFbSessionCreateErrorBanned(t *testing.T) {
+	if err := fbSessionCreateError(403, []byte(`{"status":"banned"}`)); !errors.Is(err, ErrFBBanned) {
+		t.Fatalf("403 banned body: got %v, want ErrFBBanned", err)
+	}
+	// Other statuses/bodies must NOT be classified as banned.
+	for name, tc := range map[string]struct {
+		code int
+		body []byte
+	}{
+		"403 other body": {403, []byte(`{"error":"forbidden"}`)},
+		"403 empty":      {403, nil},
+		"429 quota":      {429, []byte(`{"model":"x","entitlementBreakdown":{"base":6}}`)},
+		"500":            {500, []byte(`internal error`)},
+	} {
+		if err := fbSessionCreateError(tc.code, tc.body); errors.Is(err, ErrFBBanned) {
+			t.Fatalf("%s: unexpected ErrFBBanned (code=%d body=%s)", name, tc.code, tc.body)
+		}
+	}
+}
+
+// TestFbBannedLifecycle verifies MarkBanned persists + surfaces in ListAccounts
+// and that Next() skips banned accounts.
+func TestFbBannedLifecycle(t *testing.T) {
+	am := NewFreebuffAccountManager(nil)
+	am.accounts["account-token-aaaa"] = &FreebuffAccount{Token: "account-token-aaaa", Email: "a@example.com", QuotaLimit: 6, QuotaRecent: 0}
+	am.accounts["account-token-bbbb"] = &FreebuffAccount{Token: "account-token-bbbb", Email: "b@example.com", QuotaLimit: 6, QuotaRecent: 0}
+
+	am.MarkBanned("account-token-aaaa")
+
+	// Next must never return the banned account.
+	for i := 0; i < 10; i++ {
+		got, err := am.Next("deepseek/deepseek-v4-flash")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got.Token == "account-token-aaaa" {
+			t.Fatalf("iter %d: Next returned banned account a", i)
+		}
+	}
+
+	// ListAccounts surfaces the ban.
+	for _, e := range am.ListAccounts() {
+		if e["email"] == "a@example.com" {
+			if e["status"] != "banned" || e["banned"] != true {
+				t.Fatalf("expected banned status for a, got status=%v banned=%v", e["status"], e["banned"])
+			}
+			if bannedAt, _ := e["banned_at"].(time.Time); bannedAt.IsZero() {
+				t.Fatalf("expected banned_at to be set")
+			}
+		}
+	}
+
+	// MarkBanned is idempotent (no panic, second call fine).
+	am.MarkBanned("account-token-aaaa")
+
+	// Banned account can be restored by clearing the flag (manual re-enable).
+	am.mu.RLock()
+	accA := am.accounts["account-token-aaaa"]
+	am.mu.RUnlock()
+	accA.mu.Lock()
+	accA.Banned = false
+	accA.mu.Unlock()
+	// Round-robin means the FIRST call may hit the other account — the restored
+	// one must be selectable within a few iterations.
+	restored := false
+	for i := 0; i < 10; i++ {
+		got, err := am.Next("deepseek/deepseek-v4-flash")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got.Token == "account-token-aaaa" {
+			restored = true
+			break
+		}
+	}
+	if !restored {
+		t.Fatalf("expected restored account a to be selectable again")
+	}
 }

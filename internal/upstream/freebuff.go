@@ -7,6 +7,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -57,6 +58,10 @@ const (
 	fbSessionKeyPrefix = "fb:session:"
 	fbRunKeyPrefix     = "fb:run:"
 )
+
+// ErrFBBanned marks an account permanently banned by Freebuff upstream.
+// Detected from POST /session 403 {"status":"banned"} or GET /session status:"banned".
+var ErrFBBanned = errors.New("freebuff account banned")
 
 // FreebuffModels maps gateway model IDs (fb/ prefix) to upstream config.
 type FreebuffModelConfig struct {
@@ -110,6 +115,8 @@ type FreebuffAccount struct {
 	Email         string    `json:"email"`
 	Disabled      bool      `json:"disabled"`
 	DisabledAt    time.Time `json:"disabled_at"`
+	Banned        bool      `json:"banned"`
+	BannedAt      time.Time `json:"banned_at"`
 	CooldownUntil time.Time `json:"cooldown_until"`
 	QuotaRecent   float64   `json:"quota_recent"`
 	QuotaLimit    float64   `json:"quota_limit"`
@@ -236,6 +243,16 @@ func (am *FreebuffAccountManager) LoadFromRedis() error {
 		if vals["disabled"] == "1" || vals["disabled"] == "true" {
 			acc.Disabled = true
 		}
+		if vals["banned"] == "1" || vals["banned"] == "true" {
+			acc.Banned = true
+		}
+		if v, ok := vals["banned_at"]; ok && v != "" && v != "0" {
+			var ts int64
+			fmt.Sscanf(v, "%d", &ts)
+			if ts > 0 {
+				acc.BannedAt = time.Unix(ts, 0)
+			}
+		}
 		if v, ok := vals["cooldown_until"]; ok && v != "" && v != "0" {
 			var ts int64
 			fmt.Sscanf(v, "%d", &ts)
@@ -296,6 +313,26 @@ func (am *FreebuffAccountManager) LoadFromRedis() error {
 	return nil
 }
 
+// MarkBanned marks an account permanently banned (persisted to Redis).
+// Banned accounts are skipped by Next() but keep their entry so the ban is
+// visible in the dashboard; they can be manually re-enabled via re-import.
+func (am *FreebuffAccountManager) MarkBanned(token string) {
+	am.mu.Lock()
+	acc, ok := am.accounts[token]
+	if !ok {
+		am.mu.Unlock()
+		return
+	}
+	acc.mu.Lock()
+	if !acc.Banned {
+		acc.Banned = true
+		acc.BannedAt = time.Now()
+		am.SaveAccount(acc)
+	}
+	acc.mu.Unlock()
+	am.mu.Unlock()
+}
+
 // SaveAccount persists account state to Redis.
 func (am *FreebuffAccountManager) SaveAccount(acc *FreebuffAccount) {
 	if am.db == nil || !am.db.Ready() {
@@ -316,12 +353,18 @@ func (am *FreebuffAccountManager) SaveAccount(acc *FreebuffAccount) {
 	if !acc.CooldownUntil.IsZero() {
 		cooldownTs = acc.CooldownUntil.Unix()
 	}
+	bannedStr := "0"
+	if acc.Banned {
+		bannedStr = "1"
+	}
 	data := map[string]interface{}{
 		"token":           acc.Token,
 		"user_id":         acc.UserID,
 		"email":           acc.Email,
 		"disabled":        disabledStr,
 		"disabled_at":     acc.DisabledAt.Unix(),
+		"banned":          bannedStr,
+		"banned_at":       acc.BannedAt.Unix(),
 		"cooldown_until":  cooldownTs,
 		"quota_recent":    acc.QuotaRecent,
 		"quota_limit":     acc.QuotaLimit,
@@ -455,6 +498,7 @@ func (am *FreebuffAccountManager) Next(model string) (*FreebuffAccount, error) {
 	for _, acc := range am.accounts {
 		acc.mu.Lock()
 		disabled := acc.Disabled
+		banned := acc.Banned
 		cooldown := !acc.CooldownUntil.IsZero() && time.Now().Before(acc.CooldownUntil)
 		quotaExhausted := acc.QuotaLimit > 0 && acc.QuotaRecent >= acc.QuotaLimit
 		tierBlocked := acc.Tier == "blocked" || (acc.Tier == "limited" && premiumModel)
@@ -462,7 +506,7 @@ func (am *FreebuffAccountManager) Next(model string) (*FreebuffAccount, error) {
 			earliestReset = acc.QuotaResetAt
 		}
 		acc.mu.Unlock()
-		if !disabled && !cooldown && !quotaExhausted && !tierBlocked {
+		if !disabled && !banned && !cooldown && !quotaExhausted && !tierBlocked {
 			eligible = append(eligible, acc)
 		}
 	}
@@ -479,28 +523,71 @@ func (am *FreebuffAccountManager) Next(model string) (*FreebuffAccount, error) {
 
 	// Sort by QuotaRecent ascending (least used = most remaining quota)
 	// Snapshot quota values under lock, then sort without holding locks (avoid deadlock in comparator)
-	type accQuota struct {
-		acc    *FreebuffAccount
-		recent float64
-	}
-	snapshots := make([]accQuota, len(eligible))
-	for i, acc := range eligible {
-		acc.mu.Lock()
-		snapshots[i] = accQuota{acc: acc, recent: acc.QuotaRecent}
-		acc.mu.Unlock()
-	}
-	sort.Slice(snapshots, func(i, j int) bool {
-		return snapshots[i].recent < snapshots[j].recent
-	})
-	// Rebuild eligible from sorted snapshots
-	for i, s := range snapshots {
-		eligible[i] = s.acc
+	type fbCandidate struct {
+		acc      *FreebuffAccount
+		recent   float64
+		priority int // 0 = live cached session for requested model, 1 = idle (no session), 2 = session on other model
 	}
 
-	// Round-robin among the top candidates with same lowest quota
-	// (or just pick the first = least used)
+	candidates := make([]fbCandidate, 0, len(eligible))
+	for _, acc := range eligible {
+		acc.mu.Lock()
+		recent := acc.QuotaRecent
+		acc.mu.Unlock()
+		priority := 2
+		if am.hasCachedSessionFor(acc.Token, model) {
+			priority = 0
+		} else if !am.hasAnyCachedSession(acc.Token) {
+			priority = 1
+		}
+		candidates = append(candidates, fbCandidate{acc: acc, recent: recent, priority: priority})
+	}
+	sort.Slice(candidates, func(i, j int) bool {
+		if candidates[i].priority != candidates[j].priority {
+			return candidates[i].priority < candidates[j].priority
+		}
+		return candidates[i].recent < candidates[j].recent
+	})
+
+	// Pick the best priority group (session match > idle > mismatch), round-robin within it.
+	bestPriority := candidates[0].priority
+	var top []*FreebuffAccount
+	for _, c := range candidates {
+		if c.priority != bestPriority {
+			break
+		}
+		top = append(top, c.acc)
+	}
+
 	idx := atomic.AddUint64(&am.idx, 1)
-	return eligible[idx%uint64(len(eligible))], nil
+	return top[idx%uint64(len(top))], nil
+}
+
+// hasCachedSessionFor reports whether the account has a live cached session for
+// the given model. In-memory L1 only — cheap, no Redis per account. Redis L2 is
+// warmed back into L1 by cachedSession() on actual use, so a cold L1 after a
+// restart just degrades to "idle" (priority 1), which fbGetOrCreateSession still
+// resolves correctly via GET /session (0 cost).
+func (am *FreebuffAccountManager) hasCachedSessionFor(token, model string) bool {
+	cacheKey := fbSessionKeyPrefix + token + ":" + model
+	fbSessionCache.Lock()
+	cached, ok := fbSessionCache.m[cacheKey]
+	fbSessionCache.Unlock()
+	return ok && time.Until(cached.ExpiresAt) > FREEBUFF_SESSION_MIN_REMAINING
+}
+
+// hasAnyCachedSession reports whether the account has at least one live cached
+// session (any model). Expired entries are treated as idle.
+func (am *FreebuffAccountManager) hasAnyCachedSession(token string) bool {
+	prefix := fbSessionKeyPrefix + token + ":"
+	fbSessionCache.Lock()
+	defer fbSessionCache.Unlock()
+	for k, v := range fbSessionCache.m {
+		if strings.HasPrefix(k, prefix) && time.Until(v.ExpiresAt) > FREEBUFF_SESSION_MIN_REMAINING {
+			return true
+		}
+	}
+	return false
 }
 
 // ListAccounts returns a snapshot of all accounts for the API/dashboard.
@@ -512,7 +599,9 @@ func (am *FreebuffAccountManager) ListAccounts() []map[string]any {
 	for _, acc := range am.accounts {
 		acc.mu.Lock()
 		status := "active"
-		if acc.Disabled {
+		if acc.Banned {
+			status = "banned"
+		} else if acc.Disabled {
 			status = "disabled"
 		} else if !acc.CooldownUntil.IsZero() && time.Now().Before(acc.CooldownUntil) {
 			status = "cooldown"
@@ -524,6 +613,8 @@ func (am *FreebuffAccountManager) ListAccounts() []map[string]any {
 			"email":           acc.Email,
 			"status":          status,
 			"disabled":        acc.Disabled,
+			"banned":          acc.Banned,
+			"banned_at":       acc.BannedAt,
 			"cooldown_until":  acc.CooldownUntil,
 			"quota_recent":    acc.QuotaRecent,
 			"quota_limit":     acc.QuotaLimit,
@@ -626,6 +717,11 @@ func (am *FreebuffAccountManager) SyncQuota(acc *FreebuffAccount) error {
 		return fmt.Errorf("quota sync parse: %w", err)
 	}
 
+	// Banned account — upstream reports status:"banned" in GET /session.
+	if data.Status == "banned" {
+		return ErrFBBanned
+	}
+
 	// Always persist tier/country info (present even without an active session)
 	acc.mu.Lock()
 	if data.AccessTier != "" {
@@ -705,6 +801,11 @@ func (am *FreebuffAccountManager) SyncAllQuota() {
 	synced := 0
 	for _, acc := range accounts {
 		if err := am.SyncQuota(acc); err != nil {
+			if errors.Is(err, ErrFBBanned) {
+				am.MarkBanned(acc.Token)
+				slog.Warn("fb account banned (quota sync)", "module", "freebuff", "token", acc.Token[:8]+"...")
+				continue
+			}
 			slog.Warn("fb quota sync failed", "module", "freebuff", "token", acc.Token[:8]+"...", "error", err)
 		} else {
 			synced++
@@ -956,6 +1057,15 @@ func (am *FreebuffAccountManager) storeRun(token, agentID, runID string) {
 	}
 }
 
+// fbSessionCreateError classifies a non-200 POST /session response.
+// 403 {"status":"banned"} → ErrFBBanned (permanent); everything else → generic.
+func fbSessionCreateError(statusCode int, respBody []byte) error {
+	if statusCode == 403 && strings.Contains(string(respBody), `"banned"`) {
+		return ErrFBBanned
+	}
+	return fmt.Errorf("POST session: %d %s", statusCode, string(respBody))
+}
+
 // fbGetOrCreateSession returns an active session, creating one if needed.
 // Session cache is L1 in-memory + L2 Redis (persistent across restarts).
 func (am *FreebuffAccountManager) fbGetOrCreateSession(client *http.Client, token, userID, model string) (*FreebuffSession, error) {
@@ -1015,6 +1125,9 @@ func fbGetSession(client *http.Client, token string) (*FreebuffSession, error) {
 		return nil, err
 	}
 	if data.Status != "active" {
+		if data.Status == "banned" {
+			return nil, ErrFBBanned
+		}
 		return nil, fmt.Errorf("session not active: %s", data.Status)
 	}
 	expiresAt, _ := time.Parse(time.RFC3339, data.ExpiresAt)
@@ -1043,7 +1156,7 @@ func fbCreateSession(client *http.Client, token, model string) (*FreebuffSession
 	respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 
 	if resp.StatusCode != 200 {
-		return nil, fmt.Errorf("POST session: %d %s", resp.StatusCode, string(respBody))
+		return nil, fbSessionCreateError(resp.StatusCode, respBody)
 	}
 
 	var data struct {
@@ -1795,6 +1908,14 @@ func ProxyFreebuff(c *gin.Context, body []byte, bodyMap map[string]any, am *Free
 		// 1. Get/create session
 		sess, err := am.fbGetOrCreateSession(client, acc.Token, acc.UserID, upstreamModel)
 		if err != nil {
+			if errors.Is(err, ErrFBBanned) {
+				bannedToken := acc.Token
+				lastErr = fmt.Sprintf("banned: %v", err)
+				acc.mu.Unlock()
+				am.MarkBanned(bannedToken)
+				slog.Warn("fb account banned", "module", "freebuff", "token", bannedToken[:8]+"...")
+				continue
+			}
 			acc.mu.Unlock()
 			lastErr = fmt.Sprintf("session: %v", err)
 			slog.Warn("fb session failed", "module", "freebuff", "attempt", attempt+1, "error", err)
@@ -1840,8 +1961,10 @@ func ProxyFreebuff(c *gin.Context, body []byte, bodyMap map[string]any, am *Free
 		}
 		chatClient := &http.Client{Timeout: timeout}
 		if client != nil {
-			chatClient = client
-			chatClient.Timeout = timeout
+			// Clone the (possibly proxy) transport WITHOUT mutating the shared
+			// default client. Setting .Timeout on the shared *http.Client would
+			// permanently cap ALL CodeBuddy/Grok upstream streams at 25s.
+			chatClient.Transport = client.Transport
 		}
 
 		resp, err := chatClient.Do(chatReq)
@@ -1905,7 +2028,19 @@ func ProxyFreebuff(c *gin.Context, body []byte, bodyMap map[string]any, am *Free
 			continue
 		}
 
-		// 8. Handle 5xx — try next account
+		// 8. Handle 403 (transient empty response) — retry next account, no cooldown
+		// Freebuff occasionally returns 403 with valid JSON but empty content + 0 tokens.
+		// The same account succeeds on the next request, so this is transient — retry.
+		if resp.StatusCode == 403 {
+			respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+			resp.Body.Close()
+			acc.mu.Unlock()
+			lastErr = fmt.Sprintf("403: %s", truncateLog(string(respBody), 200))
+			slog.Warn("fb transient 403, retrying", "module", "freebuff", "account", acc.Email, "body", truncateLog(string(respBody), 200))
+			continue
+		}
+
+		// 9. Handle 5xx — try next account
 		if resp.StatusCode >= 500 {
 			resp.Body.Close()
 			acc.mu.Unlock()
@@ -1914,7 +2049,7 @@ func ProxyFreebuff(c *gin.Context, body []byte, bodyMap map[string]any, am *Free
 			continue
 		}
 
-		// 9. Success — stream passthrough or aggregate
+		// 10. Success — stream passthrough or aggregate
 		if hc != nil && hc.FB != nil {
 			hc.FB.RecordRequest(time.Since(reqStart), nil)
 		}
@@ -1984,15 +2119,7 @@ func ProxyFreebuff(c *gin.Context, body []byte, bodyMap map[string]any, am *Free
 				}
 				// output_text for dashboard preview (stream clients don't get
 				// it through the SSE passthrough).
-				if msg, ok := agg["choices"].([]any); ok && len(msg) > 0 {
-					if choice, ok := msg[0].(map[string]any); ok {
-						if m, ok := choice["message"].(map[string]any); ok {
-							if content, ok := m["content"].(string); ok {
-								c.Set("output_text", content)
-							}
-						}
-					}
-				}
+				setFBOutputText(c, agg)
 			}
 
 			// Increment hourly session counter
@@ -2013,15 +2140,7 @@ func ProxyFreebuff(c *gin.Context, body []byte, bodyMap map[string]any, am *Free
 				c.Set("response_body", json.RawMessage(aggBytes))
 			}
 			// Set output_text for dashboard preview
-			if msg, ok := agg["choices"].([]any); ok && len(msg) > 0 {
-				if choice, ok := msg[0].(map[string]any); ok {
-					if m, ok := choice["message"].(map[string]any); ok {
-						if content, ok := m["content"].(string); ok {
-							c.Set("output_text", content)
-						}
-					}
-				}
-			}
+			setFBOutputText(c, agg)
 			c.JSON(200, agg)
 
 			// Increment hourly session counter
@@ -2040,7 +2159,42 @@ func ProxyFreebuff(c *gin.Context, body []byte, bodyMap map[string]any, am *Free
 	c.Set("response_body", json.RawMessage(errJSON))
 }
 
-// fbStreamToNonStream aggregates upstream SSE into a single OpenAI response.
+// setFBOutputText extracts choices[0].message.content from the aggregated
+// response and stores it as c output_text for the dashboard preview.
+// Handles BOTH choices shapes ([]map[string]any — built by fbStreamToNonStream —
+// and []any — JSON round-trip). Previously only []any was asserted, which
+// silently dropped output_text for every Freebuff request (preview empty).
+func setFBOutputText(c *gin.Context, agg map[string]any) {
+	if content, ok := fbExtractContent(agg); ok {
+		c.Set("output_text", content)
+	}
+}
+
+func fbExtractContent(agg map[string]any) (string, bool) {
+	var first map[string]any
+	switch ch := agg["choices"].(type) {
+	case []map[string]any:
+		if len(ch) > 0 {
+			first = ch[0]
+		}
+	case []any:
+		if len(ch) > 0 {
+			if m, ok := ch[0].(map[string]any); ok {
+				first = m
+			}
+		}
+	}
+	if first == nil {
+		return "", false
+	}
+	if msg, ok := first["message"].(map[string]any); ok {
+		if content, ok := msg["content"].(string); ok {
+			return content, true
+		}
+	}
+	return "", false
+}
+
 func fbStreamToNonStream(body io.Reader, model string) map[string]any {
 	scanner := bufio.NewScanner(body)
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)

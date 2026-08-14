@@ -1,8 +1,8 @@
 // Package db is the Redis (hot state) + ClickHouse (persistent history)
 // integration layer for FoxRouters.
 //
-//   Redis: account tokens, CB key credits, rate limit buckets — sub-ms reads.
-//   ClickHouse: request_logs, token_refresh_history, account_events — full-body history.
+//	Redis: account tokens, CB key credits, rate limit buckets — sub-ms reads.
+//	ClickHouse: request_logs, token_refresh_history, account_events — full-body history.
 //
 // This package deliberately does NOT depend on the concrete domain types
 // (GrokAccount, GatewayKeyInfo, CBKey). Instead it defines a small set of
@@ -41,9 +41,9 @@ const (
 	RK_COMBO_COUNTER  = "combo:counter:" // STRING prefix, atomic INCR for round-robin
 
 	// Proxy pool (v1.5.0) — dashboard-managed HTTP/SOCKS5 proxies for upstream calls.
-	RK_PROXY         = "fr:proxy:"         // HASH prefix: fr:proxy:<id> (fields: protocol, host, port, …)
-	RK_PROXY_ENABLED = "fr:proxy:enabled"  // SET of enabled proxy IDs (fast round-robin selection)
-	RK_PROXY_RR      = "fr:proxy:rr"       // STRING atomic INCR for round-robin index
+	RK_PROXY         = "fr:proxy:"        // HASH prefix: fr:proxy:<id> (fields: protocol, host, port, …)
+	RK_PROXY_ENABLED = "fr:proxy:enabled" // SET of enabled proxy IDs (fast round-robin selection)
+	RK_PROXY_RR      = "fr:proxy:rr"      // STRING atomic INCR for round-robin index
 
 	LOG_BUFFER_SIZE    = 10000
 	LOG_FLUSH_INTERVAL = 2 * time.Second
@@ -150,6 +150,23 @@ type GrokAccountDTO struct {
 	Disabled     bool
 	DisabledAt   time.Time
 
+	// Image generation (console.x.ai DPoP) — SSO cookies from browser login.
+	// Password is kept for lazy pure-HTTP re-login (never serialized to API).
+	SSO              string
+	SSORW            string
+	Password         string
+	ImgCooldownUntil time.Time // skip account for image gen until this time (429 resource-exhausted)
+	VidCooldownUntil time.Time // skip account for video gen until this time (429 resource-exhausted)
+
+	// Free-tier quota (GET /v1/usage, console.x.ai): image 5, video 2, chat 10
+	ImgQuotaUsed   int64
+	ImgQuotaLimit  int64
+	VidQuotaUsed   int64
+	VidQuotaLimit  int64
+	ChatQuotaUsed  int64
+	ChatQuotaLimit int64
+	QuotaSyncedAt  time.Time
+
 	// Billing fields (from GET /v1/billing?format=credits)
 	BillingSyncedAt time.Time
 	PeriodStart     string
@@ -187,22 +204,23 @@ type GatewayKeyDTO struct {
 // meaningful when CredType == "oauth". Meter fields (credit_limit, remain,
 // package, cycle, status) are populated by the realtime credit sync worker.
 type CBKeyDTO struct {
-	Key           string
-	CredType      string // "api_key" | "oauth"
-	AccessToken   string
-	RefreshToken  string
-	ExpiresAt     time.Time
-	Email         string
-	CreditsUsed   float64
-	TotalReqs     int64
-	Disabled      bool
-	DisabledAt    time.Time
-	CreditLimit   float64   // from CapacitySizePrecise; 0 = use CB_CREDIT_LIMIT fallback
-	CreditsRemain float64   // from CapacityRemainPrecise
-	PackageName   string
-	CycleEnd      string    // raw CycleEndTime
-	MeterStatus   int       // Status field (0=active, 3=exhausted)
-	MeterSyncedAt time.Time // last successful meter sync
+	Key            string
+	CredType       string // "api_key" | "oauth"
+	AccessToken    string
+	RefreshToken   string
+	ExpiresAt      time.Time
+	Email          string
+	CreditsUsed    float64
+	TotalReqs      int64
+	Disabled       bool
+	DisabledAt     time.Time
+	DisabledReason string  // reason for permanent disable (persisted)
+	CreditLimit    float64 // from CapacitySizePrecise; 0 = use CB_CREDIT_LIMIT fallback
+	CreditsRemain  float64 // from CapacityRemainPrecise
+	PackageName    string
+	CycleEnd       string    // raw CycleEndTime
+	MeterStatus    int       // Status field (0=active, 3=exhausted)
+	MeterSyncedAt  time.Time // last successful meter sync
 }
 
 // NewStore initializes Redis + the selected LogStore backend, ensures schema,
@@ -321,29 +339,41 @@ func (s *Store) SaveGrokAccount(dto GrokAccountDTO) {
 	defer cancel()
 
 	data := map[string]interface{}{
-		"email":            dto.Email,
-		"access_token":     dto.AccessToken,
-		"refresh_token":    dto.RefreshToken,
-		"id_token":         dto.IDToken,
-		"expires_at":       dto.ExpiresAt.Unix(),
-		"expires_in":       dto.ExpiresIn,
-		"expired":          dto.Expired,
-		"last_refresh":     dto.LastRefresh,
-		"sub":              dto.Sub,
-		"disabled":         dto.Disabled,
-		"disabled_at":      dto.DisabledAt.Unix(),
-		"billing_synced_at": dto.BillingSyncedAt.Unix(),
-		"period_start":      dto.PeriodStart,
-		"period_end":        dto.PeriodEnd,
-		"period_type":       dto.PeriodType,
-		"on_demand_cap":     dto.OnDemandCap,
-		"on_demand_used":    dto.OnDemandUsed,
-		"prepaid_balance":   dto.PrepaidBalance,
-		"unified_billing":   dto.UnifiedBilling,
-		"tokens_used":       dto.TokensUsed,
-		"prompt_tokens":     dto.PromptTokens,
-		"completion_tokens": dto.CompletionTokens,
-		"usage_reset_at":    dto.UsageResetAt.Unix(),
+		"email":              dto.Email,
+		"access_token":       dto.AccessToken,
+		"refresh_token":      dto.RefreshToken,
+		"id_token":           dto.IDToken,
+		"expires_at":         dto.ExpiresAt.Unix(),
+		"expires_in":         dto.ExpiresIn,
+		"expired":            dto.Expired,
+		"last_refresh":       dto.LastRefresh,
+		"sub":                dto.Sub,
+		"disabled":           dto.Disabled,
+		"disabled_at":        dto.DisabledAt.Unix(),
+		"sso":                dto.SSO,
+		"sso_rw":             dto.SSORW,
+		"password":           dto.Password,
+		"img_cooldown_until": dto.ImgCooldownUntil.Unix(),
+		"vid_cooldown_until": dto.VidCooldownUntil.Unix(),
+		"img_quota_used":     dto.ImgQuotaUsed,
+		"img_quota_limit":    dto.ImgQuotaLimit,
+		"vid_quota_used":     dto.VidQuotaUsed,
+		"vid_quota_limit":    dto.VidQuotaLimit,
+		"chat_quota_used":    dto.ChatQuotaUsed,
+		"chat_quota_limit":   dto.ChatQuotaLimit,
+		"quota_synced_at":    dto.QuotaSyncedAt.Unix(),
+		"billing_synced_at":  dto.BillingSyncedAt.Unix(),
+		"period_start":       dto.PeriodStart,
+		"period_end":         dto.PeriodEnd,
+		"period_type":        dto.PeriodType,
+		"on_demand_cap":      dto.OnDemandCap,
+		"on_demand_used":     dto.OnDemandUsed,
+		"prepaid_balance":    dto.PrepaidBalance,
+		"unified_billing":    dto.UnifiedBilling,
+		"tokens_used":        dto.TokensUsed,
+		"prompt_tokens":      dto.PromptTokens,
+		"completion_tokens":  dto.CompletionTokens,
+		"usage_reset_at":     dto.UsageResetAt.Unix(),
 	}
 	key := RK_GROK_ACCOUNT + dto.Email
 	if err := s.rdb.HSet(ctx, key, data).Err(); err != nil {
@@ -393,24 +423,32 @@ func (s *Store) SaveCBKey(dto CBKeyDTO) {
 		credType = "api_key"
 	}
 	data := map[string]interface{}{
-		"cred_type":        credType,
-		"credits_used":     dto.CreditsUsed,
-		"total_requests":   dto.TotalReqs,
-		"disabled":         dto.Disabled,
-		"disabled_at":      dto.DisabledAt.Unix(),
-		"updated_at":       time.Now().Unix(),
-		"credit_limit":     dto.CreditLimit,
-		"credits_remain":   dto.CreditsRemain,
-		"package_name":     dto.PackageName,
-		"cycle_end":        dto.CycleEnd,
-		"meter_status":     dto.MeterStatus,
-		"meter_synced_at":  dto.MeterSyncedAt.Unix(),
+		"cred_type":       credType,
+		"credits_used":    dto.CreditsUsed,
+		"total_requests":  dto.TotalReqs,
+		"disabled":        dto.Disabled,
+		"disabled_at":     dto.DisabledAt.Unix(),
+		"disabled_reason": dto.DisabledReason,
+		"updated_at":      time.Now().Unix(),
+		"credit_limit":    dto.CreditLimit,
+		"credits_remain":  dto.CreditsRemain,
+		"package_name":    dto.PackageName,
+		"cycle_end":       dto.CycleEnd,
+		"meter_status":    dto.MeterStatus,
+		"meter_synced_at": dto.MeterSyncedAt.Unix(),
 	}
 	// Only persist OAuth secrets when this entry is an OAuth account —
 	// avoids writing empty access/refresh tokens over API-key hashes.
+	// Empty token fields (e.g. toDTO under TokenRefreshDisabled in dev) must
+	// NOT overwrite existing stored tokens — skip them so a dev-store
+	// interaction can't erase prod OAuth credentials.
 	if credType == "oauth" {
-		data["access_token"] = dto.AccessToken
-		data["refresh_token"] = dto.RefreshToken
+		if dto.AccessToken != "" {
+			data["access_token"] = dto.AccessToken
+		}
+		if dto.RefreshToken != "" {
+			data["refresh_token"] = dto.RefreshToken
+		}
 		data["expires_at"] = dto.ExpiresAt.Unix()
 		data["email"] = dto.Email
 	}
@@ -440,6 +478,27 @@ func (s *Store) GetCBConfig(field string) (string, error) {
 	return s.rdb.HGet(ctx, "cb:config", field).Result()
 }
 
+// SetGWConfig writes a scalar gateway config value (Turnstile solver settings
+// etc., gw:config hash — persisted across restarts).
+func (s *Store) SetGWConfig(field, value string) error {
+	if s == nil {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+	return s.rdb.HSet(ctx, "gw:config", field, value).Err()
+}
+
+// GetGWConfig reads a scalar gateway config value.
+func (s *Store) GetGWConfig(field string) (string, error) {
+	if s == nil {
+		return "", fmt.Errorf("no store")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+	return s.rdb.HGet(ctx, "gw:config", field).Result()
+}
+
 // SetGrokConfig writes a scalar Grok config value (selector mode etc.).
 func (s *Store) SetGrokConfig(field, value string) error {
 	if s == nil {
@@ -458,6 +517,27 @@ func (s *Store) GetGrokConfig(field string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 	defer cancel()
 	return s.rdb.HGet(ctx, "grok:config", field).Result()
+}
+
+// SetVideoOwner persists the account that created a console.x.ai video job so
+// polling survives gateway restarts (TTL 24h).
+func (s *Store) SetVideoOwner(id, email string) error {
+	if s == nil {
+		return fmt.Errorf("no store")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+	return s.rdb.Set(ctx, "grok:video:"+id, email, 24*time.Hour).Err()
+}
+
+// GetVideoOwner returns the account that created a video job ("" when unknown).
+func (s *Store) GetVideoOwner(id string) (string, error) {
+	if s == nil {
+		return "", fmt.Errorf("no store")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+	return s.rdb.Get(ctx, "grok:video:"+id).Result()
 }
 
 func (s *Store) LoadCBKeys() (map[string]map[string]string, error) {
@@ -913,11 +993,11 @@ func (s *Store) DeleteCustomAlias(alias string) error {
 // strategy applied per request. Callers reference the combo as
 // "combo/<name>" — see ComboRegistry.Resolve.
 //
-//   Strategy "fallback"    — try models in order; on upstream failure the
-//                            proxy falls through to the next entry (see the
-//                            fallback retry loop in proxy.ProxyRequest).
-//   Strategy "round_robin" — atomic INCR of combo:counter:<name> selects the
-//                            next model modulo len(Models) per request.
+//	Strategy "fallback"    — try models in order; on upstream failure the
+//	                         proxy falls through to the next entry (see the
+//	                         fallback retry loop in proxy.ProxyRequest).
+//	Strategy "round_robin" — atomic INCR of combo:counter:<name> selects the
+//	                         next model modulo len(Models) per request.
 type Combo struct {
 	Name        string   `json:"name"`
 	Strategy    string   `json:"strategy"`    // "fallback" | "round_robin"

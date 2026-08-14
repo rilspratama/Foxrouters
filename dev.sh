@@ -110,15 +110,17 @@ up() {
     -p "127.0.0.1:${DEV_PORT}:20130" \
     -v "$SQLITE_VOL:/var/lib/foxrouters" \
     -e "PORT=20130" \
+    -e "GATEWAY_BIND=0.0.0.0:20130" \
     -e "REDIS_ADDR=$DEV_REDIS_NAME:6379" \
     -e "REDIS_PASSWORD=$DEV_REDIS_PASS" \
     -e "LOG_BACKEND=sqlite" \
     -e "LOG_SQLITE_PATH=/var/lib/foxrouters/logs.db" \
-    -e "GATEWAY_AUTH_DISABLE=1" \
     -e "WORKERS_DISABLED=1" \
     -e "HEALTH_PROBES_DISABLED=1" \
     -e "TOKEN_REFRESH_DISABLED=1" \
     -e "CB_SELECTOR_MODE=sticky" \
+    --add-host "host.docker.internal:host-gateway" \
+    -e "TURNSTILE_SOLVER_URL=http://host.docker.internal:8742/cloudflare" \
     "$DEV_IMAGE" >/dev/null
 
   green "✓ dev gateway started"

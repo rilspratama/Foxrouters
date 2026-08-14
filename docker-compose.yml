@@ -70,8 +70,8 @@ services:
     build:
       context: .
       args:
-        VERSION: v1.6.7
-    image: ghcr.io/rilspratama/foxrouters:v1.6.7
+        VERSION: v1.6.12
+    image: ghcr.io/rilspratama/foxrouters:v1.6.12
     container_name: foxrouters
     ports:
       - "127.0.0.1:20130:20130"
@@ -97,6 +97,11 @@ services:
       # Sticky (default) binds conversations to one account for prompt-cache
       # locality. Runtime switchable via PUT /cb/selector-mode (Redis-persisted).
       CB_SELECTOR_MODE: "${CB_SELECTOR_MODE:-sticky}"
+      # Turnstile solver lives on the HOST (PM2/bun, port 8742) — reach it via
+      # host.docker.internal (host-gateway). Overridable in the Settings page.
+      TURNSTILE_SOLVER_URL: "${TURNSTILE_SOLVER_URL:-http://host.docker.internal:8742/cloudflare}"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       # Persist the sqlite log DB (only used in the default sqlite backend).
       # Safe to keep mounted even when running ClickHouse mode — the gateway

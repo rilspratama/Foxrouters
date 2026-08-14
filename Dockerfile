@@ -1,8 +1,8 @@
 # syntax=docker/dockerfile:1.7
 # Multi-stage build for FoxRouters.
-# dashboard.html is compiled into the binary via go:embed, so runtime image
-# only needs the static binary + CA roots + wget (for healthcheck) +
-# cloudflared (data plane for /api/tunnel/* — v1.6.0).
+# dashboard/ is compiled into the binary via go:embed (multi-file SPA parts),
+# so runtime image only needs the static binary + CA roots + wget (for
+# healthcheck) + cloudflared (data plane for /api/tunnel/* — v1.6.0).
 
 # -----------------------------------------------------------------------------
 # Stage 1: builder

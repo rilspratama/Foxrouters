@@ -8,12 +8,17 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// loginLimiter is an in-memory IP-based rate limiter for /login POST.
+// loginLimiter is an in-memory rate limiter for /login POST.
 // Prevents brute-force key spraying (P3 #6).
-// Limits: 5 attempts per minute, 20 per hour per client IP.
+// Dimensions:
+//   - per client IP:     5 attempts/min, 20/hour
+//   - per key prefix:   10 attempts/min, 50/hour  (defense-in-depth vs
+//     distributed IP rotation spraying the same guessed key; the first 8
+//     chars are enough to group attempts on the same key)
 type loginLimiter struct {
-	mu      sync.Mutex
-	entries map[string]*loginEntry
+	mu         sync.Mutex
+	entries    map[string]*loginEntry // keyed by client IP
+	keyEntries map[string]*loginEntry // keyed by key-prefix
 }
 
 type loginEntry struct {
@@ -22,7 +27,19 @@ type loginEntry struct {
 }
 
 func newLoginLimiter() *loginLimiter {
-	return &loginLimiter{entries: make(map[string]*loginEntry)}
+	return &loginLimiter{entries: make(map[string]*loginEntry), keyEntries: make(map[string]*loginEntry)}
+}
+
+// check enforces limit/attempts within the two windows; returns true if allowed.
+func (e *loginEntry) check(now time.Time, minLimit, hourLimit int) bool {
+	e.minuteWindow = trimBefore(e.minuteWindow, now.Add(-1*time.Minute))
+	e.hourWindow = trimBefore(e.hourWindow, now.Add(-1*time.Hour))
+	if len(e.minuteWindow) >= minLimit || len(e.hourWindow) >= hourLimit {
+		return false
+	}
+	e.minuteWindow = append(e.minuteWindow, now)
+	e.hourWindow = append(e.hourWindow, now)
+	return true
 }
 
 func (l *loginLimiter) middleware() gin.HandlerFunc {
@@ -44,35 +61,36 @@ func (l *loginLimiter) middleware() gin.HandlerFunc {
 			e = &loginEntry{}
 			l.entries[ip] = e
 		}
-
-		// Trim expired entries
-		minCutoff := now.Add(-1 * time.Minute)
-		hourCutoff := now.Add(-1 * time.Hour)
-		e.minuteWindow = trimBefore(e.minuteWindow, minCutoff)
-		e.hourWindow = trimBefore(e.hourWindow, hourCutoff)
-
-		// Check limits
-		if len(e.minuteWindow) >= 5 {
-			l.mu.Unlock()
-			c.JSON(http.StatusTooManyRequests, gin.H{
-				"error": "too many login attempts, try again in a minute",
-			})
-			c.Abort()
-			return
-		}
-		if len(e.hourWindow) >= 20 {
-			l.mu.Unlock()
-			c.JSON(http.StatusTooManyRequests, gin.H{
-				"error": "too many login attempts, try again in an hour",
-			})
-			c.Abort()
-			return
-		}
-
-		// Record this attempt
-		e.minuteWindow = append(e.minuteWindow, now)
-		e.hourWindow = append(e.hourWindow, now)
+		allowed := e.check(now, 5, 20)
 		l.mu.Unlock()
+		if !allowed {
+			c.JSON(http.StatusTooManyRequests, gin.H{
+				"error": "too many login attempts, try again later",
+			})
+			c.Abort()
+			return
+		}
+
+		// Second dimension: per-key-prefix. A distributed spray that rotates
+		// IPs while trying the same guessed key still trips this.
+		if k := c.PostForm("key"); len(k) >= 8 {
+			kp := k[:8]
+			l.mu.Lock()
+			ke, ok := l.keyEntries[kp]
+			if !ok {
+				ke = &loginEntry{}
+				l.keyEntries[kp] = ke
+			}
+			allowed = ke.check(now, 10, 50)
+			l.mu.Unlock()
+			if !allowed {
+				c.JSON(http.StatusTooManyRequests, gin.H{
+					"error": "too many attempts for this key, try again later",
+				})
+				c.Abort()
+				return
+			}
+		}
 
 		c.Next()
 	}
@@ -82,13 +100,20 @@ func (l *loginLimiter) cleanup() {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	now := time.Now()
-	minCutoff := now.Add(-1 * time.Minute)  // P4-1: was hourCutoff (bug)
+	minCutoff := now.Add(-1 * time.Minute) // P4-1: was hourCutoff (bug)
 	hourCutoff := now.Add(-1 * time.Hour)
 	for ip, e := range l.entries {
 		e.minuteWindow = trimBefore(e.minuteWindow, minCutoff)
 		e.hourWindow = trimBefore(e.hourWindow, hourCutoff)
 		if len(e.hourWindow) == 0 {
 			delete(l.entries, ip)
+		}
+	}
+	for kp, e := range l.keyEntries {
+		e.minuteWindow = trimBefore(e.minuteWindow, minCutoff)
+		e.hourWindow = trimBefore(e.hourWindow, hourCutoff)
+		if len(e.hourWindow) == 0 {
+			delete(l.keyEntries, kp)
 		}
 	}
 }

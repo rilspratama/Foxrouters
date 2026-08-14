@@ -45,11 +45,27 @@ type GrokAccount struct {
 	Expired      string `json:"expired"`
 	LastRefresh  string `json:"last_refresh"`
 	Sub          string `json:"sub"`
+	// Image generation (console.x.ai DPoP): SSO cookies from browser login.
+	// Password is used for lazy pure-HTTP re-login when the cookie dies.
+	SSO      string `json:"sso,omitempty"`
+	SSORW    string `json:"sso_rw,omitempty"`
+	Password string `json:"-"`
 	mu           sync.RWMutex
 	expiresAt    time.Time
 	disabled     bool
 	disabledAt   time.Time
 	db           *db.Store
+	imgCooldownUntil time.Time // skip image-gen until this time (429 resource-exhausted)
+	vidCooldownUntil time.Time // skip video-gen until this time (429 resource-exhausted)
+
+	// Free-tier quota from GET /v1/usage (console.x.ai): chat 10, image 5, video 2
+	imgQuotaUsed   int64
+	imgQuotaLimit  int64
+	vidQuotaUsed   int64
+	vidQuotaLimit  int64
+	chatQuotaUsed  int64
+	chatQuotaLimit int64
+	quotaSyncedAt  time.Time
 
 	// Billing fields (populated by SyncBilling, persisted to Redis)
 	billingSyncedAt time.Time
@@ -114,6 +130,20 @@ type GrokAccountSnapshot struct {
 	DisabledAt   time.Time
 	// TokenStatus is a convenience: "active" | "banned" | "cooldown" | "expired"
 	TokenStatus string
+	// Image-gen (SSO) fields — SSO/SSORW/Password are json:"-" (never serialized)
+	SSO             string    `json:"-"`
+	SSORW           string    `json:"-"`
+	Password        string    `json:"-"`
+	ImgCooldownUntil time.Time `json:"img_cooldown_until"`
+	VidCooldownUntil time.Time `json:"vid_cooldown_until"`
+	// Free-tier quota (GET /v1/usage): image 5, video 2, chat 10
+	ImgQuotaUsed   int64     `json:"img_quota_used"`
+	ImgQuotaLimit  int64     `json:"img_quota_limit"`
+	VidQuotaUsed   int64     `json:"vid_quota_used"`
+	VidQuotaLimit  int64     `json:"vid_quota_limit"`
+	ChatQuotaUsed  int64     `json:"chat_quota_used"`
+	ChatQuotaLimit int64     `json:"chat_quota_limit"`
+	QuotaSyncedAt  time.Time `json:"quota_synced_at"`
 
 	// Billing fields
 	BillingSyncedAt time.Time
@@ -148,6 +178,18 @@ func (a *GrokAccount) Snapshot() GrokAccountSnapshot {
 		LastRefresh:  a.LastRefresh,
 		Disabled:     a.disabled,
 		DisabledAt:   a.disabledAt,
+		SSO:          a.SSO,
+		SSORW:        a.SSORW,
+		Password:     a.Password,
+		ImgCooldownUntil: a.imgCooldownUntil,
+		VidCooldownUntil: a.vidCooldownUntil,
+		ImgQuotaUsed:   a.imgQuotaUsed,
+		ImgQuotaLimit:  a.imgQuotaLimit,
+		VidQuotaUsed:   a.vidQuotaUsed,
+		VidQuotaLimit:  a.vidQuotaLimit,
+		ChatQuotaUsed:  a.chatQuotaUsed,
+		ChatQuotaLimit: a.chatQuotaLimit,
+		QuotaSyncedAt:  a.quotaSyncedAt,
 
 		BillingSyncedAt: a.billingSyncedAt,
 		PeriodStart:     a.periodStart,
@@ -200,6 +242,18 @@ func (a *GrokAccount) toDTO() db.GrokAccountDTO {
 		Sub:          a.Sub,
 		Disabled:     a.disabled,
 		DisabledAt:   a.disabledAt,
+		SSO:          a.SSO,
+		SSORW:        a.SSORW,
+		Password:     a.Password,
+		ImgCooldownUntil: a.imgCooldownUntil,
+		VidCooldownUntil: a.vidCooldownUntil,
+		ImgQuotaUsed:   a.imgQuotaUsed,
+		ImgQuotaLimit:  a.imgQuotaLimit,
+		VidQuotaUsed:   a.vidQuotaUsed,
+		VidQuotaLimit:  a.vidQuotaLimit,
+		ChatQuotaUsed:  a.chatQuotaUsed,
+		ChatQuotaLimit: a.chatQuotaLimit,
+		QuotaSyncedAt:  a.quotaSyncedAt,
 
 		BillingSyncedAt: a.billingSyncedAt,
 		PeriodStart:     a.periodStart,
@@ -402,6 +456,9 @@ func (am *GrokAccountManager) LoadFromRedis() error {
 			Expired:      state["expired"],
 			LastRefresh:  state["last_refresh"],
 			Sub:          state["sub"],
+			SSO:          state["sso"],
+			SSORW:        state["sso_rw"],
+			Password:     state["password"],
 			db:           am.db,
 		}
 		if v := state["expires_in"]; v != "" {
@@ -430,6 +487,42 @@ func (am *GrokAccountManager) LoadFromRedis() error {
 						acc.disabledAt = time.Unix(n, 0)
 					}
 				}
+			}
+		}
+		// Image-gen cooldown (429 resource-exhausted marker)
+		if v := state["img_cooldown_until"]; v != "" {
+			if n, err := strconv.ParseInt(v, 10, 64); err == nil && n > 0 {
+				acc.imgCooldownUntil = time.Unix(n, 0)
+			}
+		}
+		// Video-gen cooldown (429 resource-exhausted marker)
+		if v := state["vid_cooldown_until"]; v != "" {
+			if n, err := strconv.ParseInt(v, 10, 64); err == nil && n > 0 {
+				acc.vidCooldownUntil = time.Unix(n, 0)
+			}
+		}
+		// Free-tier quota (GET /v1/usage)
+		if n, err := strconv.ParseInt(state["img_quota_used"], 10, 64); err == nil {
+			acc.imgQuotaUsed = n
+		}
+		if n, err := strconv.ParseInt(state["img_quota_limit"], 10, 64); err == nil {
+			acc.imgQuotaLimit = n
+		}
+		if n, err := strconv.ParseInt(state["vid_quota_used"], 10, 64); err == nil {
+			acc.vidQuotaUsed = n
+		}
+		if n, err := strconv.ParseInt(state["vid_quota_limit"], 10, 64); err == nil {
+			acc.vidQuotaLimit = n
+		}
+		if n, err := strconv.ParseInt(state["chat_quota_used"], 10, 64); err == nil {
+			acc.chatQuotaUsed = n
+		}
+		if n, err := strconv.ParseInt(state["chat_quota_limit"], 10, 64); err == nil {
+			acc.chatQuotaLimit = n
+		}
+		if v := state["quota_synced_at"]; v != "" {
+			if n, err := strconv.ParseInt(v, 10, 64); err == nil && n > 0 {
+				acc.quotaSyncedAt = time.Unix(n, 0)
 			}
 		}
 		// Billing fields
@@ -1006,6 +1099,378 @@ func (am *GrokAccountManager) UpsertAccount(email, accessToken, refreshToken, id
 		saveGrokAccount(am.db, acc.toDTO())
 	}
 	return true, total, acc
+}
+
+// SetSSO stores the console.x.ai SSO cookies for an account (image generation).
+// Empty sso clears them (e.g. dead cookie).
+func (am *GrokAccountManager) SetSSO(email, sso, ssoRW string) {
+	am.mu.RLock()
+	var acc *GrokAccount
+	for _, a := range am.accounts {
+		if a.Email == email {
+			acc = a
+			break
+		}
+	}
+	am.mu.RUnlock()
+	if acc == nil {
+		return
+	}
+	acc.mu.Lock()
+	acc.SSO, acc.SSORW = sso, ssoRW
+	acc.mu.Unlock()
+	if am.db != nil {
+		saveGrokAccount(am.db, acc.toDTO())
+	}
+}
+
+// SetPassword stores the console.x.ai login password for an account (used by
+// lazy pure-HTTP re-login when the SSO cookie dies). Never serialized.
+func (am *GrokAccountManager) SetPassword(email, pwd string) {
+	am.mu.RLock()
+	var acc *GrokAccount
+	for _, a := range am.accounts {
+		if a.Email == email {
+			acc = a
+			break
+		}
+	}
+	am.mu.RUnlock()
+	if acc == nil {
+		return
+	}
+	acc.mu.Lock()
+	acc.Password = pwd
+	acc.mu.Unlock()
+	if am.db != nil {
+		saveGrokAccount(am.db, acc.toDTO())
+	}
+}
+
+// GetSnapshot returns a value snapshot for an account by email (nil when
+// missing). Used by the image-gen handler after a lazy SSO refresh.
+func (am *GrokAccountManager) GetSnapshot(email string) *GrokAccountSnapshot {
+	am.mu.RLock()
+	var acc *GrokAccount
+	for _, a := range am.accounts {
+		if a.Email == email {
+			acc = a
+			break
+		}
+	}
+	am.mu.RUnlock()
+	if acc == nil {
+		return nil
+	}
+	s := acc.Snapshot()
+	return &s
+}
+
+// Grok free-tier image quota: 5 images per account per period. Tracked LAZILY
+// (incremented on successful generations, no /v1/usage round-trip — cookies
+// die too fast for proactive sync to be reliable).
+const (
+	grokImgQuotaLimit    = int64(5)
+	grokImgExhaustCooldown = 24 * time.Hour
+	grokVidQuotaLimit    = int64(2)
+)
+
+// SetImgCooldown marks an account unavailable for image gen until `until`
+// (set on 429 resource-exhausted from console.x.ai).
+func (am *GrokAccountManager) SetImgCooldown(email string, until time.Time) {
+	am.mu.RLock()
+	var acc *GrokAccount
+	for _, a := range am.accounts {
+		if a.Email == email {
+			acc = a
+			break
+		}
+	}
+	am.mu.RUnlock()
+	if acc == nil {
+		return
+	}
+	acc.mu.Lock()
+	acc.imgCooldownUntil = until
+	acc.mu.Unlock()
+	if am.db != nil {
+		saveGrokAccount(am.db, acc.toDTO())
+	}
+}
+
+// SetQuota stores the free-tier usage snapshot (GET /v1/usage) for an account.
+func (am *GrokAccountManager) SetQuota(email string, u *GrokUsage) {
+	am.mu.RLock()
+	var acc *GrokAccount
+	for _, a := range am.accounts {
+		if a.Email == email {
+			acc = a
+			break
+		}
+	}
+	am.mu.RUnlock()
+	if acc == nil {
+		return
+	}
+	acc.mu.Lock()
+	acc.imgQuotaUsed, acc.imgQuotaLimit = int64(u.Image.Used), int64(u.Image.Limit)
+	acc.vidQuotaUsed, acc.vidQuotaLimit = int64(u.Video.Used), int64(u.Video.Limit)
+	acc.chatQuotaUsed, acc.chatQuotaLimit = int64(u.Chat.Used), int64(u.Chat.Limit)
+	acc.quotaSyncedAt = time.Now()
+	acc.mu.Unlock()
+	if am.db != nil {
+		saveGrokAccount(am.db, acc.toDTO())
+	}
+}
+
+// RefreshSSO lazily re-logs into console.x.ai (pure HTTP, ~3s) and stores fresh
+// sso/sso-rw cookies for the account. Returns an error when the account has no
+// password or the login fails (bad password / Turnstile solver down / IP flag).
+func (am *GrokAccountManager) RefreshSSO(email string) error {
+	am.mu.RLock()
+	var acc *GrokAccount
+	for _, a := range am.accounts {
+		if a.Email == email {
+			acc = a
+			break
+		}
+	}
+	am.mu.RUnlock()
+	if acc == nil {
+		return fmt.Errorf("account not found")
+	}
+	acc.mu.RLock()
+	pwd := acc.Password
+	acc.mu.RUnlock()
+	if pwd == "" {
+		return fmt.Errorf("no password stored for account (import with password field)")
+	}
+	sso, ssoRW, err := LoginSSO(email, pwd)
+	if err != nil {
+		return err
+	}
+	acc.mu.Lock()
+	acc.SSO, acc.SSORW = sso, ssoRW
+	acc.imgCooldownUntil = time.Time{} // a fresh cookie clears any auth cooldown
+	acc.mu.Unlock()
+	if am.db != nil {
+		saveGrokAccount(am.db, acc.toDTO())
+	}
+	return nil
+}
+
+// RecordVideoOwner persists a video job → owner mapping (in-memory + Redis 24h
+// TTL so polling survives gateway restarts).
+func (am *GrokAccountManager) RecordVideoOwner(requestID, email string) {
+	RecordVideoOwner(requestID, email)
+	if am.db != nil {
+		am.db.SetVideoOwner(requestID, email)
+	}
+}
+
+// VideoOwner resolves the account that created a video job — in-memory first,
+// Redis fallback.
+func (am *GrokAccountManager) VideoOwner(requestID string) string {
+	if o := VideoOwner(requestID); o != "" {
+		return o
+	}
+	if am.db != nil {
+		if o, err := am.db.GetVideoOwner(requestID); err == nil && o != "" {
+			return o
+		}
+	}
+	return ""
+}
+
+// IncrImgUsed lazily counts a successful image generation toward the account's
+// free-tier quota (limit defaults to the known free tier of 5). No /v1/usage
+// round-trip needed — cookies die too fast for that to be reliable.
+func (am *GrokAccountManager) IncrImgUsed(email string) {
+	am.mu.RLock()
+	var acc *GrokAccount
+	for _, a := range am.accounts {
+		if a.Email == email {
+			acc = a
+			break
+		}
+	}
+	am.mu.RUnlock()
+	if acc == nil {
+		return
+	}
+	acc.mu.Lock()
+	if acc.imgQuotaLimit == 0 {
+		acc.imgQuotaLimit = grokImgQuotaLimit
+	}
+	acc.imgQuotaUsed++
+	acc.quotaSyncedAt = time.Now()
+	acc.mu.Unlock()
+	if am.db != nil {
+		saveGrokAccount(am.db, acc.toDTO())
+	}
+}
+
+// MarkImgExhausted flags an account as image-quota exhausted (429) until the
+// 24h cooldown passes. PickImageAccount will skip it meanwhile.
+func (am *GrokAccountManager) MarkImgExhausted(email string) {
+	am.mu.RLock()
+	var acc *GrokAccount
+	for _, a := range am.accounts {
+		if a.Email == email {
+			acc = a
+			break
+		}
+	}
+	am.mu.RUnlock()
+	if acc == nil {
+		return
+	}
+	acc.mu.Lock()
+	if acc.imgQuotaLimit == 0 {
+		acc.imgQuotaLimit = grokImgQuotaLimit
+	}
+	acc.imgQuotaUsed = acc.imgQuotaLimit
+	acc.imgCooldownUntil = time.Now().Add(grokImgExhaustCooldown)
+	acc.quotaSyncedAt = time.Now()
+	acc.mu.Unlock()
+	if am.db != nil {
+		saveGrokAccount(am.db, acc.toDTO())
+	}
+}
+
+// IncrVidUsed lazily counts one video generation (quota 2/account).
+func (am *GrokAccountManager) IncrVidUsed(email string) {
+	am.mu.RLock()
+	var acc *GrokAccount
+	for _, a := range am.accounts {
+		if a.Email == email {
+			acc = a
+			break
+		}
+	}
+	am.mu.RUnlock()
+	if acc == nil {
+		return
+	}
+	acc.mu.Lock()
+	if acc.vidQuotaLimit == 0 {
+		acc.vidQuotaLimit = grokVidQuotaLimit
+	}
+	acc.vidQuotaUsed++
+	acc.quotaSyncedAt = time.Now()
+	acc.mu.Unlock()
+	if am.db != nil {
+		saveGrokAccount(am.db, acc.toDTO())
+	}
+}
+
+// MarkVidExhausted flags an account as video-quota exhausted (429) until the
+// 24h cooldown passes. PickVideoAccount will skip it meanwhile.
+func (am *GrokAccountManager) MarkVidExhausted(email string) {
+	am.mu.RLock()
+	var acc *GrokAccount
+	for _, a := range am.accounts {
+		if a.Email == email {
+			acc = a
+			break
+		}
+	}
+	am.mu.RUnlock()
+	if acc == nil {
+		return
+	}
+	acc.mu.Lock()
+	if acc.vidQuotaLimit == 0 {
+		acc.vidQuotaLimit = grokVidQuotaLimit
+	}
+	acc.vidQuotaUsed = acc.vidQuotaLimit
+	acc.vidCooldownUntil = time.Now().Add(grokImgExhaustCooldown)
+	acc.quotaSyncedAt = time.Now()
+	acc.mu.Unlock()
+	if am.db != nil {
+		saveGrokAccount(am.db, acc.toDTO())
+	}
+}
+
+// PickVideoAccount is like PickImageAccount but for video quota (2/account).
+func (am *GrokAccountManager) PickVideoAccount(start int) (int, *GrokAccountSnapshot) {
+	am.mu.RLock()
+	n := len(am.accounts)
+	am.mu.RUnlock()
+	if n == 0 {
+		return 0, nil
+	}
+	now := time.Now()
+	for i := 0; i < n; i++ {
+		idx := (start + i) % n
+		am.mu.RLock()
+		acc := am.accounts[idx]
+		am.mu.RUnlock()
+		s := acc.Snapshot()
+		if s.SSO == "" || s.Disabled || now.Before(s.VidCooldownUntil) {
+			continue
+		}
+		if s.VidQuotaLimit > 0 && s.VidQuotaUsed >= s.VidQuotaLimit {
+			continue // video quota exhausted per lazy count
+		}
+		return idx, &s
+	}
+	return 0, nil
+}
+
+// SyncAllQuota fetches /v1/usage for every account with SSO cookies.
+// Returns (synced, failed). Best-effort: per-account failures are logged.
+func (am *GrokAccountManager) SyncAllQuota() (int, int) {
+	am.mu.RLock()
+	var accounts []*GrokAccount
+	for _, acc := range am.accounts {
+		if acc.SSO != "" {
+			accounts = append(accounts, acc)
+		}
+	}
+	am.mu.RUnlock()
+	synced, failed := 0, 0
+	for _, acc := range accounts {
+		snap := acc.Snapshot()
+		u, err := SyncUsage(snap.SSO, snap.SSORW)
+		if err != nil {
+			slog.Warn("grok quota sync failed", "module", "grok", "email", snap.Email, "error", err)
+			failed++
+			continue
+		}
+		am.SetQuota(snap.Email, u)
+		synced++
+	}
+	slog.Info("grok quota sync complete", "module", "grok", "synced", synced, "failed", failed, "total", len(accounts))
+	return synced, failed
+}
+
+// PickImageAccount returns a snapshot of the next account eligible for image
+// generation: has SSO, not disabled, image cooldown passed, image quota not
+// exhausted (when known). Round-robin from start index. Returns nil when none.
+func (am *GrokAccountManager) PickImageAccount(start int) (int, *GrokAccountSnapshot) {
+	am.mu.RLock()
+	n := len(am.accounts)
+	am.mu.RUnlock()
+	if n == 0 {
+		return 0, nil
+	}
+	now := time.Now()
+	for i := 0; i < n; i++ {
+		idx := (start + i) % n
+		am.mu.RLock()
+		acc := am.accounts[idx]
+		am.mu.RUnlock()
+		s := acc.Snapshot()
+		if s.SSO == "" || s.Disabled || now.Before(s.ImgCooldownUntil) {
+			continue
+		}
+		if s.ImgQuotaLimit > 0 && s.ImgQuotaUsed >= s.ImgQuotaLimit {
+			continue // image quota exhausted per last /v1/usage sync
+		}
+		return idx, &s
+	}
+	return 0, nil
 }
 
 // DeleteAccount removes an account by email from memory + Redis.
@@ -1647,7 +2112,17 @@ type sseChunk struct {
 		Delta struct {
 			Content          string `json:"content"`
 			ReasoningContent string `json:"reasoning_content"`
+			ToolCalls        []struct {
+				Index    int    `json:"index"`
+				ID       string `json:"id"`
+				Type     string `json:"type"`
+				Function struct {
+					Name      string `json:"name"`
+					Arguments string `json:"arguments"`
+				} `json:"function"`
+			} `json:"tool_calls"`
 		} `json:"delta"`
+		FinishReason string `json:"finish_reason"`
 	} `json:"choices"`
 	Usage map[string]any `json:"usage"`
 }

@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<title>FoxRouters — 21st.dev Theme Preview</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family: ui-sans-serif, system-ui, sans-serif; background:#0d0d10; color:#eee; padding:24px; }
+  h1 { font-size:20px; margin-bottom:4px; }
+  .sub { color:#888; font-size:12px; margin-bottom:20px; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(430px,1fr)); gap:20px; }
+
+  /* ============ THEME TOKENS (dark) ============ */
+  .th-quick { --bg:#0b0f1a; --fg:#f8fafc; --card:#111827; --muted:#1c2430; --mutedfg:#a3adbb; --primary:#6d28d9; --primaryfg:#fff; --secondary:#a21caf; --border:#1c2430; --accent:#1c2430; --ok:#22c55e; --warn:#f59e0b; --bad:#ef4444; --radius:10px; }
+  .th-blue  { --bg:#131313; --fg:#e2e8f0; --card:#171717; --muted:#303030; --mutedfg:#a2a2a2; --primary:#008ff5; --primaryfg:#fff; --secondary:#1c1c1c; --border:#202020; --accent:#303030; --ok:#22c55e; --warn:#f59e0b; --bad:#ef4444; --radius:10px; }
+  .th-green { --bg:#121212; --fg:#e2e8f0; --card:#171717; --muted:#1f1f1f; --mutedfg:#a2a2a2; --primary:#006239; --primaryfg:#dde8e3; --secondary:#242424; --border:#292929; --accent:#313131; --ok:#4ade80; --warn:#fbbf24; --bad:#ef4444; --radius:10px; }
+  .th-moon  { --bg:#000; --fg:#fff; --card:#171717; --muted:#242424; --mutedfg:#b3b3b3; --primary:#fff; --primaryfg:#000; --secondary:#262626; --border:#2a2a2a; --accent:#333; --ok:#4ade80; --warn:#fbbf24; --bad:#f87171; --radius:10px; font-family: 'Geist Mono', ui-monospace, 'JetBrains Mono', monospace; }
+  .th-dark  { --bg:#121113; --fg:#c1c1c1; --card:#121212; --muted:#222; --mutedfg:#888; --primary:#e78a53; --primaryfg:#121113; --secondary:#5f8787; --border:#222; --accent:#333; --ok:#5f8787; --warn:#fbcb97; --bad:#c94f4f; --radius:12px; font-family:'Geist Mono', ui-monospace, 'JetBrains Mono', monospace; }
+  .th-dblue { --bg:#000; --fg:#fff; --card:#1d2233; --muted:#242424; --mutedfg:#b3b3b3; --primary:#3b5bdb; --primaryfg:#f0f2fb; --secondary:#262626; --border:#2a2a2a; --accent:#333; --ok:#22c55e; --warn:#f59e0b; --bad:#ef4444; --radius:10px; }
+
+  /* ============ PANEL ============ */
+  .panel { background:var(--bg); color:var(--fg); border-radius:14px; border:1px solid var(--border); overflow:hidden; display:flex; flex-direction:column; min-height:380px; }
+  .panel-head { padding:10px 14px; font-size:12px; color:var(--mutedfg); border-bottom:1px solid var(--border); display:flex; justify-content:space-between; align-items:center; }
+  .panel-head b { color:var(--fg); font-size:13px; }
+  .tag { font-size:10px; padding:2px 8px; border-radius:99px; background:var(--primary); color:var(--primaryfg); }
+
+  /* mini dashboard mock */
+  .mock { display:flex; flex:1; }
+  .sidebar { width:96px; background:var(--card); border-right:1px solid var(--border); padding:10px 8px; display:flex; flex-direction:column; gap:4px; }
+  .navi { font-size:10px; padding:5px 8px; border-radius:6px; color:var(--mutedfg); }
+  .navi.on { background:var(--accent); color:var(--fg); }
+  .navi.dot::before { content:''; display:inline-block; width:5px; height:5px; border-radius:99px; background:var(--ok); margin-right:5px; }
+  .main { flex:1; padding:10px; display:flex; flex-direction:column; gap:8px; }
+  .cards { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; }
+  .stat { background:var(--card); border:1px solid var(--border); border-radius:var(--radius); padding:8px 10px; }
+  .stat .v { font-size:17px; font-weight:700; }
+  .stat .l { font-size:9px; color:var(--mutedfg); margin-top:2px; }
+  .stat .ok { color:var(--ok); font-size:9px; }
+  .bar { height:4px; background:var(--muted); border-radius:99px; margin-top:5px; overflow:hidden; }
+  .bar i { display:block; height:100%; width:60%; background:var(--primary); border-radius:99px; }
+  table { width:100%; border-collapse:collapse; font-size:10px; background:var(--card); border:1px solid var(--border); border-radius:var(--radius); overflow:hidden; }
+  th { text-align:left; padding:6px 8px; color:var(--mutedfg); font-weight:500; border-bottom:1px solid var(--border); font-size:9px; text-transform:uppercase; letter-spacing:.04em; }
+  td { padding:6px 8px; border-bottom:1px solid var(--border); }
+  tr:last-child td { border-bottom:none; }
+  .badge { font-size:8px; padding:2px 6px; border-radius:99px; background:var(--muted); color:var(--mutedfg); }
+  .badge.g { background:color-mix(in srgb, var(--ok) 18%, transparent); color:var(--ok); }
+  .badge.r { background:color-mix(in srgb, var(--bad) 18%, transparent); color:var(--bad); }
+  .btn { display:inline-block; font-size:10px; padding:5px 12px; border-radius:6px; background:var(--primary); color:var(--primaryfg); border:none; }
+  .btn.ghost { background:var(--muted); color:var(--fg); }
+  .head { display:flex; justify-content:space-between; align-items:center; margin-bottom:2px; }
+</style>
+</head>
+<body>
+<h1>FoxRouters — 21st.dev Theme Preview</h1>
+<div class="sub">6 theme candidates · mockup mini-dashboard (sidebar + stat cards + table + buttons)</div>
+<div class="grid" id="grid"></div>
+
+<script>
+const themes = [
+  { id:'th-quick', name:'Quick', author:'obiney500', desc:'violet + magenta — deket brand sekarang' },
+  { id:'th-blue',  name:'Classic Blue & Dark', author:'eliaszaki', desc:'blue #008ff5 — Linear/Stripe clean' },
+  { id:'th-green', name:'Respec', author:'ey.lee', desc:'emerald green — fresh hacker' },
+  { id:'th-moon',  name:'MoonCalendar', author:'byjuananguirao', desc:'pure black + white — monochrome ops' },
+  { id:'th-dark',  name:'Darkmatter', author:'serafimcloud', desc:'orange + teal, Geist Mono — terminal ops' },
+  { id:'th-dblue', name:'Darkblue-white', author:'moonlitflower112', desc:'black + blue — Vercel-ish' },
+];
+function panel(t){
+  return `<div class="panel ${t.id}">
+    <div class="panel-head"><span><b>${t.name}</b> · ${t.author}</span><span class="tag">dark</span></div>
+    <div class="mock">
+      <div class="sidebar">
+        <div class="navi on">Dashboard</div>
+        <div class="navi dot">Accounts</div>
+        <div class="navi dot">Models</div>
+        <div class="navi">Proxies</div>
+        <div class="navi">Tunnel</div>
+      </div>
+      <div class="main">
+        <div class="head"><b style="font-size:12px">Overview</b><div><span class="btn ghost">24h</span> <span class="btn">+ Add</span></div></div>
+        <div class="cards">
+          <div class="stat"><div class="v">94</div><div class="l">Grok Accounts</div><div class="ok">● 94 active</div></div>
+          <div class="stat"><div class="v">595</div><div class="l">CB Keys</div><div class="ok">● 272 active</div></div>
+          <div class="stat"><div class="v">97.7%</div><div class="l">Cache Hit</div><div class="bar"><i></i></div></div>
+        </div>
+        <table>
+          <tr><th>Upstream</th><th>Circuit</th><th>Latency</th><th>Errors</th></tr>
+          <tr><td>codebuddy</td><td><span class="badge g">closed</span></td><td>66ms</td><td>0%</td></tr>
+          <tr><td>freebuff</td><td><span class="badge g">closed</span></td><td>—</td><td>0%</td></tr>
+          <tr><td>grok</td><td><span class="badge r">open</span></td><td>1871ms</td><td>5%</td></tr>
+        </table>
+      </div>
+    </div>
+  </div>`;
+}
+document.getElementById('grid').innerHTML = themes.map(panel).join('');
+</script>
+</body>
+</html>
