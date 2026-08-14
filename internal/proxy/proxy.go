@@ -414,6 +414,17 @@ func ProxyRequest(grokAM *upstream.GrokAccountManager, cbKM *upstream.CBKeyManag
 					b, _ = json.Marshal(bm)
 				}
 				upstream.ProxyCodeBuddy(c, b, bm, cbKM, clientStream, hc)
+			case "freebuff":
+				upstreamName = "freebuff"
+				if customModelName != "" {
+					// fbModelConfig looks the model up by gateway ID ("fb/…"),
+					// so prepend the prefix — the upstream then sees exactly
+					// customModelName (e.g. "deepseek/deepseek-v4-flash") and
+					// shares the session cache with the regular fb/ models.
+					bm["model"] = "fb/" + customModelName
+					b, _ = json.Marshal(bm)
+				}
+				upstream.ProxyFreebuff(c, b, bm, fbAM, clientStream, hc)
 			default:
 				if upstream.IsFreebuffModel(m) {
 					upstreamName = "freebuff"

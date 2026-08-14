@@ -4,13 +4,13 @@
 //
 // Two mechanisms:
 //
-//   Custom model    "cb/kimi-k3" → {upstream: codebuddy, model_name: "kimi-k3",
-//                                   owned_by: "codebuddy"}
-//     Adds a new routable model id that the proxy will forward to a specific
-//     upstream, overriding the default cb/ vs grok- prefix routing.
+//	Custom model    "cb/kimi-k3" → {upstream: codebuddy, model_name: "kimi-k3",
+//	                                owned_by: "codebuddy"}
+//	  Adds a new routable model id that the proxy will forward to a specific
+//	  upstream, overriding the default cb/ vs grok- prefix routing.
 //
-//   Alias           "my-claude" → "cb/claude-sonnet-4.6"
-//     Rewrites the incoming model field to the target before routing.
+//	Alias           "my-claude" → "cb/claude-sonnet-4.6"
+//	  Rewrites the incoming model field to the target before routing.
 //
 // Resolve() first walks the alias table (single hop, no recursion), then
 // checks whether the resolved id is a custom model, and returns whichever
@@ -75,13 +75,13 @@ func (r *CustomRegistry) Reload() error { return r.Load() }
 //
 // Returns:
 //
-//   resolvedModel — model id to place in the outgoing request body. If an
-//                   alias was hit this is the alias target; otherwise the
-//                   input is returned unchanged.
-//   upstream      — "codebuddy" | "grok" if a custom model matched, empty
-//                   otherwise (caller falls back to default routing).
-//   modelName     — the actual model string the upstream should see (custom
-//                   model's ModelName override). Empty when upstream is empty.
+//	resolvedModel — model id to place in the outgoing request body. If an
+//	                alias was hit this is the alias target; otherwise the
+//	                input is returned unchanged.
+//	upstream      — "codebuddy" | "grok" if a custom model matched, empty
+//	                otherwise (caller falls back to default routing).
+//	modelName     — the actual model string the upstream should see (custom
+//	                model's ModelName override). Empty when upstream is empty.
 //
 // Aliases resolve only one hop deep — chained aliases (a→b→c) are intentional
 // non-supported to keep resolution O(1) and avoid loops.
@@ -169,15 +169,18 @@ func (r *CustomRegistry) AddModel(id string, cm db.CustomModel) error {
 		return err
 	}
 	switch cm.Upstream {
-	case "codebuddy", "grok":
+	case "codebuddy", "grok", "freebuff":
 	default:
-		return fmt.Errorf("upstream must be 'codebuddy' or 'grok'")
+		return fmt.Errorf("upstream must be 'codebuddy', 'grok' or 'freebuff'")
 	}
 	if cm.ModelName == "" {
-		// Default: derive from id (strip cb/ prefix for codebuddy).
-		if cm.Upstream == "codebuddy" {
+		// Default: derive from id (strip the provider prefix).
+		switch cm.Upstream {
+		case "codebuddy":
 			cm.ModelName = strings.TrimPrefix(id, "cb/")
-		} else {
+		case "freebuff":
+			cm.ModelName = strings.TrimPrefix(id, "fb/")
+		default:
 			cm.ModelName = id
 		}
 	}

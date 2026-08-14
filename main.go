@@ -571,6 +571,7 @@ func main() {
 	})
 
 	r.GET("/", func(c *gin.Context) {
+		// Info page — deliberately omits account/key counts (info leak).
 		c.JSON(200, gin.H{
 			"service": "foxrouters",
 			"version": Version,
@@ -587,8 +588,6 @@ func main() {
 				"GET  /history/detail/:id — full request/response JSON for a single log",
 				"GET  /dashboard — web UI dashboard",
 			},
-			"grok_accounts": grokAM.Len(),
-			"cb_keys":       cbKM.Len(),
 		})
 	})
 
