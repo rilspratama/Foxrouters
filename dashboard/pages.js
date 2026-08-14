@@ -450,6 +450,32 @@ document.addEventListener('keydown', function(e) {
 /* ══════════════════════════════════════════════════════════
    CUSTOM MODELS & ALIASES (admin only — v1.3.0)
    ══════════════════════════════════════════════════════════ */
+/* Populate the Custom Models "Upstream" dropdown dynamically:
+   1. registered upstreams from /health (cached by refresh() every 5s),
+   2. upstreams already referenced by existing custom models (may point at a
+      provider that is currently unregistered),
+   3. the known set (grok/codebuddy/freebuff) as a safety net.
+   Newly added providers appear here automatically — no hardcoded list. */
+async function populateCustomUpstreams() {
+  var sel = document.getElementById('cmUpstream');
+  if (!sel) return;
+  var current = sel.value;
+  var ups = (window._upstreams || []).slice();
+  try {
+    var res = await apiFetch('/api/models/custom');
+    var models = res.models || {};
+    Object.keys(models).forEach(function(id) {
+      if (models[id].upstream && ups.indexOf(models[id].upstream) < 0) ups.push(models[id].upstream);
+    });
+  } catch (e) { /* non-fatal: fall through to defaults */ }
+  ['grok', 'codebuddy', 'freebuff'].forEach(function(u) { if (ups.indexOf(u) < 0) ups.push(u); });
+  ups = ups.filter(function(v, i) { return ups.indexOf(v) === i; }).sort();
+  sel.innerHTML = ups.map(function(u) {
+    return '<option value="' + escHtml(u) + '">' + escHtml(u) + '</option>';
+  }).join('');
+  if (current && ups.indexOf(current) >= 0) sel.value = current;  // preserve selection
+}
+
 async function loadCustomModels() {
   var tbody = document.getElementById('cmTableBody');
   if (!tbody) return;

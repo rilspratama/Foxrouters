@@ -446,6 +446,7 @@
           </div>
         </div>
         <div style="padding:16px">
+          <div id="modelsGrid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:8px;margin-bottom:16px"></div>
           <div id="modelsContainer">
             <div style="text-align:center;padding:32px;color:var(--text-tertiary);font-size:13px">Loading models...</div>
           </div>
@@ -537,8 +538,7 @@
             <div>
               <label style="font-size:11px;color:var(--text-tertiary);display:block;margin-bottom:4px">Upstream</label>
               <select id="cmUpstream" style="width:100%;padding:6px 10px;background:var(--bg);border:1px solid var(--border-strong);border-radius:var(--radius-sm);color:var(--text-primary);font-size:12px">
-                <option value="codebuddy">codebuddy</option>
-                <option value="grok">grok</option>
+                <!-- options populated dynamically by populateCustomUpstreams() from /health upstreams -->
               </select>
             </div>
             <div>
