@@ -50,6 +50,11 @@ jobs:
             org.opencontainers.image.description=OpenAI-compatible AI Gateway for Grok + CodeBuddy
             org.opencontainers.image.licenses=MIT
 
+      - name: Compute release version (GoReleaser strips the v prefix)
+        run: echo "RELEASE_VER=${TAG#v}" >> "$GITHUB_ENV"
+        env:
+          TAG: ${{ inputs.tag }}
+
       - name: Build and push
         uses: docker/build-push-action@v6
         with:
@@ -60,6 +65,6 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
             VERSION=${{ inputs.tag }}
-            RELEASE_BASE_URL=https://github.com/${{ github.repository }}/releases/download/${{ inputs.tag }}/foxrouters_${{ inputs.tag }}_linux
+            RELEASE_BASE_URL=https://github.com/${{ github.repository }}/releases/download/${{ inputs.tag }}/foxrouters_${{ env.RELEASE_VER }}_linux
           cache-from: type=gha
           cache-to: type=gha,mode=max
