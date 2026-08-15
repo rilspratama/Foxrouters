@@ -28,6 +28,14 @@
 #   bash update.sh --check    # check only (no pull)
 #   bash update.sh --tag=vX.Y.Z  # specific version
 #
+# Native binary mode (no Docker) — requires an EXISTING Redis:
+#   curl -fsSL … | bash -s -- --binary
+#   ./install.sh --binary --version=v1.6.14   # pin release version
+#   REDIS_ADDR=host:port REDIS_PASSWORD=… ./install.sh --binary  # external Redis
+# Installs the release binary + optional cloudflared + systemd service.
+# Redis is NOT installed — point REDIS_ADDR / REDIS_PASSWORD at an existing
+# instance (local, Docker, or remote). Re-run to upgrade (idempotent).
+#
 # Manage after install:
 #   docker logs foxrouters -f
 #   docker restart foxrouters
@@ -96,106 +104,41 @@ install_binary_mode() {
     mkdir -p "${CONFIG_DIR}"
     chmod 700 "${CONFIG_DIR}"
 
-    # ── Redis ─────────────────────────────────────────────────────────────
-    # Respect an existing Redis instance: reuse it when reachable with a
-    # known password, secure a password-less one, but NEVER overwrite an
-    # unknown password. Only apt-install when nothing else is running.
+    # ── Redis (config only — user provides it) ────────────────────────────
+    # No server install: FoxRouters needs an existing Redis (local, Docker,
+    # or remote). Point REDIS_ADDR / REDIS_PASSWORD at it; the installer
+    # only verifies reachability and writes the values into .env.
     local redis_addr="${REDIS_ADDR:-127.0.0.1:${REDIS_PORT}}"
     local redis_host="${redis_addr%%:*}"
     local redis_port="${redis_addr##*:}"
-    # True when the user explicitly points at a non-local Redis (Docker/remote)
-    local redis_external=""
-    if [[ -n "${REDIS_ADDR:-}" && "${REDIS_ADDR}" != "127.0.0.1:${REDIS_PORT}" \
-        && "${REDIS_ADDR}" != "localhost:${REDIS_PORT}" ]]; then
-        redis_external="1"
-    fi
 
     info "Checking Redis at ${redis_addr}..."
-    if ! command -v redis-cli &>/dev/null; then
-        info "Installing redis-tools (redis-cli)..."
-        apt-get update -qq
-        apt-get install -y -qq redis-tools >/dev/null
-    fi
-
-    local redis_pass
-    if [[ -n "${REDIS_PASSWORD:-}" ]]; then
-        redis_pass="${REDIS_PASSWORD}"
-    elif [[ -f "${CONFIG_DIR}/.redis_pass" ]]; then
-        redis_pass="$(cat "${CONFIG_DIR}/.redis_pass")"
-    else
-        redis_pass="$(gen_hex 16)"
-        printf '%s' "${redis_pass}" > "${CONFIG_DIR}/.redis_pass"
-        chmod 600 "${CONFIG_DIR}/.redis_pass"
-    fi
-
-    # Probe what's already there (--connect-timeout: fail fast on unreachable hosts)
-    local ping_noauth ping_auth
-    ping_noauth="$(timeout 3 redis-cli -h "${redis_host}" -p "${redis_port}" ping 2>/dev/null || true)"
-    ping_auth="$(timeout 3 redis-cli -h "${redis_host}" -p "${redis_port}" -a "${redis_pass}" ping 2>/dev/null || true)"
-
-    if [[ "${ping_auth}" == "PONG" ]]; then
-        ok "Redis up (existing, auth OK)"
-    elif [[ "${ping_noauth}" == "PONG" ]]; then
-        # Running WITHOUT password → set requirepass so FoxRouters is secure
-        if [[ -z "${redis_pass}" ]]; then
-            redis_pass="$(gen_hex 16)"
-            printf '%s' "${redis_pass}" > "${CONFIG_DIR}/.redis_pass"
-            chmod 600 "${CONFIG_DIR}/.redis_pass"
-        fi
-        local redis_conf="/etc/redis/redis.conf"
-        local redis_dir
-        redis_dir="$(timeout 3 redis-cli -h "${redis_host}" -p "${redis_port}" CONFIG GET dir 2>/dev/null | sed -n '2p' || true)"
-        if [[ -n "${redis_dir}" && -f "${redis_dir}/redis.conf" ]]; then
-            redis_conf="${redis_dir}/redis.conf"
-        fi
-        info "Setting Redis requirepass (${redis_conf})"
-        set_redis_requirepass "${redis_pass}" "${redis_conf}"
-        systemctl enable redis-server >/dev/null 2>&1 || true
-        systemctl restart redis-server
-        sleep 1
-    elif echo "${ping_noauth}" | grep -qi "NOAUTH\|operation not permitted"; then
-        err "Redis at ${redis_addr} is running but requires a DIFFERENT password."
-        err "Set REDIS_PASSWORD=<that password> and re-run, or point REDIS_ADDR"
-        err "at another instance. The installer never overwrites an existing"
-        err "password that belongs to another application."
-        exit 1
-    elif [[ -n "${redis_external}" ]]; then
-        err "Redis unreachable at REDIS_ADDR=${redis_addr} — fix the address"
-        err "or password and re-run. (No local install attempted: you pointed"
-        err "at an external instance.)"
-        exit 1
-    else
-        # Nothing running → install a fresh local Redis
-        if ! command -v redis-server &>/dev/null; then
-            info "Installing redis-server via apt..."
-            apt-get update -qq
-            apt-get install -y -qq redis-server >/dev/null
-            ok "Redis installed: $(redis-server --version)"
+    local ping_auth
+    if command -v redis-cli &>/dev/null; then
+        if [[ -n "${REDIS_PASSWORD:-}" ]]; then
+            ping_auth="$(timeout 3 redis-cli -h "${redis_host}" -p "${redis_port}" \
+                -a "${REDIS_PASSWORD}" ping 2>/dev/null || true)"
         else
-            ok "Redis server binary found: $(redis-server --version)"
+            ping_auth="$(timeout 3 redis-cli -h "${redis_host}" -p "${redis_port}" \
+                ping 2>/dev/null || true)"
         fi
-        if [[ -z "${redis_pass}" ]]; then
-            redis_pass="$(gen_hex 16)"
-            printf '%s' "${redis_pass}" > "${CONFIG_DIR}/.redis_pass"
-            chmod 600 "${CONFIG_DIR}/.redis_pass"
-        fi
-        local redis_conf="/etc/redis/redis.conf"
-        info "Setting Redis requirepass (${redis_conf})"
-        set_redis_requirepass "${redis_pass}" "${redis_conf}"
-        systemctl enable redis-server >/dev/null 2>&1 || true
-        systemctl restart redis-server
-        sleep 1
+    else
+        yellow "redis-cli not found — skipping Redis verification (gateway will surface auth errors)"
+        ping_auth="PONG"
     fi
 
-    if ! timeout 3 redis-cli -h "${redis_host}" -p "${redis_port}" -a "${redis_pass}" ping >/dev/null 2>&1; then
-        err "Redis auth failed at ${redis_addr} — check REDIS_ADDR / REDIS_PASSWORD"
+    if [[ "${ping_auth}" != "PONG" ]]; then
+        err "Redis not reachable at ${redis_addr} (down or password mismatch)."
+        err "FoxRouters requires an existing Redis — provide one via:"
+        err "  REDIS_ADDR=host:port   (default 127.0.0.1:6379)"
+        err "  REDIS_PASSWORD=...     (omit if the instance has no password)"
         exit 1
     fi
     ok "Redis up (auth OK)"
 
     # Expose resolved values to the .env writer in install_binary_service
     REDIS_ADDR_FINAL="${redis_addr}"
-    REDIS_PASS_FINAL="${redis_pass}"
+    REDIS_PASS_FINAL="${REDIS_PASSWORD:-}"
 
     install_binary_download "${os}" "${arch}"
 }
@@ -298,7 +241,7 @@ install_binary_service() {
     cat > /etc/systemd/system/foxrouters.service <<EOF
 [Unit]
 Description=FoxRouters AI Gateway (Grok + CodeBuddy + Freebuff + Alibaba)
-After=network-online.target redis-server.service
+After=network-online.target
 Wants=network-online.target
 
 [Service]
@@ -387,19 +330,6 @@ gen_hex() {
     else
         head -c "$1" /dev/urandom | od -An -tx1 | tr -d ' \n'
     fi
-}
-
-# set_redis_requirepass PASS CONF — ensure requirepass is persisted.
-# sed alone silently no-ops when no requirepass line exists at all
-# (exit 0, nothing written), so verify and append as fallback.
-set_redis_requirepass() {
-    local pass="$1" conf="$2"
-    if grep -q "requirepass ${pass}" "${conf}" 2>/dev/null; then
-        return 0
-    fi
-    sed -i "s/^#\?requirepass .*/requirepass ${pass}/" "${conf}" 2>/dev/null || true
-    grep -q "requirepass ${pass}" "${conf}" 2>/dev/null \
-        || printf '\nrequirepass %s\n' "${pass}" >> "${conf}"
 }
 
 # ── Native binary mode (no Docker) ─────────────────────────────────────────
