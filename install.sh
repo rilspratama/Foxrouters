@@ -184,8 +184,9 @@ install_binary_download() {
     tar xzf "${tmpdir}/${archive_name}" -C "${tmpdir}"
     install -m 0755 "${tmpdir}/foxrouters" /usr/local/bin/foxrouters
     rm -rf "${tmpdir}"
-    # NOTE: binary has no --version flag — it would start the server. Just confirm install.
-    ok "Installed: /usr/local/bin/foxrouters (v${ver})"
+    local installed_ver
+    installed_ver="$(/usr/local/bin/foxrouters version 2>/dev/null || echo "${ver}")"
+    ok "Installed: /usr/local/bin/foxrouters (v${installed_ver})"
 
     # ── cloudflared (optional — tunnel feature) ────────────────────────────
     # Respect an existing install anywhere on PATH; only download if missing.

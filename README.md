@@ -395,6 +395,31 @@ Notes:
   and credentials via `REDIS_PASSWORD` / `GATEWAY_KEY` env — see [Configuration](#configuration).
 - For a full managed stack (Redis + gateway + tunnel) use the Docker one-liner instead.
 
+### CLI (v1.6.14+)
+
+The binary doubles as a small CLI — no args (or `serve`) starts the server as
+before; the following subcommands manage an existing install:
+
+```bash
+foxrouters version          # print version, exit (used by install.sh verify)
+foxrouters config           # INTERACTIVE editor (arrow keys; REDIS_* first)
+foxrouters install          # INTERACTIVE first-install wizard (port + Redis)
+foxrouters config list      # print config (secrets masked)
+foxrouters config get KEY   # print one value (e.g. PORT) — shell-friendly
+foxrouters config set KEY VALUE   # set/update a value (atomic rewrite, 0600)
+foxrouters update           # self-update from the latest GitHub release
+foxrouters update --tag=vX.Y.Z    # update to a specific release
+foxrouters health           # probe http://127.0.0.1:PORT/health
+foxrouters help             # full usage
+```
+
+- `config` (no args) opens an **interactive editor** (TTY required): ↑/↓ navigate, Enter edit, `a` add, `d` delete, `q` quit — raw-mode (`golang.org/x/term`), secrets typed with masked echo, full-screen redraw, every change writes the file immediately. Non-TTY (piped) falls back to an error pointing at `config list/get/set`. Non-interactive: `config list` (masked), `config get KEY`, `config set KEY VALUE`. Override path with `FOXROUTERS_ENV`.
+- `update` downloads the release archive for the current `GOOS`/`GOARCH`,
+  verifies its SHA-256 against `checksums.txt`, atomically replaces the running
+  binary, and restarts the service — but only when the `foxrouters.service`
+  systemd unit is **active** (Docker/dev deployments are left untouched; restart
+  manually). Point `FOXROUTERS_GH_API` at a mirror for air-gapped installs.
+
 ---
 
 ## Configuration

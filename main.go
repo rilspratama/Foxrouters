@@ -157,6 +157,60 @@ const (
 // ============================================================================
 
 func main() {
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "serve", "server":
+			runServer()
+			return
+		case "version", "--version", "-v":
+			fmt.Println(Version)
+			return
+		case "config":
+			os.Exit(runConfig(os.Args[2:]))
+			return
+		case "install":
+			os.Exit(runInstall(os.Args[2:]))
+			return
+		case "update":
+			os.Exit(runUpdate(os.Args[2:]))
+			return
+		case "health":
+			os.Exit(runHealth(os.Args[2:]))
+			return
+		case "stop":
+			os.Exit(runStop(os.Args[2:]))
+			return
+		case "help", "--help", "-h":
+			printUsage()
+			return
+		}
+	}
+	runServer() // no args → serve (backward compatible with systemd/docker)
+}
+
+func printUsage() {
+	fmt.Printf(`FoxRouters %s — AI Gateway (Grok + CodeBuddy + Freebuff + Alibaba)
+
+Usage:
+  foxrouters                start the gateway server (default)
+  foxrouters serve          start the gateway server
+  foxrouters version        print version and exit
+  foxrouters config         interactive editor for the config file
+  foxrouters install        interactive first-install wizard (port + Redis)
+  foxrouters stop           stop the gateway (systemd / docker / PID)
+  foxrouters config list    print current config (.env, secrets masked)
+  foxrouters config get K   print one config value
+  foxrouters config set K V set/update a config value (.env)
+  foxrouters update         update to the latest GitHub release (self-replace)
+  foxrouters update --tag=vX.Y.Z  update to a specific release
+  foxrouters health         probe the local gateway health endpoint
+  foxrouters help           show this help
+
+Config file: %s (override with FOXROUTERS_ENV)
+`, Version, cliEnvFile())
+}
+
+func runServer() {
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = DEFAULT_PORT
