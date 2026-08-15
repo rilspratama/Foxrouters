@@ -84,6 +84,11 @@ and log every request/response to SQLite — all behind a single Bearer token.
   DashScope `dashscope-intl.aliyuncs.com/compatible-mode/v1`. Plain
   OpenAI-compatible, `sk-ws-*` keys, no session lifecycle. Dynamic registry
   (108+ chat models, zero-quota models excluded), 1M-context capable models.
+- **Media Studio → Alibaba** (v1.6.14) — image generation (qwen-image-3.0,
+  qwen-image-max, z-image-turbo, wan2.x-image), image editing (qwen-image-edit
+  + wan2.x image models — Files API upload for base64), video generation
+  (wan2.6-t2v, wan3.0-video, async task poll). Grok console SSO/DPoP/Turnstile
+  media path removed. Model dropdowns per tab.
 - **Per-key free-tier quota tracking** (v1.6.14) — gateway-side accumulator
   (`ali:model_usage:<model>` Redis hash) records tokens in/out + requests per
   model. Static baseline map (1M tokens/model) × active key count = dashboard
