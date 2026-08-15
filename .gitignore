@@ -37,3 +37,6 @@ test_filter_ab.py
 migration-backup/
 foxrouters-dev
 .vscode/
+
+# GoReleaser output
+dist/
