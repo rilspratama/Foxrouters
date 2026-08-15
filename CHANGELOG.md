@@ -2,9 +2,28 @@
 
 **Service:** Docker Compose (`foxrouters` container) · port **20130** · image local / GHCR  
 **Repo:** `/root/nexus-workspace/foxrouters/`  
-**Live version:** `const Version` in `main.go` / image tag (currently **v1.6.13-audit**, working tree)
+**Live version:** `const Version` in `main.go` / image tag (currently **v1.6.14**)
 
 Policy: **test (`go test -race`) before build/restart**. Secrets only via `.gateway.env` (gitignored).
+
+---
+
+## v1.6.14 — monolith split + faster CI release + docs restructure (2026-08-15)
+
+### Changed
+- **Monolith files split into per-concern modules (zero behavior change)** — 4 large files → 20 smaller ones, exported-symbol sets byte-identical (verified pre/post via `go doc` diff):
+  - `internal/upstream/codebuddy.go` (2557 LOC) → `cbkey.go`, `cb_meter.go`, `cb_manager.go`, `cb_transform.go`, `cb_proxy.go`
+  - `internal/upstream/grok.go` (1875) → `grok_account.go`, `grok_billing.go`, `grok_selector.go`, `grok_proxy.go`
+  - `internal/upstream/freebuff.go` (2352) → `freebuff_models.go`, `freebuff_manager.go`, `freebuff_session.go`, `freebuff_device.go`
+  - `internal/handlers/handlers.go` (1472) → `handlers_health.go`, `handlers_accounts.go`, `handlers_codebuddy.go`, `handlers_history.go`, `handlers_keys.go`, `handlers_dashboard.go`
+  - Verified: `go build` clean, `go vet` clean, `go test -race ./...` 6/6 packages PASS.
+- **CI release pipeline: GHCR image now reuses the GoReleaser binary** — `Dockerfile` builder stage downloads `foxrouters_{tag}_linux_{arch}.tar.gz` from the GitHub Release when `RELEASE_BASE_URL` is set (falls back to source build for `VERSION=dev`/local). `release-binaries.yml` dispatches `docker-publish.yml` (workflow_dispatch, `tag` input) after binaries attach. Effect: multiarch image build drops ~20-28min → ~2-5min, and the image ships the *identical* binary as the native release. Verified: dev build still compiles, URL pattern matches goreleaser archives.
+- **README restructured: 800 → 87 lines** — detailed sections moved to `docs/` (`INSTALL.md`, `CLI.md`, `CREDENTIALS.md`, `CONFIGURATION.md`, `API.md`, `DASHBOARD.md`, `ARCHITECTURE.md`, `DEVELOPMENT.md`). Version badges refreshed v1.6.2 → v1.6.14; stale refs fixed; project-layout table updated to post-refactor structure.
+
+### Verified
+- `go test -race ./...` ALL PASS (6/6 packages), `go vet` clean.
+- Symbol identity: codebuddy 84 = 84, grok & freebuff identical, handlers 82 = 82 (pre/post split).
+- Docker `VERSION=dev` build compiles from source; release URL pattern `foxrouters_{tag}_linux_{arch}.tar.gz` matches goreleaser `name_template`.
 
 ---
 
