@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>FoxRouters — Unified AI Gateway</title>
+<style>
+  :root {
+    --bg: #000000;
+    --bg-elev: #171717;
+    --border: #262626;
+    --border-strong: #333333;
+    --text: #ffffff;
+    --text-secondary: #a3a3a3;
+    --text-tertiary: #737373;
+    --brand: #ffffff;
+    --green: #4cd964;
+    --red: #ff453a;
+    --mono: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 40px 20px;
+  }
+  .card {
+    width: 100%;
+    max-width: 560px;
+    background: var(--bg-elev);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 40px 36px;
+  }
+  .hero { text-align: center; margin-bottom: 28px; }
+  .logo { width: 56px; height: 56px; border-radius: 12px; margin-bottom: 16px; }
+  h1 {
+    font-size: 26px;
+    font-weight: 700;
+    letter-spacing: -0.5px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+  }
+  .tagline { color: var(--text-tertiary); font-size: 13px; margin-top: 6px; }
+  .status-row {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    margin-top: 18px;
+    font-size: 12px;
+    color: var(--text-secondary);
+  }
+  .pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 3px 12px;
+    border-radius: 20px;
+    font-size: 11px;
+    font-weight: 600;
+    background: rgba(76, 217, 100, 0.12);
+    color: var(--green);
+    font-family: var(--mono);
+  }
+  .pill .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--green); display: inline-block; }
+  .pill.err { background: rgba(255, 69, 58, 0.12); color: var(--red); }
+  .pill.err .dot { background: var(--red); }
+  .section { margin-top: 26px; }
+  .section-title {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: var(--text-tertiary);
+    font-weight: 600;
+    margin-bottom: 10px;
+  }
+  .endpoints {
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    overflow: hidden;
+  }
+  .ep {
+    display: flex;
+    gap: 12px;
+    padding: 9px 14px;
+    font-family: var(--mono);
+    font-size: 11.5px;
+    border-bottom: 1px solid var(--border);
+    color: var(--text-secondary);
+  }
+  .ep:last-child { border-bottom: none; }
+  .ep .m { color: var(--text); font-weight: 600; flex-shrink: 0; }
+  .ep .d { color: var(--text-tertiary); }
+  .cta {
+    display: block;
+    margin-top: 28px;
+    text-align: center;
+    padding: 11px;
+    border-radius: 10px;
+    background: var(--brand);
+    color: #000;
+    font-size: 13px;
+    font-weight: 600;
+    text-decoration: none;
+    transition: opacity 150ms;
+  }
+  .cta:hover { opacity: 0.85; }
+  .foot {
+    margin-top: 22px;
+    text-align: center;
+    font-size: 11px;
+    color: var(--text-tertiary);
+    font-family: var(--mono);
+  }
+  .muted { color: var(--text-tertiary); }
+</style>
+</head>
+<body>
+  <div class="card">
+    <div class="hero">
+      <img class="logo" src="data:image/png;base64,__LOGO__" alt="FoxRouters" />
+      <h1>FoxRouters</h1>
+      <div class="tagline">Unified AI Gateway — Grok · CodeBuddy · Freebuff</div>
+      <div class="status-row">
+        <span class="pill" id="statusPill"><span class="dot"></span><span id="statusText">checking…</span></span>
+        <span id="verText" class="muted">__VERSION__</span>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-title">Endpoints</div>
+      <div class="endpoints" id="endpoints"></div>
+    </div>
+
+    <a class="cta" href="/dashboard">Open Dashboard →</a>
+    <div class="foot">OpenAI-compatible · single Bearer token</div>
+  </div>
+
+<script>
+var EP = [
+  ["POST /v1/chat/completions", "grok-* → Grok · cb/* → CodeBuddy · fb/* → Freebuff"],
+  ["GET /v1/models", "available models"],
+  ["GET /health", "upstream health + circuit breaker"],
+  ["GET /history/recent", "recent request logs"],
+  ["GET /dashboard", "web UI dashboard"]
+];
+document.getElementById('endpoints').innerHTML = EP.map(function(e) {
+  return '<div class="ep"><span class="m">' + e[0] + '</span><span class="d">' + e[1] + '</span></div>';
+}).join('');
+
+fetch('/health').then(function(r) { return r.json(); }).then(function(h) {
+  var ok = h.status === 'healthy';
+  var pill = document.getElementById('statusPill');
+  pill.className = 'pill' + (ok ? '' : ' err');
+  // version renders in the adjacent verText span (server-injected), not here
+  document.getElementById('statusText').textContent = h.status;
+}).catch(function() {
+  document.getElementById('statusText').textContent = 'unreachable';
+});
+</script>
+</body>
+</html>

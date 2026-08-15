@@ -2,9 +2,166 @@
 
 **Service:** Docker Compose (`foxrouters` container) · port **20130** · image local / GHCR  
 **Repo:** `/root/nexus-workspace/foxrouters/`  
-**Live version:** `const Version` in `main.go` / image tag (currently **v1.6.7**, working tree)
+**Live version:** `const Version` in `main.go` / image tag (currently **v1.6.14**)
 
 Policy: **test (`go test -race`) before build/restart**. Secrets only via `.gateway.env` (gitignored).
+
+---
+
+## v1.6.14 — monolith split + faster CI release + docs restructure (2026-08-15)
+
+### Changed
+- **Monolith files split into per-concern modules (zero behavior change)** — 4 large files → 20 smaller ones, exported-symbol sets byte-identical (verified pre/post via `go doc` diff):
+  - `internal/upstream/codebuddy.go` (2557 LOC) → `cbkey.go`, `cb_meter.go`, `cb_manager.go`, `cb_transform.go`, `cb_proxy.go`
+  - `internal/upstream/grok.go` (1875) → `grok_account.go`, `grok_billing.go`, `grok_selector.go`, `grok_proxy.go`
+  - `internal/upstream/freebuff.go` (2352) → `freebuff_models.go`, `freebuff_manager.go`, `freebuff_session.go`, `freebuff_device.go`
+  - `internal/handlers/handlers.go` (1472) → `handlers_health.go`, `handlers_accounts.go`, `handlers_codebuddy.go`, `handlers_history.go`, `handlers_keys.go`, `handlers_dashboard.go`
+  - Verified: `go build` clean, `go vet` clean, `go test -race ./...` 6/6 packages PASS.
+- **CI release pipeline: GHCR image now reuses the GoReleaser binary** — `Dockerfile` builder stage downloads `foxrouters_{tag}_linux_{arch}.tar.gz` from the GitHub Release when `RELEASE_BASE_URL` is set (falls back to source build for `VERSION=dev`/local). `release-binaries.yml` dispatches `docker-publish.yml` (workflow_dispatch, `tag` input) after binaries attach. Effect: multiarch image build drops ~20-28min → ~2-5min, and the image ships the *identical* binary as the native release. Verified: dev build still compiles, URL pattern matches goreleaser archives.
+- **README restructured: 800 → 87 lines** — detailed sections moved to `docs/` (`INSTALL.md`, `CLI.md`, `CREDENTIALS.md`, `CONFIGURATION.md`, `API.md`, `DASHBOARD.md`, `ARCHITECTURE.md`, `DEVELOPMENT.md`). Version badges refreshed v1.6.2 → v1.6.14; stale refs fixed; project-layout table updated to post-refactor structure.
+
+### Verified
+- `go test -race ./...` ALL PASS (6/6 packages), `go vet` clean.
+- Symbol identity: codebuddy 84 = 84, grok & freebuff identical, handlers 82 = 82 (pre/post split).
+- Docker `VERSION=dev` build compiles from source; release URL pattern `foxrouters_{tag}_linux_{arch}.tar.gz` matches goreleaser `name_template`.
+
+---
+
+## v1.6.13-audit (dev working tree) — Alibaba provider + per-key quota + visibility filter + security audit fixes (2026-08-15)
+
+### Added
+- **Alibaba Cloud Model Studio provider (4th upstream)** — `ali/` prefix → `dashscope-intl.aliyuncs.com/compatible-mode/v1`. Plain OpenAI-compatible, `sk-ws-*` keys, no session lifecycle. `internal/upstream/alibaba.go` (~810 lines) + handlers + routes. 32 keys imported to prod.
+- **Dynamic Alibaba model registry** — `AliModelsWorker` (6h refresh, gated `WORKERS_DISABLED`) + `POST /models/refresh`. 108+ chat models from `/api/v1/models`; zero-quota models excluded (`glm-5.2-fast-preview`, `qwen-plus-character-ja`, `qwen-plus-2025-01-25`, `ZHIPU/GLM-5.2`); static fallback 6.
+- **Per-key free-tier quota tracker** — `ali_quota.go`: static 1M tokens/model baseline map × `ActiveKeyCount()` = dashboard limit (`used / 29M · N keys`). `RecordUsageModel` → Redis `ali:model_usage:<model>` (tokens_in/out, requests). `GET /ali/models/usage` (admin). Dashboard **Free Quota** column with mini progress bar (green <60% / orange <90% / red ≥90%).
+- **Model visibility filter** — `filterModelsByKey` in `proxy.go`: `/v1/models` + `/v1/models/:id` filtered per-key by `allowed_models` whitelist (glob). Unknown keys fail CLOSED (empty list); no-whitelist keys + dashboard cookie session see full catalog.
+- **Media Studio → Alibaba DashScope** — Grok console (SSO + DPoP + Turnstile) removed from media routes; image gen/edit + video now use plain Bearer `sk-ws-*` keys (`internal/upstream/alibaba_media.go` + `internal/handlers/ali_media.go`). Image gen = `qwen-image-3.0` sync (multimodal-generation), edit = `qwen-image-edit`/`wan2.x-image` (Files API upload for base64 input), video = `wan2.6-t2v` async task + poll. Model dropdowns per tab (11 gen / 7 edit / 5 video models). Env gate: `ALIBABA_DISABLED=1`.
+- **Native binary release (GoReleaser)** — `goreleaser.yml`: linux/darwin/windows × amd64/arm64 archives + `checksums.txt`, `CGO_ENABLED=0` (pure Go, modernc.org/sqlite). CI job `.github/workflows/release-binaries.yml` attaches binaries to GitHub Release on tag push (alongside GHCR image). Local test: `make release-snapshot` (verified — binary boots, loads 94 grok/468 cb keys from Redis, serves 164 models, real chat OK). README "Install Native Binary" section. `dist/` gitignored.
+- **`install.sh --binary` mode** — no-Docker native install (Redis **not** installed — config/env only): release binary download + SHA-256 verify, cloudflared (optional, existing PATH install respected), `/etc/foxrouters/.env` (PORT/GATEWAY_BIND/REDIS_ADDR/REDIS_PASSWORD/GATEWAY_API_KEYS/LOG_SQLITE_PATH/CLOUDFLARED_PATH), systemd `foxrouters.service` (hardened: NoNewPrivileges/ProtectSystem/PrivateTmp, HOME=/var/lib/foxrouters so cloudflared works), health-check wait, idempotent re-run for upgrade. Redis: point `REDIS_ADDR`/`REDIS_PASSWORD` at an existing instance (local/Docker/remote); installer only verifies reachability (or skips if redis-cli missing). Full E2E tested in Docker against a mocked GitHub release: download → checksum ✓ → install ✓ → .env → gateway boots healthy ✓. Pitfalls fixed: openssl fallback (gen_hex urandom), `GATEWAY_API_KEYS` env name (not GATEWAY_KEY), archive name must match checksums.txt, no `--version` flag on binary.
+
+- **CLI subcommands** — binary doubles as a CLI (no args still serves): `version` (prints `Version` & exits — fixes the missing `--version` flag that forced install.sh to skip verification), `config` = **interactive editor built on `AlecAivazis/survey` v2.3.7** (battle-tested TUI lib — arrow keys, terminal resize, unicode, masked passwords, pagination, filter-as-you-type handled by the library; replaces the fragile hand-rolled raw-mode implementation): main menu lists keys (secrets masked) + `＋ Add new key` / `🗑 Delete key` (sub-select + confirm) / `✕ Quit`; keys are auto-seeded from the 12-key template on empty/missing `.env`; non-TTY falls back to `config list/get/set` hint), plus non-interactive `config list|get|set` (`.env` read/write, secrets masked, atomic 0600), `update [--tag=vX.Y.Z]` (GitHub release fetch → GoReleaser asset for current GOOS/GOARCH → SHA-256 verify vs checksums.txt → atomic self-replace → systemd restart ONLY when the unit is active; Docker/dev left untouched), `health` (probe local `/health`), `help`. `install.sh --binary` now verifies with `foxrouters version`. `FOXROUTERS_ENV` override + `FOXROUTERS_GH_API` for mirror/air-gapped + E2E tests. E2E verified: PTY tests for arrow navigation/edit/add/delete (persist ✓; bugs found+fixed: writeEnvFile mutated the input map → menu lost keys; partial-update writer couldn't express delete → full-snapshot rewrite), update mock (fetch → checksum ✓ → self-replace ✓ → systemd-skip ✓ → prod Docker gateway untouched).
+
+### Cleanup
+- **Dead code removed (Grok console media)** — `internal/handlers/grok_images.go` (391) + `internal/upstream/grok_dpop.go` (717) + 307 lines of orphaned media/quota/SSO functions in `grok.go` (SetQuota/RefreshSSO/VideoOwner/PickImageAccount/SyncAllQuota/SetImgCooldown + quota consts). Media Studio fully on Alibaba DashScope. Removed `/grok/quota/sync`, `/settings/turnstile` routes + dashboard Turnstile Solver widget (dead — sole consumer was Grok media lazy SSO). `SECURITY_AUDIT_2026-08-15.md` deleted (report file, findings all fixed & documented in CHANGELOG). Net **-1686 lines**.
+- **External Redis E2E verified** — `install.sh --binary` against redis.io cloud (`REDIS_ADDR`/`REDIS_PASSWORD`): probe → `.env` → gateway boots healthy, writes keys to external instance. Footprint: 1 key, 299 bytes.
+
+### Security (audit #1 deleg_8152cf75 + re-audit #2 deleg_3f349570 — READ-ONLY reports, fixes verified)
+- **Key hash flow** — `/ali/accounts` returns only `key_masked` + `key_hash` (SHA-256 24 hex); full `sk-ws-*` never leaves the server. Key actions (test/disable/enable/delete) resolve hash→key server-side; unknown ids → 404 (no credential-validation oracle).
+- **No secrets in URL/logs** — `DELETE /ali/accounts/:key` replaced by `POST /ali/accounts/delete` body.
+- **TOCTOU panic fix** — `AlibabaKeyManager.Next()` snapshots the pool under one RLock (concurrent `RemoveAccount` could shrink the slice → index out of range → gateway crash).
+- **`am.idx` race** — plain read + atomic write → `atomic.LoadUint64` + `atomic.AddUint64`.
+- **`validModelID` allowlist** — registry ids (Ali + Freebuff, third-party sourced) validated `^[A-Za-z0-9._/\-]{1,80}$`, drop fail-closed.
+- **`aliUsageKey` sanitize** — `[a-z0-9._-]` whitelist, no Redis keyspace pollution.
+- **`stripDateSuffix` regex** — `-\d{4}(-\d{2}(-\d{2})?)?$` (was `LastIndex("-20")`), zero-quota checked before + after strip.
+- **Bulk import cap 500/batch** + email preserved from api_keys.txt format; generic errors (no `err.Error()` passthrough).
+- **Nil-guards** on `AliModelUsageList`; `slog.Warn` on Redis read failure; `Remaining` clamped ≥0.
+
+### Verified
+- `go test -race ./...` ALL PASS, `go vet` clean, `node --check` OK.
+- Live (dev :20131 + prod :20130): 109 models, chat `ali/qwen3.7-flash` OK, quota `167 / 29.0M`, key test via hash OK, fake key → 404, bulk 510→500 truncated, log zero "sk-ws-" hits.
+- Audit reports: `SECURITY_AUDIT_2026-08-15.md` (2 rounds), `docs/cb-audit-2026-08-14.md`.
+
+---
+
+## v1.6.13 (dev working tree) — ClickHouse removed + history filters + SQLite pool (2026-08-14)
+
+### Removed
+- **ClickHouse backend removed entirely** — too heavy (~700MB image + RAM) for the value it added. SQLite is the only log backend. `internal/db/logstore_clickhouse.go` deleted, `github.com/ClickHouse/clickhouse-go/v2` dropped from go.mod.
+  - `LOG_BACKEND=clickhouse` now logs a deprecation warning and falls back to sqlite (no crash).
+  - `docker-compose.yml`: clickhouse service + profile + `CLICKHOUSE_*` env removed.
+  - `install.sh`/`update.sh`: force sqlite; stale `foxrouters-clickhouse` container/volume auto-cleaned.
+  - `.env.example`/`README.md`/`AGENTS.md`: ClickHouse references removed.
+
+### Added
+- **Server-side history filters** — `GET /history/recent` accepts `model=`, `upstream=`, `status=` (exact `200` or range `2xx`–`5xx`), `errors=1`, `hours=N`. `RecentFilter` shared by the store interface; dashboard Request History gets a filter bar (model/upstream/status/errors/time + Apply/Enter) that re-queries server-side.
+
+### Fixed
+- **SQLite single-connection pool (`SetMaxOpenConns(1)`) serialised ALL queries** — a 5MB request-body INSERT (kimi 1M context) blocked dashboard `/history` polling for 5s → `context deadline exceeded` 500s. WAL mode allows 1 writer + N readers, so the pool is now 4 (1 writer + 3 concurrent readers). `/history/recent?limit=4` 500 resolved.
+
+---
+
+## v1.6.8+ (dev working tree) — Dashboard modular split (2026-08-13)
+
+**Changed:** `dashboard.html` (single 6.3K-line file) split into `dashboard/` dir — `head.html`/`body.html`/`modals.html` (HTML+CSS) + `core.js` (script block 1: auth/routing/helpers/accounts/history) + `pages.js` (script block 2: custom/combos/proxies/tunnel/settings/media + INIT) + `foot.html`. `main.go` now `go:embed dashboard` (embed.FS) + `assembleDashboard()` concat — payload byte-identical (verified 345,220 bytes, 0 diff; 6,316 lines). Build/vet/test PASS. Future edits touch only the relevant part file; script-block boundary (INIT must stay at end of last block) is preserved.
+
+## v1.6.7+ (dev working tree) — Grok free image generation (2026-08-12)
+
+### Added
+- **Media Studio Chat tab (first tab)** — LLM prompt engineer before generation:
+  - Chat with any gateway model (dropdown, default glm-5.2) with an image-prompt-engineer system prompt
+  - Multi-turn refine; last assistant reply = current image prompt (auto-fills Generate tab)
+  - **Generate Image →** (runs gen with the LLM prompt) + **Use in Edit** buttons
+- **Fix preview edit/video broken** — CSP img-src/media-src cuma allow self+data: → imgen.x.ai & vidgen.x.ai ditambahkan (hasil edit/video Media Studio adalah URL external; URL langsung OK, di dashboard ke-blok CSP).
+- **Content Filters toggle di Settings** — master switch + per-rule checkbox (21 rule), GET/PUT `/settings/filters`, Redis `gw:config` (`filters_enabled` + `filters_active_rules` JSON), runtime tanpa restart. `compileFilters` sekarang compile SEMUA rule (gating di apply-time). Label per rule buat UI.
+- **Reasoning select di Chat tab** — reasoning_effort high/medium/low/none (default medium). Verified: gateway forwards it, reasoning_content muncul (tetap hidden dari prompt — prompt cuma ambil message.content).
+- **Chat fixes**: model dropdown black → `color-scheme:dark` + immediate fallback seeding (MEDIA_FALLBACK_MODELS) so it's never empty; History dropdown (localStorage-persisted sessions, cap 25, + New / Clear saves current) — survives refresh/navigation; LLM context window raised slice(-20)→slice(-30).
+- **Media Studio page (#/media)** — 3 tabs (Generate / Edit / Video):
+  - Generate: prompt + aspect ratio (1:1/3:2/2:3/16:9) + count → base64 preview → Download / Send to Edit
+  - Edit: prompt + source image (file upload OR from Generate tab) → edited image URL (imgen.x.ai)
+  - Video: prompt → async job → auto-poll every 5s with progress bar → <video> player + download (vidgen.x.ai)
+- **`POST /v1/images/edits`** — OpenAI edits shape ({model, prompt, image(b64)} → {created, data:[{url}]}). Shares image quota (5/account) + lazy-auth rotation.
+- **`POST /v1/videos/generations`** — {model, prompt} → {id, status:pending}. Model `grok-imagine-video` (NOT image model — wrong model hangs upstream). Video quota 2/account (lazy local count).
+- **`GET /v1/videos/:id`** — poll: 202 {status, progress} → 200 {data:[{url}]}. DPoP GET proof (htm:"GET"). Parses console.x.ai done shape `{"status":"done","video":{"url":...}}`.
+- **Video owner persistence** — `grok:video:<id>` → owner email in Redis (24h TTL) so polling survives gateway restarts.
+- Settings page (#/settings) — Turnstile Solver config (GET/PUT /settings/turnstile + POST test).
+
+### Fixed
+- proof() now takes htm param (GET vs POST) — video poll DPoP proof was hardcoded POST.
+- clampErr() helper — `x[:200]` on short bodies panicked (index out of range).
+
+## v1.6.7+ (dev working tree) — Grok free image generation (2026-08-12) legacy
+
+### Added
+- **Settings page (#/settings)** — Turnstile Solver config: `GET/PUT /settings/turnstile`
+  (solver URL + sitekey, Redis `gw:config` persisted, env `TURNSTILE_SOLVER_URL`/
+  `TURNSTILE_SITEKEY` fallback) + `POST /settings/turnstile/test` (live solve →
+  token len + elapsed). Containers reach the host solver via
+  `host.docker.internal` (`extra_hosts: host-gateway` in compose + dev.sh).
+  Verified on dev: corrupt-ALL-SSO → 401 → auto re-login via configured solver → 200.
+- **`POST /v1/images/generations`** — OpenAI Images API endpoint backed by Grok free-tier
+  image gen via console.x.ai DPoP (SSO cookie + DPoP proof). **Pure Go** — verified
+  end-to-end: import account with `sso`/`sso_rw` → generate → 200 b64 image.
+- **Lazy SSO auth (per operator directive)** — cookies are CACHED in Redis, never
+  proactively refreshed. 401 invalid SSO → **pure-HTTP re-login in-gateway**
+  (`LoginSSO`: local Turnstile solver `127.0.0.1:8742` + `POST /api/auth/sign-in`,
+  ~3s, no browser — verified Go TLS is accepted by console.x.ai) → retry once.
+  429 resource-exhausted → `MarkImgExhausted` (lazy local count, limit 5) + rotate.
+  Account `password` field (json:"-", never serialized) imported via
+  `/accounts/import` + `/accounts/import/bulk` for the re-login path.
+- **GrokAccount image fields** — `sso`, `sso_rw`, `password` (console SSO cookies +
+  login password) + `img_cooldown_until` persisted to Redis (`grok:account:<email>`);
+  import (single + bulk) accepts `sso`/`sso_rw`/`password`.
+- **Account rotation** — `PickImageAccount()` RR over accounts with SSO/not-disabled/
+  cooldown-passed/quota-not-exhausted; skips lazily-counted-exhausted accounts.
+- **DPoP client** — `internal/upstream/grok_dpop.go`: ECDSA P-256 JWK mint
+  (`POST /v1/dpop/token`) → ES256 proof (`typ: dpop+jwt`, jti/htm/htu/iat/ath, raw r||s)
+  → `POST /v1/images/generations` (`grok-imagine-image`, b64_json). Plain net/http.
+- **Quota tracking (lazy)** — image quota counted LOCALLY (`IncrImgUsed` on 200,
+  `MarkImgExhausted` on 429, limit 5). **`GrokImageQuotaWorker` 5min /v1/usage
+  round-trip REMOVED** — cookies die too often for proactive sync to be reliable.
+  `POST /grok/quota/sync` remains as best-effort on-demand diagnostics only.
+- **output_text extraction bug (v1.6.7, Aug 12):** `fbStreamToNonStream` builds
+  `choices` as `[]map[string]any`, but the Freebuff handler asserted `agg["choices"].([]any)`
+  → assertion ALWAYS failed → `output_text` never set → dashboard preview empty for every
+  Freebuff request (status 200, response_body had content). Fixed with `setFBOutputText()` /
+  `fbExtractContent()` handling BOTH shapes (stream + non-stream paths).
+- **Dashboard `accounts is not defined` (v1.6.7, Aug 12):** `refresh()` stopped fetching
+  `/accounts` (only `/health` + `/v1/models`), but a leftover `accounts.codebuddy` reference
+  crashed the whole refresh → ReferenceError. Fixed: CB credits card now reads
+  `health.cb_credits_used` / `health.cb_credits_limit` (already in /health).
+- **SQLite cold-start quirk:** on a multi-GB logs.db, the FIRST `/history/recent` queries
+  after container restart can take 10+s (WAL/shm recovery) and trip the 5s handler deadline →
+  transient 500 `context deadline exceeded`. Warm queries are 0ms. Not a code bug; retry after
+  ~30s. `ORDER BY id DESC` is the fast path (PK index); `ORDER BY timestamp DESC` uses the
+  covering index + temp btree (fine when warm).
+- **Tool-call turns have legitimately empty `output_text`** (content="" + finish_reason=tool_calls).
+  Not a capture bug — the model emitted only tool calls, no text. Stream clients get the real
+  SSE; only the dashboard preview shows empty.
+
+### Notes
+- **Root-cause lesson:** an earlier "console.x.ai rejects Go TLS" conclusion was WRONG —
+  the 401s were a missing `sso-rw` cookie value (pool JSON key `sso-rw` DASH vs struct tag
+  `sso_rw` underscore silently drops the value). With the complete cookie, plain Go
+  net/http works. Check cookie/JSON key spelling before blaming TLS fingerprints.
 
 ---
 

@@ -1,0 +1,191 @@
+
+<!-- ══════════════════════════════════════════════════════════
+     ADD/BULK IMPORT MODALS
+     ══════════════════════════════════════════════════════════ -->
+
+<!-- Add CB Key Modal -->
+<div class="modal-overlay" id="addCBModal" onclick="if(event.target===this)closeAddCBModal()" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:1000;align-items:center;justify-content:center">
+  <div style="background:var(--bg-secondary);border:1px solid var(--border);border-radius:var(--radius);width:90%;max-width:480px;padding:24px">
+    <h3 style="margin:0 0 16px;font-size:16px">Add CodeBuddy Key</h3>
+    <div style="margin-bottom:16px">
+      <label style="font-size:12px;color:var(--text-tertiary);display:block;margin-bottom:6px">API Key</label>
+      <input type="text" id="addCBKeyInput" placeholder="ck_..." style="width:100%;padding:8px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg-primary);color:var(--text-primary);font-family:var(--mono);font-size:13px" />
+    </div>
+    <div style="display:flex;gap:8px;justify-content:flex-end">
+      <button class="btn-ghost" onclick="closeAddCBModal()" style="padding:8px 16px;font-size:13px">Cancel</button>
+      <button class="btn-primary" onclick="submitAddCB()" style="padding:8px 16px;border-radius:var(--radius-sm);background:var(--brand);color:#000;border:none;font-size:13px;font-weight:500;cursor:pointer">Add</button>
+    </div>
+  </div>
+</div>
+
+<!-- Add CB OAuth Modal -->
+<div class="modal-overlay" id="addCBOAuthModal" onclick="if(event.target===this)closeAddCBOAuthModal()" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:1000;align-items:center;justify-content:center">
+  <div style="background:var(--bg-secondary);border:1px solid var(--border);border-radius:var(--radius);width:90%;max-width:600px;padding:24px;max-height:90vh;overflow-y:auto">
+    <h3 style="margin:0 0 8px;font-size:16px">Add CodeBuddy OAuth</h3>
+    <div style="margin-bottom:16px;font-size:12px;color:var(--text-tertiary)">Import access + refresh token (CLI device/login flow). Same chat endpoint as API keys; auth uses Bearer access token.</div>
+
+    <!-- Segmented control: Manual | Login URL -->
+    <div id="cbOAuthModeSwitch" style="display:flex;gap:0;margin-bottom:16px;border:1px solid var(--border);border-radius:var(--radius-sm);overflow:hidden;width:fit-content">
+      <button type="button" id="cbOAuthModeManual" onclick="cbOAuthSwitchMode('manual')" style="padding:8px 18px;font-size:13px;border:none;background:var(--brand);color:#000;cursor:pointer">Manual</button>
+      <button type="button" id="cbOAuthModeUrl" onclick="cbOAuthSwitchMode('url')" style="padding:8px 18px;font-size:13px;border:none;background:var(--bg-primary);color:var(--text-primary);cursor:pointer">Login URL</button>
+    </div>
+
+    <!-- MANUAL MODE -->
+    <div id="cbOAuthManualPane">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
+        <div>
+          <label style="font-size:12px;color:var(--text-tertiary);display:block;margin-bottom:6px">Email *</label>
+          <input type="text" id="cbOAuthEmail" placeholder="user@example.com" style="width:100%;padding:8px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg-primary);color:var(--text-primary);font-size:13px" />
+        </div>
+        <div>
+          <label style="font-size:12px;color:var(--text-tertiary);display:block;margin-bottom:6px">Expires In (seconds)</label>
+          <input type="number" id="cbOAuthExpiresIn" placeholder="31535929 (~365d)" style="width:100%;padding:8px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg-primary);color:var(--text-primary);font-size:13px" />
+        </div>
+      </div>
+      <div style="margin-bottom:12px">
+        <label style="font-size:12px;color:var(--text-tertiary);display:block;margin-bottom:6px">Access Token *</label>
+        <textarea id="cbOAuthAccessToken" rows="3" placeholder="eyJ..." style="width:100%;padding:8px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg-primary);color:var(--text-primary);font-family:var(--mono);font-size:12px;resize:vertical"></textarea>
+      </div>
+      <div style="margin-bottom:16px">
+        <label style="font-size:12px;color:var(--text-tertiary);display:block;margin-bottom:6px">Refresh Token *</label>
+        <textarea id="cbOAuthRefreshToken" rows="3" placeholder="eyJ..." style="width:100%;padding:8px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg-primary);color:var(--text-primary);font-family:var(--mono);font-size:12px;resize:vertical"></textarea>
+      </div>
+    </div>
+
+    <!-- LOGIN URL MODE -->
+    <div id="cbOAuthUrlPane" style="display:none">
+      <div style="margin-bottom:12px">
+        <label style="font-size:12px;color:var(--text-tertiary);display:block;margin-bottom:6px">Email (optional — pre-filled from login if available)</label>
+        <input type="text" id="cbOAuthUrlEmail" placeholder="leave blank to auto-detect from token" style="width:100%;padding:8px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg-primary);color:var(--text-primary);font-size:13px" />
+      </div>
+      <div style="display:flex;gap:8px;margin-bottom:12px;align-items:center">
+        <button type="button" class="btn-primary" id="cbOAuthGenBtn" onclick="cbOAuthGenerateUrl()" style="padding:8px 16px;border-radius:var(--radius-sm);background:var(--brand);color:#000;border:none;font-size:13px;font-weight:500;cursor:pointer">Generate login URL</button>
+        <button type="button" class="btn-ghost" id="cbOAuthPollBtn" onclick="cbOAuthPollNow()" style="padding:8px 16px;font-size:13px;display:none">Poll now</button>
+        <button type="button" class="btn-ghost" id="cbOAuthCancelPollBtn" onclick="cbOAuthCancelPoll()" style="padding:8px 16px;font-size:13px;display:none">Cancel</button>
+      </div>
+      <div id="cbOAuthUrlBox" style="display:none;margin-bottom:12px">
+        <label style="font-size:12px;color:var(--text-tertiary);display:block;margin-bottom:6px">Login URL — open this in your browser, sign in with GitHub/Google</label>
+        <div style="display:flex;gap:8px;align-items:flex-start">
+          <code id="cbOAuthAuthUrl" style="flex:1;padding:8px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg-primary);color:var(--text-primary);font-family:var(--mono);font-size:11px;word-break:break-all;max-height:80px;overflow:auto"></code>
+          <button type="button" class="btn-ghost" onclick="cbOAuthCopyUrl()" style="padding:8px 12px;font-size:12px;white-space:nowrap">Copy</button>
+          <a id="cbOAuthOpenLink" href="#" target="_blank" rel="noopener noreferrer" class="btn-ghost" style="padding:8px 12px;font-size:12px;white-space:nowrap;text-decoration:none">Open</a>
+        </div>
+        <div style="margin-top:6px;font-size:11px;color:var(--text-tertiary)">state: <span id="cbOAuthState" style="font-family:var(--mono)"></span></div>
+      </div>
+      <div id="cbOAuthPollStatus" style="display:none;margin-bottom:12px;padding:10px;border-radius:var(--radius-sm);font-size:13px;background:rgba(234,179,8,0.1);color:var(--yellow)"></div>
+    </div>
+
+    <div id="cbOAuthResult" style="margin-bottom:12px;display:none;padding:10px;border-radius:var(--radius-sm);font-size:13px"></div>
+    <div style="display:flex;gap:8px;justify-content:flex-end">
+      <button class="btn-ghost" onclick="closeAddCBOAuthModal()" style="padding:8px 16px;font-size:13px">Cancel</button>
+      <button class="btn-primary" id="cbOAuthSave" onclick="submitAddCBOAuth()" style="padding:8px 16px;border-radius:var(--radius-sm);background:var(--brand);color:#000;border:none;font-size:13px;font-weight:500;cursor:pointer">Import</button>
+    </div>
+  </div>
+</div>
+
+<!-- Bulk CB OAuth Import Modal -->
+<div class="modal-overlay" id="bulkCBOAuthModal" onclick="if(event.target===this)closeBulkCBOAuthModal()" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:1000;align-items:center;justify-content:center">
+  <div style="background:var(--bg-secondary);border:1px solid var(--border);border-radius:var(--radius);width:90%;max-width:640px;padding:24px;max-height:90vh;overflow-y:auto">
+    <h3 style="margin:0 0 8px;font-size:16px">Bulk Import CodeBuddy OAuth</h3>
+    <div style="margin-bottom:8px;font-size:12px;color:var(--text-tertiary)">Paste JSON array. Existing emails are updated (tokens refreshed).</div>
+    <div style="margin-bottom:16px">
+      <textarea id="bulkCBOAuthInput" rows="12" placeholder='[
+  {
+    "email": "user1@example.com",
+    "access_token": "eyJ...",
+    "refresh_token": "eyJ...",
+    "expires_in": 31535929
+  },
+  {
+    "email": "user2@example.com",
+    "access_token": "eyJ...",
+    "refresh_token": "eyJ..."
+  }
+]' style="width:100%;padding:8px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg-primary);color:var(--text-primary);font-family:var(--mono);font-size:12px;resize:vertical"></textarea>
+    </div>
+    <div id="bulkCBOAuthResult" style="margin-bottom:12px;display:none;padding:10px;border-radius:var(--radius-sm);font-size:13px"></div>
+    <div style="display:flex;gap:8px;justify-content:flex-end">
+      <button class="btn-ghost" onclick="closeBulkCBOAuthModal()" style="padding:8px 16px;font-size:13px">Cancel</button>
+      <button class="btn-primary" id="bulkCBOAuthSave" onclick="submitBulkCBOAuth()" style="padding:8px 16px;border-radius:var(--radius-sm);background:var(--brand);color:#000;border:none;font-size:13px;font-weight:500;cursor:pointer">Import</button>
+    </div>
+  </div>
+</div>
+
+<!-- Bulk CB Import Modal -->
+<div class="modal-overlay" id="bulkCBModal" onclick="if(event.target===this)closeBulkCBModal()" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:1000;align-items:center;justify-content:center">
+  <div style="background:var(--bg-secondary);border:1px solid var(--border);border-radius:var(--radius);width:90%;max-width:560px;padding:24px">
+    <h3 style="margin:0 0 16px;font-size:16px">Bulk Import CodeBuddy Keys</h3>
+    <div style="margin-bottom:8px;font-size:12px;color:var(--text-tertiary)">Paste keys — one per line, or comma-separated. Duplicates are skipped automatically.</div>
+    <div style="margin-bottom:16px">
+      <textarea id="bulkCBInput" placeholder="ck_abc123&#10;ck_def456&#10;ck_ghi789" rows="10" style="width:100%;padding:8px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg-primary);color:var(--text-primary);font-family:var(--mono);font-size:12px;resize:vertical"></textarea>
+    </div>
+    <div id="bulkCBResult" style="margin-bottom:12px;display:none;padding:10px;border-radius:var(--radius-sm);font-size:13px"></div>
+    <div style="display:flex;gap:8px;justify-content:flex-end">
+      <button class="btn-ghost" onclick="closeBulkCBModal()" style="padding:8px 16px;font-size:13px">Cancel</button>
+      <button class="btn-primary" id="bulkCBSave" onclick="submitBulkCB()" style="padding:8px 16px;border-radius:var(--radius-sm);background:var(--brand);color:#000;border:none;font-size:13px;font-weight:500;cursor:pointer">Import</button>
+    </div>
+  </div>
+</div>
+
+<!-- Add Grok Account Modal -->
+<div class="modal-overlay" id="addGrokModal" onclick="if(event.target===this)closeAddGrokModal()" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:1000;align-items:center;justify-content:center">
+  <div style="background:var(--bg-secondary);border:1px solid var(--border);border-radius:var(--radius);width:90%;max-width:560px;padding:24px;max-height:90vh;overflow-y:auto">
+    <h3 style="margin:0 0 16px;font-size:16px">Add Grok Account</h3>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
+      <div>
+        <label style="font-size:12px;color:var(--text-tertiary);display:block;margin-bottom:6px">Email *</label>
+        <input type="text" id="grokEmail" placeholder="user@example.com" style="width:100%;padding:8px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg-primary);color:var(--text-primary);font-size:13px" />
+      </div>
+      <div>
+        <label style="font-size:12px;color:var(--text-tertiary);display:block;margin-bottom:6px">Expires In (seconds)</label>
+        <input type="number" id="grokExpiresIn" placeholder="21600 (6h default)" style="width:100%;padding:8px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg-primary);color:var(--text-primary);font-size:13px" />
+      </div>
+    </div>
+    <div style="margin-bottom:12px">
+      <label style="font-size:12px;color:var(--text-tertiary);display:block;margin-bottom:6px">Access Token *</label>
+      <textarea id="grokAccessToken" rows="3" placeholder="eyJ..." style="width:100%;padding:8px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg-primary);color:var(--text-primary);font-family:var(--mono);font-size:12px;resize:vertical"></textarea>
+    </div>
+    <div style="margin-bottom:12px">
+      <label style="font-size:12px;color:var(--text-tertiary);display:block;margin-bottom:6px">Refresh Token *</label>
+      <textarea id="grokRefreshToken" rows="3" placeholder="..." style="width:100%;padding:8px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg-primary);color:var(--text-primary);font-family:var(--mono);font-size:12px;resize:vertical"></textarea>
+    </div>
+    <div style="margin-bottom:16px">
+      <label style="font-size:12px;color:var(--text-tertiary);display:block;margin-bottom:6px">ID Token (optional)</label>
+      <textarea id="grokIDToken" rows="2" placeholder="..." style="width:100%;padding:8px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg-primary);color:var(--text-primary);font-family:var(--mono);font-size:12px;resize:vertical"></textarea>
+    </div>
+    <div style="display:flex;gap:8px;justify-content:flex-end">
+      <button class="btn-ghost" onclick="closeAddGrokModal()" style="padding:8px 16px;font-size:13px">Cancel</button>
+      <button class="btn-primary" onclick="submitAddGrok()" style="padding:8px 16px;border-radius:var(--radius-sm);background:var(--brand);color:#000;border:none;font-size:13px;font-weight:500;cursor:pointer">Add</button>
+    </div>
+  </div>
+</div>
+
+<!-- Bulk Grok Import Modal -->
+<div class="modal-overlay" id="bulkGrokModal" onclick="if(event.target===this)closeBulkGrokModal()" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:1000;align-items:center;justify-content:center">
+  <div style="background:var(--bg-secondary);border:1px solid var(--border);border-radius:var(--radius);width:90%;max-width:640px;padding:24px;max-height:90vh;overflow-y:auto">
+    <h3 style="margin:0 0 16px;font-size:16px">Bulk Import Grok Accounts</h3>
+    <div style="margin-bottom:8px;font-size:12px;color:var(--text-tertiary)">Paste JSON array. Existing accounts are updated (tokens refreshed).</div>
+    <div style="margin-bottom:16px">
+      <textarea id="bulkGrokInput" rows="12" placeholder='[
+  {
+    "email": "user1@example.com",
+    "access_token": "eyJ...",
+    "refresh_token": "...",
+    "id_token": "...",
+    "expires_in": 21600
+  },
+  {
+    "email": "user2@example.com",
+    "access_token": "eyJ...",
+    "refresh_token": "..."
+  }
+]' style="width:100%;padding:8px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg-primary);color:var(--text-primary);font-family:var(--mono);font-size:12px;resize:vertical"></textarea>
+    </div>
+    <div id="bulkGrokResult" style="margin-bottom:12px;display:none;padding:10px;border-radius:var(--radius-sm);font-size:13px"></div>
+    <div style="display:flex;gap:8px;justify-content:flex-end">
+      <button class="btn-ghost" onclick="closeBulkGrokModal()" style="padding:8px 16px;font-size:13px">Cancel</button>
+      <button class="btn-primary" id="bulkGrokSave" onclick="submitBulkGrok()" style="padding:8px 16px;border-radius:var(--radius-sm);background:var(--brand);color:#000;border:none;font-size:13px;font-weight:500;cursor:pointer">Import</button>
+    </div>
+  </div>
+</div>
+

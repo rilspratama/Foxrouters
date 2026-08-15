@@ -3,11 +3,11 @@
 // Selected when LOG_BACKEND=sqlite (the default). Pure Go, no CGO, works
 // in the alpine runtime image without pulling gcc.
 //
-//   File location: LOG_SQLITE_PATH (default /var/lib/foxrouters/logs.db)
-//   Retention:     rows older than 90 days pruned by a background goroutine
-//                  once per hour (mirrors the CH TTL semantics)
-//   Concurrency:   sqlite serialises writes; we run WAL mode + a 5s busy
-//                  timeout so reads and writes don't deadlock under load
+//	File location: LOG_SQLITE_PATH (default /var/lib/foxrouters/logs.db)
+//	Retention:     rows older than 90 days pruned by a background goroutine
+//	               once per hour (mirrors the CH TTL semantics)
+//	Concurrency:   sqlite serialises writes; we run WAL mode + a 5s busy
+//	               timeout so reads and writes don't deadlock under load
 //
 // modernc.org/sqlite registers itself as the "sqlite" driver in database/sql.
 package db
@@ -59,9 +59,13 @@ func newSqliteStore() (LogStore, error) {
 	if err != nil {
 		return nil, fmt.Errorf("sqlite open %s: %w", path, err)
 	}
-	// SQLite writes serialise on a single connection — cap the pool.
-	sdb.SetMaxOpenConns(1)
-	sdb.SetMaxIdleConns(1)
+	// WAL mode allows ONE writer + multiple concurrent readers. Capping the
+	// pool at 1 serialised EVERY query (SELECTs included) behind a slow
+	// 5MB-body INSERT, so dashboard /history polling hit busy_timeout and
+	// returned 500 "context deadline exceeded". Use a small pool: writes
+	// still serialise via busy_timeout, reads run in parallel.
+	sdb.SetMaxOpenConns(4)
+	sdb.SetMaxIdleConns(4)
 	// Verify the DB is actually reachable.
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
@@ -146,7 +150,7 @@ func (s *sqliteStore) EnsureSchema(ctx context.Context) error {
 }
 
 // retentionLoop periodically deletes rows older than 90 days across all
-// three log tables — mirrors the ClickHouse TTL 90 DAY behaviour.
+// three log tables — mirrors the old ClickHouse TTL 90 DAY behaviour.
 func (s *sqliteStore) retentionLoop() {
 	// Run once shortly after startup, then hourly.
 	first := time.NewTimer(30 * time.Second)
@@ -369,21 +373,47 @@ func (s *sqliteStore) GetModelStats(ctx context.Context, since time.Time, limit 
 	return out, nil
 }
 
-func (s *sqliteStore) GetRecentRequests(ctx context.Context, limit int) ([]RecentRequest, error) {
+func (s *sqliteStore) GetRecentRequests(ctx context.Context, limit int, f RecentFilter) ([]RecentRequest, error) {
 	if limit <= 0 {
 		limit = 50
 	}
 	if limit > 500 {
 		limit = 500
 	}
-	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, timestamp, client_key, model, upstream, account_id,
-		       status_code, latency_ms, tokens_in, tokens_out, error_msg,
-		       input_text, output_text, cache_hit_pct
-		FROM request_logs
-		ORDER BY timestamp DESC, id DESC
-		LIMIT ?
-	`, limit)
+	q := `SELECT id, timestamp, client_key, model, upstream, account_id,
+	       status_code, latency_ms, tokens_in, tokens_out, error_msg,
+	       input_text, output_text, cache_hit_pct
+	FROM request_logs`
+	args := make([]any, 0, 6)
+	var where []string
+	if f.Model != "" {
+		where = append(where, "model = ?")
+		args = append(args, f.Model)
+	}
+	if f.Upstream != "" {
+		where = append(where, "upstream = ?")
+		args = append(args, f.Upstream)
+	}
+	if f.Status != "" {
+		if lo, hi, ok := statusRange(f.Status); ok {
+			where = append(where, "status_code >= ? AND status_code < ?")
+			args = append(args, lo, hi)
+		}
+	}
+	if f.ErrorOnly {
+		where = append(where, "error_msg != ''")
+	}
+	if f.Hours > 0 {
+		where = append(where, "timestamp >= datetime('now', ?)")
+		args = append(args, fmt.Sprintf("-%d hours", f.Hours))
+	}
+	if len(where) > 0 {
+		q += " WHERE " + strings.Join(where, " AND ")
+	}
+	q += " ORDER BY timestamp DESC, id DESC LIMIT ?"
+	args = append(args, limit)
+
+	rows, err := s.db.QueryContext(ctx, q, args...)
 	if err != nil {
 		return nil, err
 	}

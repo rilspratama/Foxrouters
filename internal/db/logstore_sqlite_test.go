@@ -85,7 +85,7 @@ func TestSqliteStore_InsertAndQuery(t *testing.T) {
 	}
 
 	// Recent (previews)
-	recent, err := store.GetRecentRequests(ctx, 10)
+	recent, err := store.GetRecentRequests(ctx, 10, RecentFilter{})
 	if err != nil {
 		t.Fatalf("GetRecentRequests: %v", err)
 	}
@@ -95,6 +95,35 @@ func TestSqliteStore_InsertAndQuery(t *testing.T) {
 	// ID must be a decimal string (JS-safe).
 	if recent[0].ID == "" {
 		t.Error("recent[0].ID is empty")
+	}
+
+	// Filtered recent: model=cb/gpt-4 (the errored row) must return 1 row.
+	fModel, err := store.GetRecentRequests(ctx, 10, RecentFilter{Model: "cb/gpt-4"})
+	if err != nil {
+		t.Fatalf("GetRecentRequests(model): %v", err)
+	}
+	if len(fModel) != 1 {
+		t.Fatalf("recent(model=cb/gpt-4) len=%d want 1", len(fModel))
+	}
+	// Error-only filter: exactly the row with error_msg set.
+	fErr, err := store.GetRecentRequests(ctx, 10, RecentFilter{ErrorOnly: true})
+	if err != nil {
+		t.Fatalf("GetRecentRequests(errors): %v", err)
+	}
+	if len(fErr) != 1 || fErr[0].Model != "cb/gpt-4" {
+		t.Fatalf("recent(errors=1) len=%d want 1 cb/gpt-4 row", len(fErr))
+	}
+	// Status range filter: 2xx matches the 200 row, 5xx the 500 row.
+	f2xx, err := store.GetRecentRequests(ctx, 10, RecentFilter{Status: "2xx"})
+	if err != nil {
+		t.Fatalf("GetRecentRequests(2xx): %v", err)
+	}
+	f5xx, err := store.GetRecentRequests(ctx, 10, RecentFilter{Status: "5xx"})
+	if err != nil {
+		t.Fatalf("GetRecentRequests(5xx): %v", err)
+	}
+	if len(f2xx) != 1 || len(f5xx) != 1 {
+		t.Fatalf("status filters: 2xx=%d 5xx=%d want 1/1", len(f2xx), len(f5xx))
 	}
 
 	// Full detail round-trip via the stringified id.

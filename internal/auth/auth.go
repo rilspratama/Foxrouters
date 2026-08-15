@@ -579,6 +579,10 @@ func (am *Manager) Count() int {
 // /history*, /cb-stats — everything except /v1/* and /health.
 func AdminMiddleware(am *Manager) gin.HandlerFunc {
 	authDisabled := os.Getenv("GATEWAY_AUTH_DISABLE") == "1"
+	if authDisabled {
+		slog.Warn("GATEWAY_AUTH_DISABLE=1 — ALL admin endpoints (key CRUD, accounts, history, metrics) are OPEN. Dev only.",
+			"module", "auth")
+	}
 	return func(c *gin.Context) {
 		// If auth is explicitly disabled (dev mode), allow all as admin.
 		if authDisabled {
@@ -620,9 +624,11 @@ func AuthMiddleware(am *Manager, sessionLookup ...func(string) string) gin.Handl
 		sl = sessionLookup[0]
 	}
 	return func(c *gin.Context) {
-		// Skip auth for public endpoints
+		// Skip auth for public endpoints. /dashboard is NOT public: it is the
+		// admin UI and must sit behind a valid session (browser requests
+		// without one are redirected to /login below).
 		path := c.Request.URL.Path
-		if path == "/health" || path == "/" || path == "/dashboard" || path == "/login" || path == "/logout" {
+		if path == "/health" || path == "/" || path == "/login" || path == "/logout" {
 			c.Next()
 			return
 		}

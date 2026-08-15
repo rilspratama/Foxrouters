@@ -1,6 +1,6 @@
 // Package proxy wires the HTTP entrypoint (/v1/chat/completions, /v1/models)
 // to the correct upstream — Grok or CodeBuddy — and emits Prometheus metrics
-// + async ClickHouse audit rows for every proxied call.
+// + async log audit rows for every proxied call.
 //
 // Dependencies:
 //   - internal/upstream  (isGrokModel, expandGrokAlias, proxyGrok, proxyCodeBuddy, MAX_REQUEST_BODY)
@@ -100,7 +100,7 @@ func toString(v interface{}) string {
 // ProxyRequest routes /v1/chat/completions to Grok or CodeBuddy based on the
 // requested model, expands Grok aliases, enforces per-key model whitelists,
 // records Prometheus metrics, updates per-key token quotas, and emits an
-// async RequestLog to ClickHouse for chat completions only.
+// async RequestLog for chat completions only.
 //
 // The optional `registry` argument (may be nil) resolves runtime-configured
 // custom models + aliases (see internal/proxy/custom.go). Aliases are
@@ -112,12 +112,39 @@ func toString(v interface{}) string {
 // Fallback combos retry on 5xx by buffering the upstream response through a
 // httptest-style recorder and only flushing to the real writer on success
 // or list exhaustion.
-func ProxyRequest(grokAM *upstream.GrokAccountManager, cbKM *upstream.CBKeyManager, fbAM *upstream.FreebuffAccountManager, hc *upstream.HealthChecker, authMgr *auth.Manager, registry *CustomRegistry, combos *ComboRegistry) gin.HandlerFunc {
+// filterModelsByKey restricts the model list to a key's allowed_models
+// whitelist (glob: "grok-*", "cb/*", exact). A key with NO whitelist sees
+// everything. An UNKNOWN key fails CLOSED (empty list) — identity that
+// cannot be verified must not inherit full catalog visibility.
+func filterModelsByKey(c *gin.Context, authMgr *auth.Manager, models []gin.H) []gin.H {
+	fullKey := c.GetString("client_key")
+	if fullKey == "" || authMgr == nil {
+		return models
+	}
+	info, ok := authMgr.Get(fullKey)
+	if !ok {
+		return []gin.H{} // unknown identity — deny
+	}
+	if len(info.AllowedModels) == 0 {
+		return models
+	}
+	out := make([]gin.H, 0, len(models))
+	for _, m := range models {
+		if id, _ := m["id"].(string); id != "" && info.IsModelAllowed(id) {
+			out = append(out, m)
+		}
+	}
+	return out
+}
+
+func ProxyRequest(grokAM *upstream.GrokAccountManager, cbKM *upstream.CBKeyManager, fbAM *upstream.FreebuffAccountManager, aliAM *upstream.AlibabaKeyManager, hc *upstream.HealthChecker, authMgr *auth.Manager, registry *CustomRegistry, combos *ComboRegistry) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		path := c.Request.URL.Path
 
-		// /v1/models — local
-		if path == "/v1/models" || path == "/models" {
+		// /v1/models — local (list + single lookup). Models are built by
+		// buildModels() so GET /v1/models/:id (used by Hermes/OpenAI SDKs
+		// for model resolution) shares the exact same list.
+		buildModels := func() []gin.H {
 			models := []gin.H{
 				// CodeBuddy — GPT
 				{"id": "gpt-5.6-sol", "object": "model", "owned_by": "codebuddy", "reasoning": true},
@@ -129,6 +156,7 @@ func ProxyRequest(grokAM *upstream.GrokAccountManager, cbKM *upstream.CBKeyManag
 				{"id": "gpt-5.3-codex", "object": "model", "owned_by": "codebuddy", "reasoning": true},
 				// CodeBuddy — Claude
 				{"id": "claude-opus-4.7-1m", "object": "model", "owned_by": "codebuddy", "reasoning": true},
+				{"id": "claude-opus-5", "object": "model", "owned_by": "codebuddy", "reasoning": true},
 				{"id": "claude-opus-4.6", "object": "model", "owned_by": "codebuddy", "reasoning": true},
 				{"id": "claude-sonnet-4.6", "object": "model", "owned_by": "codebuddy", "reasoning": true},
 				// CodeBuddy — Gemini
@@ -181,6 +209,11 @@ func ProxyRequest(grokAM *upstream.GrokAccountManager, cbKM *upstream.CBKeyManag
 			for _, m := range upstream.GetFBModels() {
 				models = append(models, gin.H{"id": m.GatewayID, "object": "model", "owned_by": "freebuff", "reasoning": m.Reasoning})
 			}
+			// Alibaba (DashScope) models — dynamic from the model registry
+			// (fetched from /api/v1/models), static catalog fallback otherwise.
+			for _, m := range upstream.GetAliModels() {
+				models = append(models, gin.H{"id": m.Gateway, "object": "model", "owned_by": "alibaba", "reasoning": m.Reasoning})
+			}
 			// Backward-compat aliases: cb/<model> → same model, same upstream.
 			// Routing treats non-grok-* as CodeBuddy, so both shapes work.
 			cbAliases := []gin.H{
@@ -230,7 +263,24 @@ func ProxyRequest(grokAM *upstream.GrokAccountManager, cbKM *upstream.CBKeyManag
 					models[i]["created_at"] = "2025-01-01T00:00:00Z"
 				}
 			}
-			c.JSON(200, gin.H{"object": "list", "data": models})
+			return models
+		}
+		// /v1/models — local (list)
+		if path == "/v1/models" || path == "/models" {
+			c.JSON(200, gin.H{"object": "list", "data": filterModelsByKey(c, authMgr, buildModels())})
+			return
+		}
+		// /v1/models/:id — single model lookup (Hermes/OpenAI SDK resolve
+		// models this way; a 404 here makes clients fall back silently).
+		if strings.HasPrefix(path, "/v1/models/") {
+			id := strings.TrimPrefix(path, "/v1/models/")
+			for _, m := range filterModelsByKey(c, authMgr, buildModels()) {
+				if mid, _ := m["id"].(string); mid == id {
+					c.JSON(200, m)
+					return
+				}
+			}
+			c.JSON(404, gin.H{"error": "model not found"})
 			return
 		}
 
@@ -394,10 +444,24 @@ func ProxyRequest(grokAM *upstream.GrokAccountManager, cbKM *upstream.CBKeyManag
 					b, _ = json.Marshal(bm)
 				}
 				upstream.ProxyCodeBuddy(c, b, bm, cbKM, clientStream, hc)
+			case "freebuff":
+				upstreamName = "freebuff"
+				if customModelName != "" {
+					// fbModelConfig looks the model up by gateway ID ("fb/…"),
+					// so prepend the prefix — the upstream then sees exactly
+					// customModelName (e.g. "deepseek/deepseek-v4-flash") and
+					// shares the session cache with the regular fb/ models.
+					bm["model"] = "fb/" + customModelName
+					b, _ = json.Marshal(bm)
+				}
+				upstream.ProxyFreebuff(c, b, bm, fbAM, clientStream, hc)
 			default:
 				if upstream.IsFreebuffModel(m) {
 					upstreamName = "freebuff"
 					upstream.ProxyFreebuff(c, b, bm, fbAM, clientStream, hc)
+				} else if upstream.IsAlibabaModel(m) {
+					upstreamName = "alibaba"
+					upstream.ProxyAlibaba(c, b, bm, aliAM, clientStream, hc)
 				} else if upstream.IsGrokModel(m) {
 					upstreamName = "grok"
 					upstream.ProxyGrok(c, b, grokAM, clientStream, hc, m)
@@ -509,7 +573,7 @@ func ProxyRequest(grokAM *upstream.GrokAccountManager, cbKM *upstream.CBKeyManag
 			}
 		}
 
-		// Async log to ClickHouse — only for chat completion endpoint,
+		// Async log — only for chat completion endpoint,
 		// not for probes to /v1/models, /health, /props, etc.
 		if grokAM.DB() != nil && path == "/v1/chat/completions" {
 			inputText := extractInputText(bodyMap)
@@ -518,7 +582,7 @@ func ProxyRequest(grokAM *upstream.GrokAccountManager, cbKM *upstream.CBKeyManag
 			tokensOut, _ := c.Get("tokens_out")
 			responseBody, _ := c.Get("response_body")
 
-			// Full request/response JSON stored in ClickHouse (ZSTD) — unlimited.
+			// Full request/response JSON stored in SQLite — unlimited.
 			rl := db.RequestLog{
 				Timestamp:  startTime,
 				RequestID:  c.GetString("request_id"),

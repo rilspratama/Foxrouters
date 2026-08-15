@@ -41,13 +41,15 @@ func SecurityHeadersMiddleware() gin.HandlerFunc {
 		h.Set("X-Frame-Options", "DENY")
 		h.Set("Referrer-Policy", "no-referrer")
 		// CSP: allow self + inline styles/scripts (dashboard SPA) + Google Fonts
+		// + imgen/vidgen.x.ai (Media Studio edit/video results are external URLs)
 		h.Set("Content-Security-Policy",
 			"default-src 'self'; "+
 				"script-src 'self' 'unsafe-inline'; "+
 				"style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "+
 				"font-src 'self' https://fonts.gstatic.com; "+
 				"connect-src 'self'; "+
-				"img-src 'self' data:; "+
+				"img-src 'self' data: https://imgen.x.ai https://vidgen.x.ai; "+
+				"media-src 'self' https://imgen.x.ai https://vidgen.x.ai; "+
 				"frame-ancestors 'none'")
 		c.Next()
 	}

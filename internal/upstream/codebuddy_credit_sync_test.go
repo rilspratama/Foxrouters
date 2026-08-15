@@ -56,10 +56,14 @@ func itoa(n int) string {
 
 func TestParseCBMeterAccount(t *testing.T) {
 	body := sampleMeterBody(0, "249.92", "0.08", "250")
-	acc, err := parseCBMeterAccount(body)
+	accs, err := parseCBMeterAccounts(body)
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
+	if len(accs) != 1 {
+		t.Fatalf("expected 1 account, got %d", len(accs))
+	}
+	acc := accs[0]
 	if acc.PackageName != "Pro Trial" {
 		t.Fatalf("PackageName=%q", acc.PackageName)
 	}
@@ -75,8 +79,8 @@ func TestParseCBMeterAccount(t *testing.T) {
 }
 
 func TestParseCBMeterAccountEmpty(t *testing.T) {
-	body := []byte(`{"code":0,"data":{"Response":{"Data":{"Accounts":[]}}}}`)
-	_, err := parseCBMeterAccount(body)
+	body := []byte(`{"code":0,"data":{"Response":{"Data":{"Accounts":[]}}}`)
+	_, err := parseCBMeterAccounts(body)
 	if err == nil {
 		t.Fatal("expected error for empty Accounts")
 	}
@@ -84,7 +88,7 @@ func TestParseCBMeterAccountEmpty(t *testing.T) {
 
 func TestParseCBMeterAccountCodeError(t *testing.T) {
 	body := []byte(`{"code":1,"msg":"unauthorized","data":{}}`)
-	_, err := parseCBMeterAccount(body)
+	_, err := parseCBMeterAccounts(body)
 	if err == nil || !strings.Contains(err.Error(), "code=1") {
 		t.Fatalf("expected code error, got %v", err)
 	}
@@ -164,28 +168,10 @@ func TestSyncCreditsAPIKey(t *testing.T) {
 	}
 }
 
-// applyMeterAccount is the lock-section of SyncCredits extracted for offline tests.
+// applyMeterAccount is the lock-section of SyncCredits extracted for offline
+// tests — delegates to the production applyMeterAccounts aggregation.
 func applyMeterAccount(k *CBKey, account cbMeterAccount) {
-	size := parseFloatOr(account.CapacitySizePrecise, float64(account.CapacitySize))
-	used := parseFloatOr(account.CapacityUsedPrecise, float64(account.CapacityUsed))
-	remain := parseFloatOr(account.CapacityRemainPrecise, float64(account.CapacityRemain))
-	k.mu.Lock()
-	k.creditsUsed = used
-	if size > 0 {
-		k.creditLimit = size
-	}
-	k.creditsRemain = remain
-	k.packageName = account.PackageName
-	k.cycleEnd = account.CycleEndTime
-	k.meterStatus = account.Status
-	k.meterSyncedAt = time.Now()
-	if account.Status == 3 || remain <= 0 {
-		if !k.disabled || !k.disabledAt.IsZero() {
-			k.disabled = true
-			k.disabledAt = time.Time{}
-		}
-	}
-	k.mu.Unlock()
+	k.applyMeterAccounts([]cbMeterAccount{account})
 }
 
 func TestSyncCreditsOAuthHeader(t *testing.T) {
@@ -216,12 +202,12 @@ func TestSyncCreditsOAuthHeader(t *testing.T) {
 }
 
 func TestSyncCreditsStatus3PermanentDisable(t *testing.T) {
-	acc, err := parseCBMeterAccount(sampleMeterBody(3, "0", "250", "250"))
+	accs, err := parseCBMeterAccounts(sampleMeterBody(3, "0", "250", "250"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	k := NewCBKeyForTest("ck_exhausted_keyxxxx")
-	applyMeterAccount(k, acc)
+	applyMeterAccount(k, accs[0])
 	if !k.IsDisabled() {
 		t.Fatal("status=3 should permanently disable")
 	}
@@ -236,46 +222,78 @@ func TestSyncCreditsStatus3PermanentDisable(t *testing.T) {
 }
 
 func TestSyncCreditsRemainZeroDisable(t *testing.T) {
-	acc, err := parseCBMeterAccount(sampleMeterBody(0, "0", "250", "250"))
+	accs, err := parseCBMeterAccounts(sampleMeterBody(0, "0", "250", "250"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	k := NewCBKeyForTest("ck_zero_remain_xxxx")
-	applyMeterAccount(k, acc)
+	applyMeterAccount(k, accs[0])
 	if !k.IsDisabled() {
 		t.Fatal("remain<=0 should permanently disable")
 	}
 }
 
-func TestSyncCreditsNoAutoReenablePermanent(t *testing.T) {
-	// Permanent disable, then meter says remain>0 — must stay disabled.
+func TestSyncCreditsMeterReenablePermanent(t *testing.T) {
+	// H3: a key disabled BY THE METER path (reason = "meter exhausted")
+	// comes back automatically when a later sync reports credits (remain > 0,
+	// not all-exhausted) — that's how keys with a surviving plan
+	// (e.g. Bonus Pack dead + Free Plan alive) recover.
 	k := NewCBKeyForTest("ck_perm_disabledxxxx",
 		WithCBDisabledCooldown(time.Time{})) // permanent
+	k.mu.Lock()
+	k.disabledReason = cbMeterDisableReason
+	k.mu.Unlock()
 	if !k.IsDisabled() {
 		t.Fatal("precondition")
 	}
-	acc, _ := parseCBMeterAccount(sampleMeterBody(0, "200", "50", "250"))
-	// applyMeterAccount only disables on exhausted — it never re-enables.
-	// Simulate: only update meter fields without clearing disabled.
-	k.mu.Lock()
-	wasDisabled := k.disabled
-	wasPerm := k.disabledAt.IsZero()
-	k.mu.Unlock()
+	accs, _ := parseCBMeterAccounts(sampleMeterBody(0, "200", "50", "250"))
+	acc := accs[0]
 
 	applyMeterAccount(k, acc)
 
-	// Because status!=3 and remain>0, applyMeterAccount won't touch disabled.
-	// Permanent state preserved.
-	if !wasDisabled || !wasPerm {
-		t.Fatal("precondition permanent")
-	}
-	if !k.IsDisabled() {
-		t.Fatal("must NOT auto-reenable permanent disable")
+	// Meter healthy → meter-driven permanent disable lifted.
+	if k.IsDisabled() {
+		t.Fatal("healthy meter must re-enable a meter-disabled key")
 	}
 	s := k.Snapshot()
-	// credits still updated from meter
 	if s.CreditsRemain != 200 {
-		t.Fatalf("remain should update even when disabled: %v", s.CreditsRemain)
+		t.Fatalf("remain should update from meter: %v", s.CreditsRemain)
+	}
+}
+
+func TestSyncCreditsDoesNotReenableOperatorDisable(t *testing.T) {
+	// H3: a key disabled by the OPERATOR (arbitrary reason, zero timestamp)
+	// must NEVER be auto-re-enabled by the credit-sync worker, even when the
+	// meter reports credits. Operator disables fail closed.
+	k := NewCBKeyForTest("ck_op_disabledxxxx",
+		WithCBDisabledCooldown(time.Time{})) // permanent
+	k.mu.Lock()
+	k.disabledReason = "manual sweep by operator" // operator/sweep reason
+	k.mu.Unlock()
+	if !k.IsDisabled() {
+		t.Fatal("precondition")
+	}
+	accs, _ := parseCBMeterAccounts(sampleMeterBody(0, "200", "50", "250"))
+	acc := accs[0]
+
+	applyMeterAccount(k, acc)
+
+	if !k.IsDisabled() {
+		t.Fatal("healthy meter must NOT re-enable an operator-disabled key")
+	}
+	if r := k.Snapshot().DisabledReason; r != "manual sweep by operator" {
+		t.Fatalf("disabled reason must be preserved: %q", r)
+	}
+}
+
+func TestSyncCreditsMeterKeepsExhaustedDisabled(t *testing.T) {
+	// Exhausted meter must NOT re-enable — remain <= 0 keeps the key dead.
+	k := NewCBKeyForTest("ck_exh_still_xxxx",
+		WithCBDisabledCooldown(time.Time{})) // permanent
+	accs, _ := parseCBMeterAccounts(sampleMeterBody(3, "0", "250", "250"))
+	applyMeterAccount(k, accs[0])
+	if !k.IsDisabled() {
+		t.Fatal("all-exhausted meter must keep key disabled")
 	}
 }
 
@@ -347,16 +365,16 @@ func TestCBKeyDTOMeterFields(t *testing.T) {
 func TestLoadMeterFieldsFromRedisShape(t *testing.T) {
 	// Replicate LoadFromRedis field mapping for meter fields
 	state := map[string]string{
-		"cred_type":        "api_key",
-		"credits_used":     "1.5",
-		"total_requests":   "7",
-		"disabled":         "false",
-		"credit_limit":     "250",
-		"credits_remain":   "248.5",
-		"package_name":     "Pro Trial",
-		"cycle_end":        "2026-08-05 18:28:40",
-		"meter_status":     "0",
-		"meter_synced_at":  "1893456000",
+		"cred_type":       "api_key",
+		"credits_used":    "1.5",
+		"total_requests":  "7",
+		"disabled":        "false",
+		"credit_limit":    "250",
+		"credits_remain":  "248.5",
+		"package_name":    "Pro Trial",
+		"cycle_end":       "2026-08-05 18:28:40",
+		"meter_status":    "0",
+		"meter_synced_at": "1893456000",
 	}
 	key := &CBKey{Key: "ck_from_redis_xxxx", CredType: CBAuthAPIKey}
 	if f, err := parseFloatOrErr(state["credit_limit"]); err == nil && f > 0 {
@@ -403,6 +421,149 @@ func parseInt64Local(s string) (int64, error) {
 	return n, nil
 }
 
+// TestApplyMeterAccountsMultiPlan — a key can hold Bonus Pack + Free Plan
+// Subscription concurrently. Aggregation must SUM remain/size and NOT disable
+// when only ONE plan is exhausted but the other still has credits.
+func TestApplyMeterAccountsMultiPlan(t *testing.T) {
+	body := []byte(`{
+		"code":0,
+		"data":{"Response":{"Data":{"Accounts":[
+			{
+				"PackageName":"Bonus Pack",
+				"CapacitySize":250,
+				"CapacityUsed":0,
+				"CapacityRemain":250,
+				"CapacitySizePrecise":"250",
+				"CapacityUsedPrecise":"0",
+				"CapacityRemainPrecise":"250",
+				"CycleEndTime":"2026-08-26 23:02:20",
+				"Status":0
+			},
+			{
+				"PackageName":"Free Plan Subscription",
+				"CapacitySize":100,
+				"CapacityUsed":0,
+				"CapacityRemain":100,
+				"CapacitySizePrecise":"100",
+				"CapacityUsedPrecise":"0",
+				"CapacityRemainPrecise":"100",
+				"CycleEndTime":"2026-08-31 23:59:59",
+				"Status":0
+			}
+		]}}}
+	}`)
+
+	k := NewCBKeyForTest("ck_multi_plan_xxxxx")
+	if err := parseAndApply(k, body); err != nil {
+		t.Fatal(err)
+	}
+	s := k.Snapshot()
+	if s.CreditsRemain != 350 {
+		t.Fatalf("aggregated remain=%v want 350", s.CreditsRemain)
+	}
+	if s.CreditLimit != 350 {
+		t.Fatalf("aggregated limit=%v want 350", s.CreditLimit)
+	}
+	if s.MeterStatus != 0 {
+		t.Fatalf("status=%v want 0 (all active)", s.MeterStatus)
+	}
+	if k.IsDisabled() {
+		t.Fatal("key must stay enabled when total remain > 0")
+	}
+	// primary = plan with the most remain
+	if s.PackageName != "Bonus Pack" {
+		t.Fatalf("primary=%q want Bonus Pack", s.PackageName)
+	}
+}
+
+// TestApplyMeterAccountsPartialExhaustion — Bonus Pack exhausted (Status 3) but
+// Free Plan still has credits → total remain > 0 → key must NOT be disabled.
+func TestApplyMeterAccountsPartialExhaustion(t *testing.T) {
+	body := []byte(`{
+		"code":0,
+		"data":{"Response":{"Data":{"Accounts":[
+			{
+				"PackageName":"Bonus Pack",
+				"CapacitySize":250,
+				"CapacityUsed":250,
+				"CapacityRemain":0,
+				"CapacitySizePrecise":"250",
+				"CapacityUsedPrecise":"250",
+				"CapacityRemainPrecise":"0",
+				"CycleEndTime":"2026-08-26 23:02:20",
+				"Status":3
+			},
+			{
+				"PackageName":"Free Plan Subscription",
+				"CapacitySize":100,
+				"CapacityUsed":20,
+				"CapacityRemain":80,
+				"CapacitySizePrecise":"100",
+				"CapacityUsedPrecise":"20",
+				"CapacityRemainPrecise":"80",
+				"CycleEndTime":"2026-08-31 23:59:59",
+				"Status":0
+			}
+		]}}}
+	}`)
+
+	k := NewCBKeyForTest("ck_partial_exh_xxxxx")
+	if err := parseAndApply(k, body); err != nil {
+		t.Fatal(err)
+	}
+	if k.IsDisabled() {
+		t.Fatal("partially-exhausted key (one plan dead, other alive) must NOT be disabled")
+	}
+	s := k.Snapshot()
+	if s.CreditsRemain != 80 {
+		t.Fatalf("aggregated remain=%v want 80", s.CreditsRemain)
+	}
+	if s.MeterStatus != 0 {
+		t.Fatalf("status=%v want 0 (not all exhausted)", s.MeterStatus)
+	}
+	// primary switches to the surviving plan
+	if s.PackageName != "Free Plan Subscription" {
+		t.Fatalf("primary=%q want Free Plan Subscription", s.PackageName)
+	}
+}
+
+// TestApplyMeterAccountsAllExhausted — ALL plans dead → permanent disable.
+func TestApplyMeterAccountsAllExhausted(t *testing.T) {
+	body := []byte(`{
+		"code":0,
+		"data":{"Response":{"Data":{"Accounts":[
+			{"PackageName":"Bonus Pack","CapacityRemainPrecise":"0","CapacitySizePrecise":"250","CapacityUsedPrecise":"250","CycleEndTime":"2026-08-26","Status":3},
+			{"PackageName":"Free Plan Subscription","CapacityRemainPrecise":"0","CapacitySizePrecise":"100","CapacityUsedPrecise":"100","CycleEndTime":"2026-08-31","Status":3}
+		]}}}
+	}`)
+
+	k := NewCBKeyForTest("ck_all_exh_xxxxxxx")
+	if err := parseAndApply(k, body); err != nil {
+		t.Fatal(err)
+	}
+	if !k.IsDisabled() {
+		t.Fatal("all plans exhausted → must be permanently disabled")
+	}
+	s := k.Snapshot()
+	if !s.DisabledAt.IsZero() {
+		t.Fatalf("expected permanent (zero DisabledAt), got %v", s.DisabledAt)
+	}
+	if s.MeterStatus != 3 {
+		t.Fatalf("status=%v want 3", s.MeterStatus)
+	}
+}
+
+// parseAndApply is a tiny helper: parse body then run the production
+// aggregation (same code path SyncCredits uses).
+func parseAndApply(k *CBKey, body []byte) error {
+	accs, err := parseCBMeterAccounts(body)
+	if err != nil {
+		return err
+	}
+	k.applyMeterAccounts(accs)
+	return nil
+}
+
 func TestSyncCreditsIntFallback(t *testing.T) {
 	// Precise fields empty → use int Capacity* fields
 	body := []byte(`{
@@ -419,14 +580,49 @@ func TestSyncCreditsIntFallback(t *testing.T) {
 			"Status":0
 		}]}}}
 	}`)
-	acc, err := parseCBMeterAccount(body)
+	accs, err := parseCBMeterAccounts(body)
 	if err != nil {
 		t.Fatal(err)
 	}
 	k := NewCBKeyForTest("ck_int_fallback_xxx")
-	applyMeterAccount(k, acc)
+	applyMeterAccount(k, accs[0])
 	s := k.Snapshot()
 	if s.CreditLimit != 100 || s.CreditsUsed != 10 || s.CreditsRemain != 90 {
 		t.Fatalf("int fallback: limit=%v used=%v remain=%v", s.CreditLimit, s.CreditsUsed, s.CreditsRemain)
+	}
+}
+
+func TestMeterExhaustionDisableAutoLifts(t *testing.T) {
+	// I1: permanentDisable with the meter reason (14018 / credits-used paths)
+	// must auto-lift when a later meter sync reports credits — this restores
+	// the pre-H3 self-healing at cycle rollover.
+	k := NewCBKeyForTest("ck_i1_exhaustionxxxx")
+	permanentDisable(k, cbMeterDisableReason)
+	if !k.IsDisabled() {
+		t.Fatal("precondition: key must be disabled")
+	}
+	accs, _ := parseCBMeterAccounts(sampleMeterBody(0, "200", "50", "250"))
+	applyMeterAccount(k, accs[0])
+	if k.IsDisabled() {
+		t.Fatal("meter reason disable must auto-lift when meter reports credits")
+	}
+	if r := k.Snapshot().DisabledReason; r != "" {
+		t.Fatalf("reason must be cleared after lift: %q", r)
+	}
+}
+
+func TestAuthFailureDisableStaysPermanent(t *testing.T) {
+	// I1: auth-failure disables (401 etc.) carry an arbitrary reason and must
+	// stay disabled even when the meter reports credits — the meter call would
+	// fail for them anyway.
+	k := NewCBKeyForTest("ck_i1_authfailxxxx")
+	permanentDisable(k, "401 unauthorized, permanent")
+	if !k.IsDisabled() {
+		t.Fatal("precondition")
+	}
+	accs, _ := parseCBMeterAccounts(sampleMeterBody(0, "200", "50", "250"))
+	applyMeterAccount(k, accs[0])
+	if !k.IsDisabled() {
+		t.Fatal("auth-failure disable must NOT auto-lift")
 	}
 }

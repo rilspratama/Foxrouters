@@ -1,4 +1,4 @@
-.PHONY: build test vet lint run docker docker-up docker-down clean
+.PHONY: build test vet lint run docker docker-up docker-down clean release
 
 # Go binary
 GO ?= go
@@ -19,6 +19,12 @@ lint: vet test
 
 run: build
 	./$(BINARY)
+
+release:
+	goreleaser release --clean
+
+release-snapshot:
+	goreleaser release --snapshot --clean
 
 docker:
 	docker build -t foxrouters .

@@ -28,6 +28,9 @@ graphify-out/
 migrate.py
 stress_test.py
 stress_test_v2.py
+check_disabled_credits.py
+test_filter_ab.py
+foxrouters-dev
 migration-backup/
 *.tsv
 *.rdb

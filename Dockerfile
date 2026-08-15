@@ -1,8 +1,8 @@
 # syntax=docker/dockerfile:1.7
 # Multi-stage build for FoxRouters.
-# dashboard.html is compiled into the binary via go:embed, so runtime image
-# only needs the static binary + CA roots + wget (for healthcheck) +
-# cloudflared (data plane for /api/tunnel/* — v1.6.0).
+# dashboard/ is compiled into the binary via go:embed (multi-file SPA parts),
+# so runtime image only needs the static binary + CA roots + wget (for
+# healthcheck) + cloudflared (data plane for /api/tunnel/* — v1.6.0).
 
 # -----------------------------------------------------------------------------
 # Stage 1: builder
@@ -13,6 +13,11 @@ FROM golang:1.25-alpine AS builder
 # `docker build --build-arg VERSION=v1.2.3 .` or the CI workflow.
 ARG VERSION=dev
 
+# Release builds (CI): download the GoReleaser-built binary instead of
+# compiling here. Base URL, arch suffix is appended per-platform:
+#   ${RELEASE_BASE_URL}_${TARGETARCH}.tar.gz
+ARG RELEASE_BASE_URL=""
+
 WORKDIR /build
 
 # Cache module downloads separately from source changes.
@@ -22,10 +27,22 @@ RUN go mod download
 # Copy the rest of the source tree (respects .dockerignore).
 COPY . .
 
-# CGO_ENABLED=0 → fully static binary, safe to drop into scratch/alpine.
-# -ldflags "-s -w" strips debug/symbol tables (~30% smaller).
-# -X main.Version stamps the release tag into the binary.
-RUN CGO_ENABLED=0 go build -ldflags="-s -w -X main.Version=${VERSION}" -o foxrouters .
+# Release builds (CI): download the GoReleaser-built binary from the GitHub
+# Release instead of compiling here — identical artifact, much faster.
+# Falls back to source build when RELEASE_BASE_URL is empty (local/dev).
+ARG TARGETARCH
+
+RUN set -eux; \
+    if [ -n "${RELEASE_BASE_URL}" ]; then \
+      apk add --no-cache curl tar; \
+      curl -fsSL -o /tmp/foxrouters.tar.gz "${RELEASE_BASE_URL}_${TARGETARCH}.tar.gz"; \
+      tar xzf /tmp/foxrouters.tar.gz -C /tmp; \
+      chmod +x /tmp/foxrouters; \
+      /tmp/foxrouters version; \
+      mv /tmp/foxrouters /build/foxrouters; \
+    else \
+      CGO_ENABLED=0 go build -ldflags="-s -w -X main.Version=${VERSION}" -o foxrouters .; \
+    fi
 
 # -----------------------------------------------------------------------------
 # Stage 2: cloudflared downloader

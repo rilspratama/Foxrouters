@@ -28,6 +28,8 @@ xai-*.json
 grok-gateway
 stress_test.py
 stress_test_v2.py
+check_disabled_credits.py
+test_filter_ab.py
 
 # Allow skills/ (project skill, not global)
 !skills/
@@ -35,3 +37,6 @@ stress_test_v2.py
 migration-backup/
 foxrouters-dev
 .vscode/
+
+# GoReleaser output
+dist/

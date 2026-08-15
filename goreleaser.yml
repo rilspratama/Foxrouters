@@ -1,0 +1,71 @@
+# goreleaser.yml — FoxRouters native binary release config.
+# Triggered on tag push (v*) via .github/workflows/release-binaries.yml,
+# producing foxrouters_<version>_<os>_<arch> archives + SHA-256 checksums
+# attached to the GitHub Release alongside the GHCR multi-arch image.
+#
+# Local test:  goreleaser release --snapshot --clean
+version: 2
+
+project_name: foxrouters
+
+env:
+  - CGO_ENABLED=0
+
+builds:
+  - id: foxrouters
+    main: .
+    binary: foxrouters
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    # Pure-Go deps only (modernc.org/sqlite) — CGO off keeps cross-builds clean.
+    ldflags:
+      - -s -w -X main.Version={{ .Version }}
+    mod_timestamp: "{{ .CommitTimestamp }}"
+
+archives:
+  - id: default
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    formats:
+      - tar.gz
+    format_overrides:
+      - goos: windows
+        formats:
+          - zip
+    files:
+      - LICENSE
+      - README.md
+
+checksum:
+  name_template: "checksums.txt"
+  algorithm: sha256
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+      - "^ci:"
+      - Merge pull request
+      - Merge branch
+
+release:
+  # Don't clobber release notes created via the GitHub API — just attach assets.
+  mode: keep-existing
+  header: |
+    ## FoxRouters {{ .Version }}
+
+    OpenAI + Anthropic compatible AI gateway: Grok · CodeBuddy · Freebuff · Alibaba.
+    See [README](https://github.com/rilspratama/Foxrouters) for usage.
+
+    ### Assets
+    - `foxrouters_{{ .Version }}_linux_amd64` / `linux_arm64` — Linux
+    - `foxrouters_{{ .Version }}_darwin_amd64` / `darwin_arm64` — macOS
+    - `foxrouters_{{ .Version }}_windows_amd64` / `windows_arm64` — Windows
+    - `checksums.txt` — SHA-256 of all archives

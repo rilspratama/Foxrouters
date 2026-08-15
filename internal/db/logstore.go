@@ -1,12 +1,12 @@
-// logstore.go — pluggable request-log storage backend.
+// logstore.go — request-log storage backend (SQLite).
 //
-// FoxRouters historically only wrote request/response history to ClickHouse.
-// ClickHouse is great for analytics but heavy (~700MB image, +RAM/disk cost)
-// which is overkill for small deployments. This file defines a LogStore
-// interface so the caller can pick between backends via LOG_BACKEND env:
+// FoxRouters historically offered ClickHouse as an analytics backend, but it
+// was heavy (~700MB image, +RAM/disk cost) and removed Aug 2026. This file
+// defines the LogStore interface so the store layer stays decoupled from the
+// concrete SQLite implementation:
 //
-//	LOG_BACKEND=sqlite      (default) → embedded modernc.org/sqlite, ~0 ops cost
-//	LOG_BACKEND=clickhouse            → existing analytics backend
+//	LOG_BACKEND=sqlite   (default) → embedded modernc.org/sqlite, ~0 ops cost
+//	LOG_BACKEND=clickhouse         → deprecated; warns and falls back to sqlite
 //
 // The interface deliberately mirrors the async-batch pattern the old CH code
 // used: producers push into channels (owned by Store), a consumer goroutine
@@ -17,6 +17,7 @@ package db
 import (
 	"context"
 	"encoding/json"
+	"strconv"
 	"time"
 )
 
@@ -39,13 +40,13 @@ type LogStore interface {
 	// Query methods — the dashboard hits these.
 	GetRequestStats(ctx context.Context, since time.Time) (*RequestStats, error)
 	GetModelStats(ctx context.Context, since time.Time, limit int) ([]ModelStats, error)
-	GetRecentRequests(ctx context.Context, limit int) ([]RecentRequest, error)
+	GetRecentRequests(ctx context.Context, limit int, f RecentFilter) ([]RecentRequest, error)
 	GetRequestDetail(ctx context.Context, id uint64) (*RequestDetail, error)
 
 	// Close releases any backing resources.
 	Close() error
 
-	// Kind returns a short label ("clickhouse"|"sqlite") for logging.
+	// Kind returns a short label ("sqlite") for logging.
 	Kind() string
 }
 
@@ -109,6 +110,28 @@ type ModelStats struct {
 	TotalTokensIn  int     `json:"total_tokens_in"`
 	TotalTokensOut int     `json:"total_tokens_out"`
 	TotalTokens    int     `json:"total_tokens"`
+}
+
+// RecentFilter narrows the /history/recent listing. Zero values = no filter.
+type RecentFilter struct {
+	Model     string // exact model match
+	Upstream  string // exact upstream match ("grok"|"codebuddy"|"freebuff")
+	Status    string // "" (all), "200" (exact), or "2xx"/"3xx"/"4xx"/"5xx" (range)
+	ErrorOnly bool   // only rows with a non-empty error_msg
+	Hours     int    // >0: only rows within the last N hours; 0 = all time
+}
+
+// statusRange interprets a Status filter: "200" → exact, "2xx" → [200,300).
+// Returns ok=false for any other value (including "").
+func statusRange(s string) (lo, hi int, ok bool) {
+	if len(s) == 3 && s[2] == 'x' && s[0] >= '0' && s[0] <= '5' && s[1] == 'x' {
+		d := int(s[0] - '0')
+		return d * 100, (d + 1) * 100, true
+	}
+	if n, err := strconv.Atoi(s); err == nil && n >= 100 && n <= 599 {
+		return n, n + 1, true
+	}
+	return 0, 0, false
 }
 
 // RecentRequest is the previews row used by /history/recent.

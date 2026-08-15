@@ -2,11 +2,8 @@
 # Usage:
 #   cp .env.example .env    # then edit .env with real values
 #
-# Default log backend (LOG_BACKEND=sqlite) — lightweight, only Redis + gateway:
+# Log backend is SQLite (lightweight — only Redis + gateway):
 #   docker compose up -d --build
-#
-# ClickHouse mode (LOG_BACKEND=clickhouse) — analytics + full-text queries:
-#   LOG_BACKEND=clickhouse docker compose --profile clickhouse up -d --build
 #
 # Cloudflare Tunnel (quick mode, random *.trycloudflare.com URL):
 #   docker compose --profile tunnel up -d
@@ -37,41 +34,13 @@ services:
       start_period: 5s
     restart: unless-stopped
 
-  # ClickHouse only starts when the `clickhouse` profile is activated
-  # (docker compose --profile clickhouse up …). In the default sqlite mode
-  # this service is skipped, saving ~700MB image + RAM.
-  clickhouse:
-    image: clickhouse/clickhouse-server:latest
-    container_name: foxrouters-clickhouse
-    profiles: ["clickhouse"]
-    ports:
-      - "127.0.0.1:8123:8123"   # HTTP interface
-      - "127.0.0.1:9000:9000"   # Native TCP (gateway connects here)
-    environment:
-      CLICKHOUSE_USER: default
-      CLICKHOUSE_PASSWORD: "${CLICKHOUSE_PASSWORD}"
-      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "1"
-    volumes:
-      - clickhouse-data:/var/lib/clickhouse
-    ulimits:
-      nofile:
-        soft: 262144
-        hard: 262144
-    healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8123/ping"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 15s
-    restart: unless-stopped
-
   foxrouters:
     # Prefer GHCR image for production; `build` used when developing locally.
     build:
       context: .
       args:
-        VERSION: v1.6.7
-    image: ghcr.io/rilspratama/foxrouters:v1.6.7
+        VERSION: v1.6.14
+    image: ghcr.io/rilspratama/foxrouters:v1.6.14
     container_name: foxrouters
     ports:
       - "127.0.0.1:20130:20130"
@@ -83,20 +52,20 @@ services:
     environment:
       # Override host-oriented values from .env with container DNS names.
       REDIS_ADDR: redis:6379
-      # Log backend defaults to sqlite via .env; when set to clickhouse the
-      # compose command must also activate the `clickhouse` profile so the
-      # service comes up. CH addr uses the container DNS name.
-      LOG_BACKEND: "${LOG_BACKEND:-sqlite}"
+      # Log backend is SQLite (default). LOG_BACKEND=clickhouse is deprecated
+      # and falls back to sqlite with a warning.
+      LOG_BACKEND: "sqlite"
       LOG_SQLITE_PATH: /var/lib/foxrouters/logs.db
-      CLICKHOUSE_ADDR: clickhouse:9000
-      CLICKHOUSE_DB: gateway
-      CLICKHOUSE_USER: default
-      CLICKHOUSE_PASSWORD: "${CLICKHOUSE_PASSWORD}"
       PORT: "20130"
       # CodeBuddy key selection strategy (rr|sticky|content-hash|hybrid).
       # Sticky (default) binds conversations to one account for prompt-cache
       # locality. Runtime switchable via PUT /cb/selector-mode (Redis-persisted).
       CB_SELECTOR_MODE: "${CB_SELECTOR_MODE:-sticky}"
+      # Turnstile solver lives on the HOST (PM2/bun, port 8742) — reach it via
+      # host.docker.internal (host-gateway). Overridable in the Settings page.
+      TURNSTILE_SOLVER_URL: "${TURNSTILE_SOLVER_URL:-http://host.docker.internal:8742/cloudflare}"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       # Persist the sqlite log DB (only used in the default sqlite backend).
       # Safe to keep mounted even when running ClickHouse mode — the gateway
@@ -120,5 +89,4 @@ services:
 
 volumes:
   redis-data:
-  clickhouse-data:
   sqlite-data:

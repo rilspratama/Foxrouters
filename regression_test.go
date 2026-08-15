@@ -19,6 +19,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"foxrouters/internal/auth"
+	"foxrouters/internal/handlers"
 	"foxrouters/internal/upstream"
 )
 
@@ -52,8 +54,8 @@ func TestLogFullBodyMax(t *testing.T) {
 }
 
 func TestMaxRequestBodyConstant(t *testing.T) {
-	if MAX_REQUEST_BODY != 10*1024*1024 {
-		t.Fatalf("MAX_REQUEST_BODY = %d, want 10MB", MAX_REQUEST_BODY)
+	if upstream.MAX_REQUEST_BODY != 10*1024*1024 {
+		t.Fatalf("MAX_REQUEST_BODY = %d, want 10MB", upstream.MAX_REQUEST_BODY)
 	}
 }
 
@@ -114,15 +116,15 @@ func TestHealthStatusOK(t *testing.T) {
 		{199, false},
 	}
 	for _, tc := range cases {
-		got := healthStatusOK(tc.code)
+		got := upstream.HealthStatusOK(tc.code)
 		if got != tc.ok {
-			t.Errorf("healthStatusOK(%d) = %v, want %v", tc.code, got, tc.ok)
+			t.Errorf("upstream.HealthStatusOK(%d) = %v, want %v", tc.code, got, tc.ok)
 		}
 	}
 }
 
 func TestCircuitBreaker_PoolExhaustionDoesNotOpen(t *testing.T) {
-	h := newUpstreamHealth("test")
+	h := upstream.NewUpstreamHealth("test")
 
 	// Simulate success baseline
 	h.RecordRequest(10*time.Millisecond, nil)
@@ -135,26 +137,26 @@ func TestCircuitBreaker_PoolExhaustionDoesNotOpen(t *testing.T) {
 	// even if we would have previously recorded 5 "all accounts on cooldown" errors.
 	//
 	// (We deliberately do NOT call RecordRequest here — that's the fix.)
-	for i := 0; i < CB_OPEN_THRESHOLD+2; i++ {
+	for i := 0; i < upstream.CB_OPEN_THRESHOLD+2; i++ {
 		// no-op: pool exhaustion path no longer records errors
 	}
 	if !h.CanRequest() {
 		t.Fatal("circuit should stay closed when pool exhaustion does not record errors")
 	}
-	if h.State() != CircuitClosed {
+	if h.State() != upstream.CircuitClosed {
 		t.Fatalf("state = %s, want closed", h.State())
 	}
 }
 
 func TestCircuitBreaker_RealUpstreamErrorsStillOpen(t *testing.T) {
-	h := newUpstreamHealth("test")
-	for i := 0; i < CB_OPEN_THRESHOLD; i++ {
+	h := upstream.NewUpstreamHealth("test")
+	for i := 0; i < upstream.CB_OPEN_THRESHOLD; i++ {
 		h.RecordRequest(5*time.Millisecond, errTest("upstream 502"))
 	}
 	if h.CanRequest() {
 		t.Fatal("circuit should be open after consecutive upstream errors")
 	}
-	if h.State() != CircuitOpen {
+	if h.State() != upstream.CircuitOpen {
 		t.Fatalf("state = %s, want open", h.State())
 	}
 }
@@ -169,8 +171,8 @@ func (e errTest) Error() string { return string(e) }
 // ============================================================================
 
 func TestGrokLenO1(t *testing.T) {
-	am := NewGrokAccountManager(nil)
-	am.SetAccountsForTest([]*GrokAccount{
+	am := upstream.NewGrokAccountManager(nil)
+	am.SetAccountsForTest([]*upstream.GrokAccount{
 		upstream.NewGrokAccountForTest("a@t.com", "t", "r"),
 		upstream.NewGrokAccountForTest("b@t.com", "t", "r"),
 		upstream.NewGrokAccountForTest("c@t.com", "t", "r"),
@@ -182,10 +184,10 @@ func TestGrokLenO1(t *testing.T) {
 
 func TestGrokNextNoFullReenableScan(t *testing.T) {
 	// Cooldown past 10min should NOT be re-enabled by Next (background worker only).
-	am := NewGrokAccountManager(nil)
+	am := upstream.NewGrokAccountManager(nil)
 	acc := upstream.NewGrokAccountForTest("cd@t.com", "t", "r",
 		upstream.WithDisabledCooldown(time.Now().Add(-11*time.Minute)))
-	am.SetAccountsForTest([]*GrokAccount{acc})
+	am.SetAccountsForTest([]*upstream.GrokAccount{acc})
 	_, err := am.Next()
 	if err == nil {
 		t.Fatal("Next should fail when only cooldown account exists (no hot re-enable)")
@@ -203,13 +205,13 @@ func TestGrokNextNoFullReenableScan(t *testing.T) {
 func TestGrokNextReenableDoesNotHoldLockDuringSave(t *testing.T) {
 	// Re-enable is background-only now. Next itself does not re-enable.
 	// Test reenableCooldowns + concurrent GetAccessToken after lift.
-	am := NewGrokAccountManager(nil)
-	acc := NewGrokAccountForTest(
+	am := upstream.NewGrokAccountManager(nil)
+	acc := upstream.NewGrokAccountForTest(
 		"cooldown@test.com", "tok", "rt",
-		WithExpiresAt(time.Now().Add(time.Hour)),
-		WithDisabledCooldown(time.Now().Add(-11*time.Minute)),
+		upstream.WithExpiresAt(time.Now().Add(time.Hour)),
+		upstream.WithDisabledCooldown(time.Now().Add(-11*time.Minute)),
 	)
-	am.SetAccountsForTest([]*GrokAccount{acc})
+	am.SetAccountsForTest([]*upstream.GrokAccount{acc})
 
 	// Next must NOT re-enable (hot path is O(k) only)
 	if _, err := am.Next(); err == nil {
@@ -273,8 +275,8 @@ func TestRefreshDoesNotHoldLockAcrossSleep(t *testing.T) {
 }
 
 func TestGrokAccountManager_GetAllIsCopy(t *testing.T) {
-	am := NewGrokAccountManager(nil)
-	am.SetAccountsForTest([]*GrokAccount{
+	am := upstream.NewGrokAccountManager(nil)
+	am.SetAccountsForTest([]*upstream.GrokAccount{
 		upstream.NewGrokAccountForTest("a@test.com", "t1", "r1"),
 		upstream.NewGrokAccountForTest("b@test.com", "t2", "r2"),
 	})
@@ -296,8 +298,8 @@ func TestGrokAccountManager_GetAllIsCopy(t *testing.T) {
 // ============================================================================
 
 func TestCBLenO1(t *testing.T) {
-	km := NewCBKeyManager(nil)
-	km.SetKeysForTest([]*CBKey{
+	km := upstream.NewCBKeyManager(nil)
+	km.SetKeysForTest([]*upstream.CBKey{
 		upstream.NewCBKeyForTest("ck_a"),
 		upstream.NewCBKeyForTest("ck_b"),
 	})
@@ -307,7 +309,7 @@ func TestCBLenO1(t *testing.T) {
 }
 
 func TestCBKeyAddKey(t *testing.T) {
-	km := NewCBKeyManager(nil)
+	km := upstream.NewCBKeyManager(nil)
 	added, total := km.AddKey("ck_test_one")
 	if !added || total != 1 {
 		t.Fatalf("first add: added=%v total=%d", added, total)
@@ -330,7 +332,7 @@ func TestCBKeyAddKey(t *testing.T) {
 }
 
 func TestCBKeyAddKeyConcurrent(t *testing.T) {
-	km := NewCBKeyManager(nil)
+	km := upstream.NewCBKeyManager(nil)
 	var wg sync.WaitGroup
 	for i := 0; i < 50; i++ {
 		wg.Add(1)
@@ -343,7 +345,7 @@ func TestCBKeyAddKeyConcurrent(t *testing.T) {
 	if km.Len() == 0 {
 		t.Fatal("expected some keys")
 	}
-	km2 := NewCBKeyManager(nil)
+	km2 := upstream.NewCBKeyManager(nil)
 	var wg2 sync.WaitGroup
 	for i := 0; i < 20; i++ {
 		wg2.Add(1)
@@ -359,8 +361,8 @@ func TestCBKeyAddKeyConcurrent(t *testing.T) {
 }
 
 func TestCBNextNoFullReenableScan(t *testing.T) {
-	km := NewCBKeyManager(nil)
-	km.SetKeysForTest([]*CBKey{
+	km := upstream.NewCBKeyManager(nil)
+	km.SetKeysForTest([]*upstream.CBKey{
 		upstream.NewCBKeyForTest("ck_test.xxx",
 			upstream.WithCBDisabledCooldown(time.Now().Add(-11*time.Minute))),
 	})
@@ -376,11 +378,11 @@ func TestCBNextNoFullReenableScan(t *testing.T) {
 }
 
 func TestCBNextReenableDoesNotHoldKeyLockDuringSave(t *testing.T) {
-	km := NewCBKeyManager(nil)
-	k := NewCBKeyForTest("ck_testkey.abcdef",
-		WithCBDisabledCooldown(time.Now().Add(-11*time.Minute)),
+	km := upstream.NewCBKeyManager(nil)
+	k := upstream.NewCBKeyForTest("ck_testkey.abcdef",
+		upstream.WithCBDisabledCooldown(time.Now().Add(-11*time.Minute)),
 	)
-	km.SetKeysForTest([]*CBKey{k})
+	km.SetKeysForTest([]*upstream.CBKey{k})
 
 	if _, err := km.Next(); err == nil {
 		t.Fatal("Next should not re-enable on hot path")
@@ -403,9 +405,9 @@ func TestCBNextReenableDoesNotHoldKeyLockDuringSave(t *testing.T) {
 // ============================================================================
 
 func TestAuthManager_ConcurrentLenIsSafe(t *testing.T) {
-	// Regression: AuthMiddleware used to call len(am.keys) without RLock.
+	// Regression: auth.AuthMiddleware used to call len(am.keys) without RLock.
 	// This stress-test concurrent Add/Remove/Valid while reading count under RLock.
-	am := NewAuthManagerForTest(nil)
+	am := auth.NewManagerForTest(nil)
 	// seed one key
 	am.Add("gw-testkey-aaaaaaaaaaaaaaaaaaaaaaaa", "seed", 0, 0, 0)
 
@@ -416,7 +418,7 @@ func TestAuthManager_ConcurrentLenIsSafe(t *testing.T) {
 		go func(n int) {
 			defer wg.Done()
 			for j := 0; j < 200; j++ {
-				k := generateGatewayKey()
+				k := auth.GenerateGatewayKey()
 				am.Add(k, "t", 0, 0, 0)
 				am.Remove(k)
 			}
@@ -440,7 +442,7 @@ func TestAuthManager_ConcurrentLenIsSafe(t *testing.T) {
 // (unlimited) bypasses the rate limiter entirely and is NOT subject to
 // the global default RPM. Bug found by GLM-5.2 review.
 func TestRateLimitRPMZeroUnlimited(t *testing.T) {
-	am := NewAuthManagerForTest(nil)
+	am := auth.NewManagerForTest(nil)
 	am.Add("gw-test-unlimited", "test", 0, 0, 0)
 
 	info, ok := am.Get("gw-test-unlimited")
@@ -469,7 +471,7 @@ func TestHandleDashboardDoesNotInjectKeys(t *testing.T) {
 	}
 	// Handler returns static HTML
 	r := gin.New()
-	r.GET("/dashboard", handleDashboard())
+	r.GET("/dashboard", handlers.HandleDashboard())
 	req := httptest.NewRequest("GET", "/dashboard", nil)
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
@@ -502,12 +504,12 @@ func TestExpandGrokAlias(t *testing.T) {
 		"grok-4.5-auto": "auto", "grok-4.5-none": "none",
 	}
 	for m, want := range cases {
-		got, ok := expandGrokAlias(m)
+		got, ok := upstream.ExpandGrokAlias(m)
 		if !ok || got != want {
 			t.Errorf("%s -> %s,%v want %s", m, got, ok, want)
 		}
 	}
-	if _, ok := expandGrokAlias("grok-4.5"); ok {
+	if _, ok := upstream.ExpandGrokAlias("grok-4.5"); ok {
 		t.Error("base model should not be alias")
 	}
 }

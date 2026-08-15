@@ -5,9 +5,9 @@ Unified OpenAI-compatible API gateway for **Grok + CodeBuddy**. Routes by model 
 `grok-*` → cli-chat-proxy.grok.com, `cb/*` → www.codebuddy.ai/v2.
 
 Multi-account/key round-robin, auto-refresh (singleflight + pre-warm), circuit breaker,
-API key auth, per-key RPM/quota, Redis hot-state, **ClickHouse** full-body history, web dashboard.
+API key auth, per-key RPM/quota, Redis hot-state, **SQLite** full-body history, web dashboard.
 
-**Version:** v1.6.7 (`-X main.Version` build flag)
+**Version:** v1.6.13-audit (`-X main.Version` build flag)
 **Port:** 20130 · **Deploy:** Docker Compose (`docker compose up -d --build foxrouters`)
 
 > **⚠️ DEV MUST NOT TOUCH PROD.** `docker compose up --build` from a dev
@@ -40,7 +40,7 @@ Client → AuthMiddleware (Bearer) → RateLimitMiddleware
        ├── grok-* → proxyGrok (selector modes, 401 retry, 402/403 ban, 429 cooldown, 400 passthrough, billing sync, usage tracking)
        └── cb/*   → proxyCodeBuddy (stream-only transform, credit/14018 disable + Redis)
             ↓
-       async LogRequest → ClickHouse (full body, ZSTD, unlimited)
+       async LogRequest → SQLite (full body, TTL 90d)
 ```
 
 ### Data stores
@@ -73,6 +73,7 @@ Log backend choices (`LOG_BACKEND` env, default `sqlite`):
 - `Next()` Pass1 valid token; Pass2 least-expired + async refresh  
 - 401 rebuild request body + retry  
 - **CB OAuth:** Pre-warm worker (30s tick, 30m window) + `EnsureValid` before chat + 401 refresh-retry. Singleflight + lock-split. Refresh via `POST /v2/plugin/auth/token/refresh` (`X-Refresh-Token`). Eager refresh on import when AT is expired/near-expiry and RT is valid.
+- **Alibaba:** plain key RR (`ali/` prefix → DashScope compatible-mode). `Next()` snapshots the pool under one RLock (TOCTOU-safe) + `atomic.LoadUint64` cursor. Per-key usage (`RecordUsage`) + per-model usage (`RecordUsageModel` → `ali:model_usage:<model>`). Permanent disable on `AccessDenied.Unpurchased` (403), cooldown on 429, 4xx passthrough. Key actions via opaque `key_hash` (SHA-256 24 hex) — full secrets never leave the server. Bulk import capped at 500/batch. **Env gate:** `ALIBABA_DISABLED=1` skips provider. **Media Studio** (qwen-image gen/edit, wan2.x video) — plain Bearer, no SSO/DPoP/Turnstile.
 - **Grok selector modes:** rr | sticky | content-hash | hybrid (default sticky). `GROK_SELECTOR_MODE` env, `GET/PUT /grok/selector-mode` (Redis `grok:config`). `NextForMode()` dispatches by mode. Sticky map + 30min TTL janitor. `x-session-id`/`x-conversation-id`/`x-chat-id` header pins conversation. Content-hash = FNV-1a(model + first system message). Hybrid = 3-key bucket + sticky within bucket.
 - **Grok billing sync:** `GET /v1/billing?format=credits` every 5min (`GrokBillingSyncWorker`). 8 fields persisted (periodStart/End/Type, onDemandCap/Used, prepaidBalance, unifiedBilling). `POST /accounts/billing/sync` manual trigger. Weekly period rollover auto-resets usage counters.
 - **Grok usage tracking:** Per-account cumulative tokens from response `usage` field. `RecordUsage()` non-blocking Redis persist. `GROK_FREE_TIER_QUOTA=1M`. Dashboard: 'tokens_used / 1M (pct%)'.
@@ -86,6 +87,32 @@ Log backend choices (`LOG_BACKEND` env, default `sqlite`):
 - **Credit sync:** worker every 5m + `POST /cb/credits/sync`. Meter API `POST /v2/billing/meter/get-user-resource` (works for both modes). Persist limit/remain/package/cycle/status. Permanent disable on `Status==3`. Fallback `CB_CREDIT_LIMIT=240` if never synced.
 - **OAuth login URL (device flow):** `POST /cb/oauth/device/start` → `auth_url` + `state` (upstream `POST /v2/plugin/auth/state?platform=CLI`); poll `GET /cb/oauth/device/poll?state=` until ready → client imports via `/cb/oauth/import`. Dashboard Add OAuth modal: **Manual | Login URL**.
 - **Credential probe (Test):** `POST /cb/keys/test` (key or email) and `POST /accounts/test` (Grok email). Hits upstream directly with that credential (CB `gpt-5.5`, Grok `grok-4.5`); not pool RR. Disabled credentials still probed.
+
+### Grok image generation (console.x.ai DPoP, free tier) — dev branch
+- **Route:** `POST /v1/images/generations` (OpenAI Images API shape: `{model, prompt, n, size|aspect_ratio, response_format: b64_json|url}`) — dispatched in main.go catch-all.
+- **PURE GO — no sidecar.** console.x.ai accepts Go's plain net/http **as long as the Cookie header is complete** (`sso` + `sso-rw`). The earlier "TLS fingerprint block" conclusion was WRONG: root cause was a missing `sso-rw` value (pool JSON key is `sso-rw` DASH — struct tags with `sso_rw` underscore silently drop it → mint 401). Always double-check cookie/JSON key spelling before blaming TLS.
+- **LAZY SSO AUTH (operator directive, Aug 2026):** cookies CACHED in Redis, NEVER proactively refreshed. On 401 → `RefreshSSO(email)` = pure-HTTP re-login in-gateway (`LoginSSO`: local Turnstile solver `127.0.0.1:8742` sitekey `0x4AAAAAAAhr9JGVDZbrZOo0` + `POST /api/auth/sign-in`, ~3s, NO browser) → retry once. On 429 → `MarkImgExhausted` (lazy local count, limit 5) + rotate. NO `/v1/usage` round-trip worker — `GrokImageQuotaWorker` REMOVED (cookies die too often); quota counted locally (`IncrImgUsed` on 200). `POST /grok/quota/sync` = best-effort on-demand only.
+- **Account fields (Redis `grok:account:<email>`):** `sso`, `sso_rw` (console SSO cookies, JWT), `password` (console login pwd for lazy re-login; `json:"-"` — never serialized), `img_cooldown_until` (unix). Import accepts `sso`/`sso_rw`/`password` (single + bulk).
+- **Rotation:** `PickImageAccount(start)` = RR over accounts with SSO, not disabled, cooldown passed, quota not exhausted (lazy count). All exhausted → 429.
+- **DPoP impl:** `internal/upstream/grok_dpop.go` — `GenerateImage(sso, ssoRW, prompt, aspect)` does mint (`POST /v1/dpop/token` `{jwk}` + Cookie) → ES256 proof (`typ: dpop+jwt`, claims jti/htm/htu/iat/ath, raw r||s) → `POST /v1/images/generations` (`grok-imagine-image`, `b64_json`). `SyncUsage(sso,ssoRW)` = GET /v1/usage (diagnostics).
+- Verified end-to-end (dev gateway native + dev redis): direct 200 AND corrupt-SSO → 401 → auto re-login → 200.
+
+### Media Studio — Chat tab (LLM prompt engineer)
+- First tab = **Chat**: chat with any gateway model (default glm-5.2) using an image-prompt-engineer system prompt (MEDIA_SYS_PROMPT). Multi-turn refine; last assistant reply becomes "current image prompt" (auto-fills the Generate prompt box).
+- **Generate Image →** runs the generate with the LLM-refined prompt; **Use in Edit** copies it to the edit prompt.
+- Verified live: "red panda with sunglasses" → 100-word detailed prompt → photorealistic image matching all details.
+### Media Studio (image gen / edit / video)
+- Nav **Media** → **Media Studio** (#/media). 3 tabs:
+  - **Generate** — POST /v1/images/generations (b64 preview, aspect ratio, n). Shares image quota 5/account (lazy local counter).
+  - **Edit** — POST /v1/images/edits ({model, prompt, image(b64)} → {data:[{url}]} imgen.x.ai). Source = file upload or "Send to Edit" from Generate.
+  - **Video** — POST /v1/videos/generations ({model, prompt} → {id}, model MUST be `grok-imagine-video`) + GET /v1/videos/:id (202 {status,progress} → 200 {data:[{url}]} vidgen.x.ai). Auto-poll 5s. Video quota 2/account.
+- All media endpoints: lazy SSO auth (401 → LoginSSO via Settings-configured Turnstile solver → retry), 429 → MarkImgExhausted / MarkVidExhausted (24h cooldown) + rotate.
+- Video owner mapping persisted to Redis (`grok:video:<id>`, 24h TTL) — polling survives gateway restarts.
+- console.x.ai DPoP: proof(htm, htu, at) — htm must match HTTP method (GET for polls).
+### Settings page (Turnstile Solver config)
+- Nav **Settings** (#/settings) → `GET/PUT /settings/turnstile` (solver_url + sitekey, persisted Redis `gw:config`, env `TURNSTILE_SOLVER_URL`/`TURNSTILE_SITEKEY` fallback at startup) + `POST /settings/turnstile/test` (live solve → token_len + elapsed_ms + reachable status cards).
+- Containers reach the host solver via `host.docker.internal` — compose `extra_hosts: ["host.docker.internal:host-gateway"]` + `TURNSTILE_SOLVER_URL=http://host.docker.internal:8742/cloudflare` default; dev.sh passes the same. Native (non-Docker) default stays `127.0.0.1:8742/cloudflare`.
+- `LoginSSO` (lazy 401 refresh) reads the runtime config — no restart needed after Settings save.
 
 ### Grok aliases
 `grok-4.5-{high,medium,low,xhigh,auto,none}` → `grok-4.5` + `reasoning_effort` (client wins if set).
@@ -140,11 +167,10 @@ endpoint — verified).
 | `proxy.go` | Routing, RequestLog build |
 | `db.go` | Redis + LogStore glue (async batch pipeline, factory) |
 | `internal/db/logstore.go` | `LogStore` interface + shared DTOs (RequestLog, RequestStats, …) |
-| `internal/db/logstore_sqlite.go` | modernc.org/sqlite backend (default) |
-| `internal/db/logstore_clickhouse.go` | ClickHouse backend (opt-in via `LOG_BACKEND=clickhouse`) |
+| `internal/db/logstore_sqlite.go` | modernc.org/sqlite backend (default; the only backend since v1.6.13 — ClickHouse removed) |
 | `handlers.go` | health, accounts, history, keys, dashboard static |
 | `auth.go` / `ratelimit.go` / `health.go` | Auth, RPM, circuit |
-| `dashboard.html` | SPA — 5 nav routes (Dashboard/Accounts/Keys/Models/Proxies), Models page has 3 tabs (Models/Custom/Combos) |
+| `dashboard/` | Embedded SPA (go:embed dir) — modular parts: `head.html`/`body.html`/`modals.html` (HTML+CSS) + `core.js` (block 1: auth/routing/helpers/accounts) + `pages.js` (block 2: custom/combos/proxies/tunnel/settings/media + INIT). Assembled byte-identical in `main.go assembleDashboard()`. Nav: Dashboard/Accounts/Keys/Models/Proxies/Tunnel/Settings/Media |
 | `internal/auth/session_store.go` | Session token → API key map (P3-3, 256-bit random tokens) |
 | `internal/proxy/validate.go` | `validateName()` regex for id/alias/combo (P3-5) |
 | `internal/proxy/combo.go` | ComboRegistry — fallback + round_robin strategies |

@@ -13,7 +13,7 @@ import (
 )
 
 // setupTestRouter builds a minimal router mirroring main.go's public routes
-// for integration testing without needing Redis/ClickHouse.
+// for integration testing without needing Redis.
 func setupTestRouter() *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()

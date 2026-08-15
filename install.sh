@@ -9,15 +9,14 @@
 #
 # What it does:
 #   1. Checks/installs Docker
-#   2. Prompts for log backend (SQLite default; ClickHouse optional)
-#   3. Creates dedicated network + volumes
-#   4. Pulls and starts Redis (+ ClickHouse if selected) + FoxRouters containers
-#   5. Generates random Redis password + bootstraps gateway admin key
-#   6. Prints gateway key + dashboard URL
+#   2. Creates dedicated network + volumes
+#   3. Pulls and starts Redis + FoxRouters containers
+#   4. Generates random Redis password + bootstraps gateway admin key
+#   5. Prints gateway key + dashboard URL
 #
-# Non-interactive mode:
-#   Set LOG_BACKEND=sqlite     (default) or LOG_BACKEND=clickhouse before piping to bash.
-#     curl -fsSL … | LOG_BACKEND=clickhouse bash
+# Log backend is SQLite (only). The ClickHouse backend was removed (Aug 2026).
+# Legacy LOG_BACKEND=clickhouse values are ignored with a notice and any stale
+# foxrouters-clickhouse container is cleaned up.
 #
 # Development mode (isolated stack, own Redis, port 20131):
 #   curl -fsSL … | DEV_MODE=1 bash
@@ -29,28 +28,288 @@
 #   bash update.sh --check    # check only (no pull)
 #   bash update.sh --tag=vX.Y.Z  # specific version
 #
+# Native binary mode (no Docker) — requires an EXISTING Redis:
+#   curl -fsSL … | bash -s -- --binary
+#   ./install.sh --binary --version=v1.6.14   # pin release version
+#   REDIS_ADDR=host:port REDIS_PASSWORD=… ./install.sh --binary  # external Redis
+# Installs the release binary + optional cloudflared + systemd service.
+# Redis is NOT installed — point REDIS_ADDR / REDIS_PASSWORD at an existing
+# instance (local, Docker, or remote). Re-run to upgrade (idempotent).
+#
 # Manage after install:
 #   docker logs foxrouters -f
 #   docker restart foxrouters
-#   docker rm -f foxrouters foxrouters-redis [foxrouters-clickhouse]   # remove (keeps volumes)
+#   docker rm -f foxrouters foxrouters-redis   # remove (keeps volumes)
+#
+# Native binary mode (no Docker — Redis via apt + systemd service):
+#   curl -fsSL https://raw.githubusercontent.com/rilspratama/Foxrouters/master/install.sh | bash -s -- --binary
+#   ./install.sh --binary --version=v1.6.14   # pin a release; default = latest
 #
 set -euo pipefail
+
+# ── Argument parsing ─────────────────────────────────────────────────────────
+MODE="docker"          # docker (default) | binary
+FOXROUTERS_VERSION=""  # pin release version for --binary (default latest)
+for arg in "$@"; do
+    case "$arg" in
+        --binary) MODE="binary" ;;
+        --version=*) FOXROUTERS_VERSION="${arg#*=}" ;;
+    esac
+done
+
+# ── Paths/ports — defined here (used by binary mode below + Docker mode later)
+GATEWAY_PORT="${FOXROUTERS_PORT:-20130}"
+REDIS_PORT="${REDIS_PORT:-6379}"
+CONFIG_DIR="/etc/foxrouters"
+ENV_FILE="${CONFIG_DIR}/.env"
+KEY_FILE="${CONFIG_DIR}/gateway-key.txt"
+CF_BIN_PATH="/usr/local/bin/cloudflared"   # resolved during binary-mode install
+REDIS_ADDR_FINAL="127.0.0.1:6379"          # resolved during binary-mode install
+REDIS_PASS_FINAL=""                        # resolved during binary-mode install
+
+# ── install_binary_mode: native binary install (no Docker) ─────────────────
+# Redis via apt + systemd, gateway binary from GitHub Release, optional
+# cloudflared for the tunnel feature. Idempotent — re-run to upgrade.
+install_binary_mode() {
+    bold "═══════════════════════════════════════════════════════════════"
+    bold "  FoxRouters — Native Binary Install (no Docker)"
+    bold "═══════════════════════════════════════════════════════════════"
+
+    # ── OS/arch detection ─────────────────────────────────────────────────
+    local os arch
+    case "$(uname -s)" in
+        Linux)  os="linux" ;;
+        Darwin) os="darwin" ;;
+        *) err "Unsupported OS: $(uname -s) (linux/darwin only)"; exit 1 ;;
+    esac
+    case "$(uname -m)" in
+        x86_64|amd64) arch="amd64" ;;
+        aarch64|arm64) arch="arm64" ;;
+        *) err "Unsupported arch: $(uname -m)"; exit 1 ;;
+    esac
+    info "Target: ${os}/${arch}"
+
+    if [[ "${os}" == "darwin" ]]; then
+        err "Native install on macOS = manual only (no systemd)."
+        err "Download the darwin archive and run ./foxrouters directly."
+        exit 1
+    fi
+
+    # ── Root check ────────────────────────────────────────────────────────
+    if [[ "$(id -u)" -ne 0 ]]; then
+        err "Binary mode needs root (apt + systemd). Run as root or with sudo."
+        exit 1
+    fi
+
+    mkdir -p "${CONFIG_DIR}"
+    chmod 700 "${CONFIG_DIR}"
+
+    # ── Redis (config only — user provides it) ────────────────────────────
+    # No server install: FoxRouters needs an existing Redis (local, Docker,
+    # or remote). Point REDIS_ADDR / REDIS_PASSWORD at it; the installer
+    # only verifies reachability and writes the values into .env.
+    local redis_addr="${REDIS_ADDR:-127.0.0.1:${REDIS_PORT}}"
+    local redis_host="${redis_addr%%:*}"
+    local redis_port="${redis_addr##*:}"
+
+    info "Checking Redis at ${redis_addr}..."
+    local ping_auth
+    if command -v redis-cli &>/dev/null; then
+        if [[ -n "${REDIS_PASSWORD:-}" ]]; then
+            ping_auth="$(timeout 3 redis-cli -h "${redis_host}" -p "${redis_port}" \
+                -a "${REDIS_PASSWORD}" ping 2>/dev/null || true)"
+        else
+            ping_auth="$(timeout 3 redis-cli -h "${redis_host}" -p "${redis_port}" \
+                ping 2>/dev/null || true)"
+        fi
+    else
+        yellow "redis-cli not found — skipping Redis verification (gateway will surface auth errors)"
+        ping_auth="PONG"
+    fi
+
+    if [[ "${ping_auth}" != "PONG" ]]; then
+        err "Redis not reachable at ${redis_addr} (down or password mismatch)."
+        err "FoxRouters requires an existing Redis — provide one via:"
+        err "  REDIS_ADDR=host:port   (default 127.0.0.1:6379)"
+        err "  REDIS_PASSWORD=...     (omit if the instance has no password)"
+        exit 1
+    fi
+    ok "Redis up (auth OK)"
+
+    # Expose resolved values to the .env writer in install_binary_service
+    REDIS_ADDR_FINAL="${redis_addr}"
+    REDIS_PASS_FINAL="${REDIS_PASSWORD:-}"
+
+    install_binary_download "${os}" "${arch}"
+}
+
+# ── Download release binary + verify checksum ─────────────────────────────
+install_binary_download() {
+    local os="$1" arch="$2"
+
+    # Resolve release version: --version=vX.Y.Z or latest tag via GitHub API
+    local ver asset_url checksums_url tmpdir archive
+    if [[ -n "${FOXROUTERS_VERSION}" ]]; then
+        ver="${FOXROUTERS_VERSION}"
+    else
+        info "Resolving latest release..."
+        ver="$(curl -fsSL https://api.github.com/repos/rilspratama/Foxrouters/releases/latest \
+            | grep -oE '"tag_name":\s*"[^"]+"' | head -1 | sed 's/.*"\([^"]*\)".*/\1/')"
+        if [[ -z "${ver}" ]]; then
+            err "Could not resolve latest release — pass --version=vX.Y.Z"
+            exit 1
+        fi
+    fi
+    ver="${ver#v}"
+    info "Release: v${ver} (${os}/${arch})"
+
+    asset_url="https://github.com/rilspratama/Foxrouters/releases/download/v${ver}/foxrouters_${ver}_${os}_${arch}.tar.gz"
+    checksums_url="https://github.com/rilspratama/Foxrouters/releases/download/v${ver}/checksums.txt"
+
+    tmpdir="$(mktemp -d)"
+    local archive_name="foxrouters_${ver}_${os}_${arch}.tar.gz"
+    info "Downloading ${os}/${arch} binary..."
+    curl -fsSL -o "${tmpdir}/${archive_name}" "${asset_url}" \
+        || { err "Download failed (asset not found? release built?)"; exit 1; }
+    curl -fsSL -o "${tmpdir}/checksums.txt" "${checksums_url}" || true
+
+    if [[ -s "${tmpdir}/checksums.txt" ]]; then
+        (cd "${tmpdir}" && sha256sum -c checksums.txt --ignore-missing) \
+            || { err "Checksum mismatch — aborting"; exit 1; }
+        ok "Checksum verified"
+    else
+        yellow "No checksums.txt — skipping verification"
+    fi
+
+    tar xzf "${tmpdir}/${archive_name}" -C "${tmpdir}"
+    install -m 0755 "${tmpdir}/foxrouters" /usr/local/bin/foxrouters
+    rm -rf "${tmpdir}"
+    local installed_ver
+    installed_ver="$(/usr/local/bin/foxrouters version 2>/dev/null || echo "${ver}")"
+    ok "Installed: /usr/local/bin/foxrouters (v${installed_ver})"
+
+    # ── cloudflared (optional — tunnel feature) ────────────────────────────
+    # Respect an existing install anywhere on PATH; only download if missing.
+    CF_BIN_PATH="/usr/local/bin/cloudflared"   # default (script-level, used by .env)
+    if command -v cloudflared &>/dev/null; then
+        CF_BIN_PATH="$(command -v cloudflared)"
+        ok "cloudflared found: ${CF_BIN_PATH}"
+    else
+        info "Installing cloudflared (tunnel feature)..."
+        if curl -fsSL -o /usr/local/bin/cloudflared \
+            "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-${os}-${arch}" \
+            && chmod +x /usr/local/bin/cloudflared; then
+            ok "cloudflared installed: $(/usr/local/bin/cloudflared --version 2>/dev/null | head -1)"
+        else
+            yellow "cloudflared install failed — tunnel disabled (install later)"
+        fi
+    fi
+
+    install_binary_service "${ver}"
+}
+
+# ── systemd service + .env + start ────────────────────────────────────────
+install_binary_service() {
+    local ver="$1"
+
+    # Gateway key (idempotent)
+    local gw_key
+    if [[ -f "${KEY_FILE}" ]]; then
+        gw_key="$(cat "${KEY_FILE}")"
+    else
+        gw_key="gw-$(gen_hex 24)"
+        printf '%s\n' "${gw_key}" > "${KEY_FILE}"
+        chmod 600 "${KEY_FILE}"
+    fi
+
+    # Write .env (preserve existing values on re-run)
+    {
+        printf 'PORT=%s\n' "${GATEWAY_PORT}"
+        printf 'GATEWAY_BIND=127.0.0.1:%s\n' "${GATEWAY_PORT}"
+        printf 'REDIS_ADDR=%s\n' "${REDIS_ADDR_FINAL}"
+        printf 'REDIS_PASSWORD=%s\n' "${REDIS_PASS_FINAL}"
+        printf 'GATEWAY_API_KEYS=%s\n' "${gw_key}"
+        printf 'LOG_BACKEND=sqlite\n'
+        printf 'LOG_SQLITE_PATH=/var/lib/foxrouters/logs.db\n'
+        printf 'CLOUDFLARED_PATH=%s\n' "${CF_BIN_PATH}"
+    } > "${ENV_FILE}.tmp"
+    mv "${ENV_FILE}.tmp" "${ENV_FILE}"
+    chmod 600 "${ENV_FILE}"
+    mkdir -p /var/lib/foxrouters
+    ok "Config: ${ENV_FILE}"
+
+    # systemd unit
+    cat > /etc/systemd/system/foxrouters.service <<EOF
+[Unit]
+Description=FoxRouters AI Gateway (Grok + CodeBuddy + Freebuff + Alibaba)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=${ENV_FILE}
+Environment=HOME=/var/lib/foxrouters
+ExecStart=/usr/local/bin/foxrouters
+Restart=on-failure
+RestartSec=3
+# Hardening (mirrors the Docker image)
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/foxrouters
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    systemctl daemon-reload
+    systemctl enable foxrouters >/dev/null 2>&1 || true
+    systemctl restart foxrouters
+    ok "Service started (foxrouters.service)"
+
+    # Health check
+    local i
+    for i in $(seq 1 15); do
+        if curl -fsS "http://127.0.0.1:${GATEWAY_PORT}/health" >/dev/null 2>&1; then
+            break
+        fi
+        sleep 2
+    done
+    if curl -fsS "http://127.0.0.1:${GATEWAY_PORT}/health" >/dev/null 2>&1; then
+        ok "Gateway healthy on :${GATEWAY_PORT}"
+    else
+        err "Gateway did not become healthy — check: journalctl -u foxrouters -n 50"
+        exit 1
+    fi
+
+    # ── Summary ────────────────────────────────────────────────────────────
+    echo ""
+    bold "═══════════════════════════════════════════════════════════════"
+    echo ""
+    echo "  FoxRouters v${ver} installed — native binary"
+    echo ""
+    echo "  Dashboard:    http://127.0.0.1:${GATEWAY_PORT}/dashboard"
+    echo "  Gateway key:  ${gw_key}"
+    echo "  Config:       ${ENV_FILE}"
+    echo "  Logs:         journalctl -u foxrouters -f"
+    echo ""
+    echo "  Manage:"
+    echo "    systemctl restart foxrouters"
+    echo "    systemctl stop foxrouters"
+    echo "    Re-run this installer to upgrade to a newer release"
+    echo ""
+    echo "  Tunnel:       ./tunnel.sh enable          (quick)"
+    echo "                ./tunnel.sh enable --named  (custom domain)"
+    echo ""
+    bold "═══════════════════════════════════════════════════════════════"
+}
 
 # ── Config ──────────────────────────────────────────────────────────────────
 IMAGE_GATEWAY="${IMAGE_GATEWAY:-ghcr.io/rilspratama/foxrouters:latest}"
 IMAGE_REDIS="redis:7-alpine"
-IMAGE_CLICKHOUSE="clickhouse/clickhouse-server:latest"
-GATEWAY_PORT="${FOXROUTERS_PORT:-20130}"
-REDIS_PORT="${REDIS_PORT:-6379}"
-CH_HTTP_PORT="${CH_HTTP_PORT:-8123}"
-CH_NATIVE_PORT="${CH_NATIVE_PORT:-9000}"
 NETWORK="foxrouters-net"
 VOL_REDIS="foxrouters-redis-data"
-VOL_CH="foxrouters-clickhouse-data"
 VOL_SQLITE="foxrouters-sqlite-data"
-CONFIG_DIR="/etc/foxrouters"
-ENV_FILE="${CONFIG_DIR}/.env"
-KEY_FILE="${CONFIG_DIR}/gateway-key.txt"
 TUNNEL_CONFIG_DIR="${CONFIG_DIR}/cloudflared"
 TUNNEL_CONTAINER_QUICK="foxrouters-tunnel-quick"
 TUNNEL_CONTAINER_NAMED="foxrouters-tunnel-named"
@@ -64,6 +323,21 @@ bold()   { printf '\033[1m%s\033[0m\n' "$*"; }
 info()   { printf '\033[36m[i]\033[0m %s\n' "$*"; }
 ok()     { printf '\033[32m[✓]\033[0m %s\n' "$*"; }
 err()    { printf '\033[31m[✗]\033[0m %s\n' "$*"; }
+
+# gen_hex N — N random hex bytes (openssl preferred, urandom fallback)
+gen_hex() {
+    if command -v openssl &>/dev/null; then
+        openssl rand -hex "$1"
+    else
+        head -c "$1" /dev/urandom | od -An -tx1 | tr -d ' \n'
+    fi
+}
+
+# ── Native binary mode (no Docker) ─────────────────────────────────────────
+if [[ "${MODE}" == "binary" ]]; then
+    install_binary_mode
+    exit 0
+fi
 
 # ── Step 1: Docker check/install ────────────────────────────────────────────
 info "Checking Docker..."
@@ -90,49 +364,23 @@ if ! docker info &>/dev/null; then
     exit 1
 fi
 
-# ── Step 2: Prompt for log backend ──────────────────────────────────────────
-# Priority:
-#   1. LOG_BACKEND env var (non-interactive install)
-#   2. Auto-detect existing ClickHouse install (upgrade safety)
-#   3. Interactive prompt (only if stdin is a TTY)
-#   4. Default: sqlite
-LOG_BACKEND="${LOG_BACKEND:-}"
-if [[ -z "${LOG_BACKEND}" ]]; then
-    # Auto-detect: existing .env with LOG_BACKEND=clickhouse OR running CH container
-    if [[ -f "${CONFIG_DIR}/.env" ]] && grep -q '^LOG_BACKEND=clickhouse' "${CONFIG_DIR}/.env" 2>/dev/null; then
-        LOG_BACKEND="clickhouse"
-        info "Auto-detected existing ClickHouse config — keeping LOG_BACKEND=clickhouse"
-    elif docker ps -a --format '{{.Names}}' 2>/dev/null | grep -q 'foxrouters-clickhouse'; then
-        LOG_BACKEND="clickhouse"
-        info "Auto-detected existing ClickHouse container — using LOG_BACKEND=clickhouse"
-    elif [[ -t 0 ]]; then
-        echo ""
-        bold "Log backend"
-        echo "  [1] SQLite     (default, lightweight, ~0 ops cost — recommended)"
-        echo "  [2] ClickHouse (analytics; adds ~700MB image + a service to maintain)"
-        echo ""
-        read -r -p "Choice [1]: " CHOICE || CHOICE=""
-        case "${CHOICE}" in
-            2|ch|clickhouse) LOG_BACKEND="clickhouse" ;;
-            *)               LOG_BACKEND="sqlite"     ;;
-        esac
-    else
-        # Piped install with no LOG_BACKEND set → default to sqlite.
-        LOG_BACKEND="sqlite"
-    fi
+# ── Step 2: Log backend ─────────────────────────────────────────────────────
+# SQLite is the only backend (ClickHouse removed Aug 2026). Accept legacy
+# LOG_BACKEND=clickhouse silently but always run sqlite; clean up a stale CH
+# container if one exists from an older install.
+if [[ -n "${LOG_BACKEND:-}" && "${LOG_BACKEND}" != "sqlite" && "${LOG_BACKEND}" != "sqlite3" ]]; then
+    info "LOG_BACKEND=${LOG_BACKEND} is deprecated (ClickHouse removed) — using sqlite"
 fi
-case "${LOG_BACKEND}" in
-    sqlite|clickhouse) ok "Log backend: ${LOG_BACKEND}" ;;
-    *)
-        err "Unknown LOG_BACKEND=${LOG_BACKEND} — must be sqlite or clickhouse"
-        exit 1
-        ;;
-esac
+LOG_BACKEND="sqlite"
+if docker ps -a --format '{{.Names}}' 2>/dev/null | grep -q 'foxrouters-clickhouse'; then
+    info "Removing stale foxrouters-clickhouse container (backend removed)"
+    docker rm -f foxrouters-clickhouse 2>/dev/null || true
+fi
+ok "Log backend: sqlite"
 
 # ── Step 3: Generate secrets ────────────────────────────────────────────────
 info "Generating secrets..."
 REDIS_PASSWORD=$(openssl rand -hex 16 2>/dev/null || head -c 16 /dev/urandom | xxd -p)
-CH_PASSWORD=""  # ClickHouse default user has no password by default
 
 mkdir -p "${CONFIG_DIR}"
 chmod 700 "${CONFIG_DIR}"
@@ -144,12 +392,8 @@ cat > "${ENV_FILE}" << EOF
 REDIS_ADDR=redis:6379
 REDIS_PASSWORD=${REDIS_PASSWORD}
 REDIS_DB=0
-LOG_BACKEND=${LOG_BACKEND}
+LOG_BACKEND=sqlite
 LOG_SQLITE_PATH=/var/lib/foxrouters/logs.db
-CLICKHOUSE_ADDR=clickhouse:9000
-CLICKHOUSE_DB=gateway
-CLICKHOUSE_USER=default
-CLICKHOUSE_PASSWORD=${CH_PASSWORD}
 PORT=${GATEWAY_PORT}
 EOF
 chmod 600 "${ENV_FILE}"
@@ -164,16 +408,10 @@ docker volume  create "${VOL_SQLITE}" 2>/dev/null || ok "Volume ${VOL_SQLITE} al
 # Fix volume ownership: gateway runs as UID 1000 (non-root).
 # Without this, SQLite can't write to /var/lib/foxrouters/logs.db.
 docker run --rm -v "${VOL_SQLITE}:/data" alpine chown -R 1000:1000 /data 2>/dev/null || true
-if [[ "${LOG_BACKEND}" == "clickhouse" ]]; then
-    docker volume create "${VOL_CH}" 2>/dev/null || ok "Volume ${VOL_CH} already exists"
-fi
 
 # ── Step 5: Pull images ─────────────────────────────────────────────────────
 info "Pulling images (this may take a few minutes on first run)..."
 docker pull "${IMAGE_REDIS}"      2>&1 | tail -1
-if [[ "${LOG_BACKEND}" == "clickhouse" ]]; then
-    docker pull "${IMAGE_CLICKHOUSE}"  2>&1 | tail -1
-fi
 # Only pull gateway if not already present locally (avoid overwriting local builds)
 if ! docker image inspect "${IMAGE_GATEWAY}" &>/dev/null; then
     docker pull "${IMAGE_GATEWAY}"    2>&1 | tail -1
@@ -196,40 +434,18 @@ docker run -d \
     redis-server --requirepass "${REDIS_PASSWORD}" --appendonly no
 ok "Redis started (port ${REDIS_PORT})"
 
-# ── Step 7: Start ClickHouse (only if selected) ─────────────────────────────
-if [[ "${LOG_BACKEND}" == "clickhouse" ]]; then
-    info "Starting ClickHouse..."
+# ── Step 7: Cleanup legacy ClickHouse (backend removed Aug 2026) ────────────
+if docker ps -a --format '{{.Names}}' 2>/dev/null | grep -q 'foxrouters-clickhouse'; then
+    info "Removing stale foxrouters-clickhouse container (backend removed)"
     docker rm -f foxrouters-clickhouse 2>/dev/null || true
-    docker run -d \
-        --name foxrouters-clickhouse \
-        --network "${NETWORK}" \
-        --network-alias clickhouse \
-        -p "127.0.0.1:${CH_HTTP_PORT}:8123" \
-        -p "127.0.0.1:${CH_NATIVE_PORT}:9000" \
-        -v "${VOL_CH}:/var/lib/clickhouse" \
-        --ulimit nofile=262144:262144 \
-        --restart unless-stopped \
-        -e CLICKHOUSE_USER=default \
-        -e CLICKHOUSE_PASSWORD="${CH_PASSWORD}" \
-        -e CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT=1 \
-        "${IMAGE_CLICKHOUSE}"
-    ok "ClickHouse started (HTTP ${CH_HTTP_PORT}, Native ${CH_NATIVE_PORT})"
-else
-    info "SQLite mode — skipping ClickHouse container"
-    # Best-effort cleanup of a stale CH container from a prior CH install.
-    docker rm -f foxrouters-clickhouse 2>/dev/null || true
+    docker volume rm foxrouters-clickhouse-data 2>/dev/null || true
 fi
 
 # ── Step 8: Wait for dependencies healthy ───────────────────────────────────
-info "Waiting for Redis${LOG_BACKEND:+ + ${LOG_BACKEND}} to be healthy..."
+info "Waiting for Redis to be healthy..."
 for i in $(seq 1 30); do
     REDIS_OK=$(docker exec foxrouters-redis redis-cli -a "${REDIS_PASSWORD}" ping 2>/dev/null || echo "FAIL")
-    if [[ "${LOG_BACKEND}" == "clickhouse" ]]; then
-        CH_OK=$(curl -sf "http://127.0.0.1:${CH_HTTP_PORT}/ping" 2>/dev/null || echo "FAIL")
-    else
-        CH_OK="Ok."
-    fi
-    if [[ "${REDIS_OK}" == "PONG" && "${CH_OK}" == "Ok." ]]; then
+    if [[ "${REDIS_OK}" == "PONG" ]]; then
         ok "Dependencies healthy"
         break
     fi
@@ -238,7 +454,6 @@ for i in $(seq 1 30); do
     if [[ $i -eq 30 ]]; then
         err "Timeout waiting for dependencies"
         docker logs foxrouters-redis --tail 5
-        [[ "${LOG_BACKEND}" == "clickhouse" ]] && docker logs foxrouters-clickhouse --tail 5
         exit 1
     fi
 done
@@ -254,15 +469,11 @@ docker run -d \
     --restart unless-stopped \
     --env-file "${ENV_FILE}" \
     -e REDIS_ADDR=redis:6379 \
-    -e LOG_BACKEND="${LOG_BACKEND}" \
+    -e LOG_BACKEND=sqlite \
     -e LOG_SQLITE_PATH=/var/lib/foxrouters/logs.db \
-    -e CLICKHOUSE_ADDR=clickhouse:9000 \
-    -e CLICKHOUSE_DB=gateway \
-    -e CLICKHOUSE_USER=default \
-    -e CLICKHOUSE_PASSWORD="${CH_PASSWORD}" \
     -e PORT=20130 \
     "${IMAGE_GATEWAY}"
-ok "FoxRouters started (port ${GATEWAY_PORT}, log backend: ${LOG_BACKEND})"
+ok "FoxRouters started (port ${GATEWAY_PORT}, log backend: sqlite)"
 
 # ── Step 10: Capture gateway key from Redis ─────────────────────────────────
 info "Waiting for gateway to write key to Redis (up to 30s)..."

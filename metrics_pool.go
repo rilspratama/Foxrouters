@@ -5,13 +5,15 @@
 package main
 
 import (
+	"foxrouters/internal/auth"
 	"foxrouters/internal/metrics"
+	"foxrouters/internal/upstream"
 )
 
 // updatePoolGauges snapshots pool sizes into active/disabled gauges.
 // Called every 10s from a background ticker — cheap RLock walk, no
 // hot-path overhead.
-func updatePoolGauges(grokAM *GrokAccountManager, cbKM *CBKeyManager, authMgr *AuthManager) {
+func updatePoolGauges(grokAM *upstream.GrokAccountManager, cbKM *upstream.CBKeyManager, authMgr *auth.Manager) {
 	if grokAM != nil {
 		var gActive, gDisabled int
 		for _, a := range grokAM.GetAll() {

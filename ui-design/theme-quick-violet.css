@@ -1,0 +1,25 @@
+/* 21st.dev — Quick theme (obiney500)
+   https://21st.dev/community/themes/quick-theme-1786397511983
+   Dark: bg hsl(222.2 84% 4.9%) ≈ #0b0f1a · primary hsl(266 80.3% 53.1%) ≈ #6d28d9 (violet)
+   secondary hsl(291 64.8% 47.4%) (magenta) — dekat dengan brand purple FoxRouters sekarang
+   Light: primary hsl(248 68.8% 50.8%) (indigo) */
+.dark-theme-quick-violet {
+  --bg: #0b0f1a;
+  --fg: #f8fafc;
+  --card: #0b0f1a;
+  --popover: #0b0f1a;
+  --primary: #6d28d9;
+  --primary-fg: #f8fafc;
+  --secondary: #a21caf;
+  --secondary-fg: #f8fafc;
+  --muted: #1c2430;
+  --muted-fg: #a3adbb;
+  --accent: #1c2430;
+  --destructive: #ef4444;
+  --border: #1c2430;
+  --input: #1c2430;
+  --ring: #d8dee9;
+  --sidebar: #0b0f1a;
+  --sidebar-fg: #f8fafc;
+  --radius: 6px;
+}
