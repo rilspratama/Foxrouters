@@ -33,19 +33,276 @@
 #   docker restart foxrouters
 #   docker rm -f foxrouters foxrouters-redis   # remove (keeps volumes)
 #
+# Native binary mode (no Docker — Redis via apt + systemd service):
+#   curl -fsSL https://raw.githubusercontent.com/rilspratama/Foxrouters/master/install.sh | bash -s -- --binary
+#   ./install.sh --binary --version=v1.6.14   # pin a release; default = latest
+#
 set -euo pipefail
+
+# ── Argument parsing ─────────────────────────────────────────────────────────
+MODE="docker"          # docker (default) | binary
+FOXROUTERS_VERSION=""  # pin release version for --binary (default latest)
+for arg in "$@"; do
+    case "$arg" in
+        --binary) MODE="binary" ;;
+        --version=*) FOXROUTERS_VERSION="${arg#*=}" ;;
+    esac
+done
+
+# ── Paths/ports — defined here (used by binary mode below + Docker mode later)
+GATEWAY_PORT="${FOXROUTERS_PORT:-20130}"
+REDIS_PORT="${REDIS_PORT:-6379}"
+CONFIG_DIR="/etc/foxrouters"
+ENV_FILE="${CONFIG_DIR}/.env"
+KEY_FILE="${CONFIG_DIR}/gateway-key.txt"
+
+# ── install_binary_mode: native binary install (no Docker) ─────────────────
+# Redis via apt + systemd, gateway binary from GitHub Release, optional
+# cloudflared for the tunnel feature. Idempotent — re-run to upgrade.
+install_binary_mode() {
+    bold "═══════════════════════════════════════════════════════════════"
+    bold "  FoxRouters — Native Binary Install (no Docker)"
+    bold "═══════════════════════════════════════════════════════════════"
+
+    # ── OS/arch detection ─────────────────────────────────────────────────
+    local os arch
+    case "$(uname -s)" in
+        Linux)  os="linux" ;;
+        Darwin) os="darwin" ;;
+        *) err "Unsupported OS: $(uname -s) (linux/darwin only)"; exit 1 ;;
+    esac
+    case "$(uname -m)" in
+        x86_64|amd64) arch="amd64" ;;
+        aarch64|arm64) arch="arm64" ;;
+        *) err "Unsupported arch: $(uname -m)"; exit 1 ;;
+    esac
+    info "Target: ${os}/${arch}"
+
+    if [[ "${os}" == "darwin" ]]; then
+        err "Native install on macOS = manual only (no systemd)."
+        err "Download the darwin archive and run ./foxrouters directly."
+        exit 1
+    fi
+
+    # ── Root check ────────────────────────────────────────────────────────
+    if [[ "$(id -u)" -ne 0 ]]; then
+        err "Binary mode needs root (apt + systemd). Run as root or with sudo."
+        exit 1
+    fi
+
+    mkdir -p "${CONFIG_DIR}"
+    chmod 700 "${CONFIG_DIR}"
+
+    # ── Redis (apt) ───────────────────────────────────────────────────────
+    info "Checking Redis..."
+    if ! command -v redis-server &>/dev/null; then
+        info "Installing redis-server via apt..."
+        apt-get update -qq
+        apt-get install -y -qq redis-server >/dev/null
+        ok "Redis installed: $(redis-server --version)"
+    else
+        ok "Redis found: $(redis-server --version)"
+    fi
+
+    local redis_pass
+    if [[ -n "${REDIS_PASSWORD:-}" ]]; then
+        redis_pass="${REDIS_PASSWORD}"
+    elif [[ -f "${CONFIG_DIR}/.redis_pass" ]]; then
+        redis_pass="$(cat "${CONFIG_DIR}/.redis_pass")"
+    else
+        redis_pass="$(gen_hex 16)"
+        printf '%s' "${redis_pass}" > "${CONFIG_DIR}/.redis_pass"
+        chmod 600 "${CONFIG_DIR}/.redis_pass"
+    fi
+
+    # Persist requirepass in redis.conf (idempotent — replace existing line)
+    local redis_conf="/etc/redis/redis.conf"
+    local redis_dir
+    redis_dir="$(redis-cli -h 127.0.0.1 -p ${REDIS_PORT} CONFIG GET dir 2>/dev/null | sed -n '2p' || true)"
+    if [[ -n "${redis_dir}" && -f "${redis_dir}/redis.conf" ]]; then
+        redis_conf="${redis_dir}/redis.conf"
+    fi
+    if ! grep -q "requirepass ${redis_pass}" "${redis_conf}" 2>/dev/null; then
+        info "Setting Redis requirepass (${redis_conf})"
+        sed -i "s/^#\?requirepass .*/requirepass ${redis_pass}/" "${redis_conf}" 2>/dev/null \
+            || printf '\nrequirepass %s\n' "${redis_pass}" >> "${redis_conf}"
+    fi
+    systemctl enable redis-server >/dev/null 2>&1 || true
+    systemctl restart redis-server
+    sleep 1
+    if redis-cli -h 127.0.0.1 -p 6379 -a "${redis_pass}" ping >/dev/null 2>&1; then
+        ok "Redis up (auth OK)"
+    else
+        err "Redis auth failed — check ${redis_conf}"
+        exit 1
+    fi
+
+    install_binary_download "${os}" "${arch}"
+}
+
+# ── Download release binary + verify checksum ─────────────────────────────
+install_binary_download() {
+    local os="$1" arch="$2"
+
+    # Resolve release version: --version=vX.Y.Z or latest tag via GitHub API
+    local ver asset_url checksums_url tmpdir archive
+    if [[ -n "${FOXROUTERS_VERSION}" ]]; then
+        ver="${FOXROUTERS_VERSION}"
+    else
+        info "Resolving latest release..."
+        ver="$(curl -fsSL https://api.github.com/repos/rilspratama/Foxrouters/releases/latest \
+            | grep -oE '"tag_name":\s*"[^"]+"' | head -1 | sed 's/.*"\([^"]*\)".*/\1/')"
+        if [[ -z "${ver}" ]]; then
+            err "Could not resolve latest release — pass --version=vX.Y.Z"
+            exit 1
+        fi
+    fi
+    ver="${ver#v}"
+    info "Release: v${ver} (${os}/${arch})"
+
+    asset_url="https://github.com/rilspratama/Foxrouters/releases/download/v${ver}/foxrouters_${ver}_${os}_${arch}.tar.gz"
+    checksums_url="https://github.com/rilspratama/Foxrouters/releases/download/v${ver}/checksums.txt"
+
+    tmpdir="$(mktemp -d)"
+    local archive_name="foxrouters_${ver}_${os}_${arch}.tar.gz"
+    info "Downloading ${os}/${arch} binary..."
+    curl -fsSL -o "${tmpdir}/${archive_name}" "${asset_url}" \
+        || { err "Download failed (asset not found? release built?)"; exit 1; }
+    curl -fsSL -o "${tmpdir}/checksums.txt" "${checksums_url}" || true
+
+    if [[ -s "${tmpdir}/checksums.txt" ]]; then
+        (cd "${tmpdir}" && sha256sum -c checksums.txt --ignore-missing) \
+            || { err "Checksum mismatch — aborting"; exit 1; }
+        ok "Checksum verified"
+    else
+        yellow "No checksums.txt — skipping verification"
+    fi
+
+    tar xzf "${tmpdir}/${archive_name}" -C "${tmpdir}"
+    install -m 0755 "${tmpdir}/foxrouters" /usr/local/bin/foxrouters
+    rm -rf "${tmpdir}"
+    # NOTE: binary has no --version flag — it would start the server. Just confirm install.
+    ok "Installed: /usr/local/bin/foxrouters (v${ver})"
+
+    # ── cloudflared (optional — tunnel feature) ────────────────────────────
+    if ! command -v cloudflared &>/dev/null; then
+        info "Installing cloudflared (tunnel feature)..."
+        curl -fsSL -o /usr/local/bin/cloudflared \
+            "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-${os}-${arch}" \
+            && chmod +x /usr/local/bin/cloudflared \
+            && ok "cloudflared: $(/usr/local/bin/cloudflared --version 2>/dev/null | head -1)" \
+            || yellow "cloudflared install failed — tunnel disabled (install later)"
+    else
+        ok "cloudflared found: $(command -v cloudflared)"
+    fi
+
+    install_binary_service "${ver}"
+}
+
+# ── systemd service + .env + start ────────────────────────────────────────
+install_binary_service() {
+    local ver="$1"
+
+    # Gateway key (idempotent)
+    local gw_key
+    if [[ -f "${KEY_FILE}" ]]; then
+        gw_key="$(cat "${KEY_FILE}")"
+    else
+        gw_key="gw-$(gen_hex 24)"
+        printf '%s\n' "${gw_key}" > "${KEY_FILE}"
+        chmod 600 "${KEY_FILE}"
+    fi
+
+    # Write .env (preserve existing values on re-run)
+    local redis_pass
+    redis_pass="$(cat "${CONFIG_DIR}/.redis_pass")"
+    {
+        printf 'PORT=%s\n' "${GATEWAY_PORT}"
+        printf 'GATEWAY_BIND=127.0.0.1:%s\n' "${GATEWAY_PORT}"
+        printf 'REDIS_ADDR=127.0.0.1:%s\n' "${REDIS_PORT}"
+        printf 'REDIS_PASSWORD=%s\n' "${redis_pass}"
+        printf 'GATEWAY_API_KEYS=%s\n' "${gw_key}"
+        printf 'LOG_BACKEND=sqlite\n'
+        printf 'LOG_SQLITE_PATH=/var/lib/foxrouters/logs.db\n'
+        printf 'CLOUDFLARED_PATH=/usr/local/bin/cloudflared\n'
+    } > "${ENV_FILE}.tmp"
+    mv "${ENV_FILE}.tmp" "${ENV_FILE}"
+    chmod 600 "${ENV_FILE}"
+    mkdir -p /var/lib/foxrouters
+    ok "Config: ${ENV_FILE}"
+
+    # systemd unit
+    cat > /etc/systemd/system/foxrouters.service <<EOF
+[Unit]
+Description=FoxRouters AI Gateway (Grok + CodeBuddy + Freebuff + Alibaba)
+After=network-online.target redis-server.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=${ENV_FILE}
+Environment=HOME=/var/lib/foxrouters
+ExecStart=/usr/local/bin/foxrouters
+Restart=on-failure
+RestartSec=3
+# Hardening (mirrors the Docker image)
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/foxrouters
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    systemctl daemon-reload
+    systemctl enable foxrouters >/dev/null 2>&1 || true
+    systemctl restart foxrouters
+    ok "Service started (foxrouters.service)"
+
+    # Health check
+    local i
+    for i in $(seq 1 15); do
+        if curl -fsS "http://127.0.0.1:${GATEWAY_PORT}/health" >/dev/null 2>&1; then
+            break
+        fi
+        sleep 2
+    done
+    if curl -fsS "http://127.0.0.1:${GATEWAY_PORT}/health" >/dev/null 2>&1; then
+        ok "Gateway healthy on :${GATEWAY_PORT}"
+    else
+        err "Gateway did not become healthy — check: journalctl -u foxrouters -n 50"
+        exit 1
+    fi
+
+    # ── Summary ────────────────────────────────────────────────────────────
+    echo ""
+    bold "═══════════════════════════════════════════════════════════════"
+    echo ""
+    echo "  FoxRouters v${ver} installed — native binary"
+    echo ""
+    echo "  Dashboard:    http://127.0.0.1:${GATEWAY_PORT}/dashboard"
+    echo "  Gateway key:  ${gw_key}"
+    echo "  Config:       ${ENV_FILE}"
+    echo "  Logs:         journalctl -u foxrouters -f"
+    echo ""
+    echo "  Manage:"
+    echo "    systemctl restart foxrouters"
+    echo "    systemctl stop foxrouters"
+    echo "    Re-run this installer to upgrade to a newer release"
+    echo ""
+    echo "  Tunnel:       ./tunnel.sh enable          (quick)"
+    echo "                ./tunnel.sh enable --named  (custom domain)"
+    echo ""
+    bold "═══════════════════════════════════════════════════════════════"
+}
 
 # ── Config ──────────────────────────────────────────────────────────────────
 IMAGE_GATEWAY="${IMAGE_GATEWAY:-ghcr.io/rilspratama/foxrouters:latest}"
 IMAGE_REDIS="redis:7-alpine"
-GATEWAY_PORT="${FOXROUTERS_PORT:-20130}"
-REDIS_PORT="${REDIS_PORT:-6379}"
 NETWORK="foxrouters-net"
 VOL_REDIS="foxrouters-redis-data"
 VOL_SQLITE="foxrouters-sqlite-data"
-CONFIG_DIR="/etc/foxrouters"
-ENV_FILE="${CONFIG_DIR}/.env"
-KEY_FILE="${CONFIG_DIR}/gateway-key.txt"
 TUNNEL_CONFIG_DIR="${CONFIG_DIR}/cloudflared"
 TUNNEL_CONTAINER_QUICK="foxrouters-tunnel-quick"
 TUNNEL_CONTAINER_NAMED="foxrouters-tunnel-named"
@@ -59,6 +316,21 @@ bold()   { printf '\033[1m%s\033[0m\n' "$*"; }
 info()   { printf '\033[36m[i]\033[0m %s\n' "$*"; }
 ok()     { printf '\033[32m[✓]\033[0m %s\n' "$*"; }
 err()    { printf '\033[31m[✗]\033[0m %s\n' "$*"; }
+
+# gen_hex N — N random hex bytes (openssl preferred, urandom fallback)
+gen_hex() {
+    if command -v openssl &>/dev/null; then
+        openssl rand -hex "$1"
+    else
+        head -c "$1" /dev/urandom | od -An -tx1 | tr -d ' \n'
+    fi
+}
+
+# ── Native binary mode (no Docker) ─────────────────────────────────────────
+if [[ "${MODE}" == "binary" ]]; then
+    install_binary_mode
+    exit 0
+fi
 
 # ── Step 1: Docker check/install ────────────────────────────────────────────
 info "Checking Docker..."
