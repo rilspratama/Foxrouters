@@ -113,7 +113,7 @@ var routes = {
   '#/proxies':  { page: 'page-proxies',   title: 'Proxies', meta: 'HTTP/SOCKS5 upstream proxy pool · round-robin' },
   '#/tunnel':   { page: 'page-tunnel',    title: 'Tunnel', meta: 'Cloudflare Tunnel · embedded cloudflared · Redis config' },
   '#/media':    { page: 'page-media',     title: 'Media Studio', meta: 'Alibaba DashScope · qwen-image / wan' },
-  '#/settings': { page: 'page-settings',  title: 'Settings', meta: 'Turnstile Solver · lazy SSO refresh' }
+  '#/settings': { page: 'page-settings',  title: 'Settings', meta: 'Content Filters · runtime rules' }
 };
 
 function navigateTo(hash) {
@@ -171,7 +171,6 @@ function router() {
     if (typeof stopTunnelPolling === 'function') stopTunnelPolling();
   }
   if (hash === '#/settings') {
-    if (typeof loadTurnstileSettings === 'function') loadTurnstileSettings();
     if (typeof loadFilterSettings === 'function') loadFilterSettings();
   }
   if (hash === '#/media') {

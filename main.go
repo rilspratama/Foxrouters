@@ -170,8 +170,6 @@ func main() {
 	}
 	defer db.Close()
 
-	// Turnstile solver config: env → Redis gw:config (Settings page) → runtime.
-	upstream.LoadTurnstileConfig(db)
 	// Content filter config: Redis gw:config (Settings page) → runtime.
 	proxy.LoadFilterConfig(db)
 
@@ -394,7 +392,6 @@ func main() {
 	r.GET("/cb/oauth/device/poll", csrfGuard(), adminAuth, handlers.HandleCBOAuthDevicePoll())
 	r.POST("/cb/credits/sync", csrfGuard(), adminAuth, handlers.HandleSyncCBCredits(cbKM))
 	r.POST("/accounts/billing/sync", csrfGuard(), adminAuth, handlers.HandleSyncGrokBilling(grokAM))
-	r.POST("/grok/quota/sync", csrfGuard(), adminAuth, handlers.HandleGrokQuotaSync(grokAM))
 	// CB selector mode: rr | sticky | content-hash | hybrid (runtime switch, Redis-persisted)
 	r.GET("/cb/selector-mode", adminAuth, func(c *gin.Context) {
 		c.JSON(200, gin.H{
@@ -442,41 +439,7 @@ func main() {
 	r.POST("/cb/keys/test", csrfGuard(), adminAuth, handlers.HandleTestCBKey(cbKM))
 	r.POST("/cb/keys/disable", csrfGuard(), adminAuth, handlers.HandleDisableCBKey(cbKM))
 	r.POST("/cb/keys/enable", csrfGuard(), adminAuth, handlers.HandleEnableCBKey(cbKM))
-	// Turnstile solver settings (dashboard Settings page) — runtime + Redis gw:config
-	r.GET("/settings/turnstile", adminAuth, func(c *gin.Context) {
-		url, sk := upstream.GetTurnstileConfig()
-		c.JSON(200, gin.H{"solver_url": url, "sitekey": sk})
-	})
-	r.PUT("/settings/turnstile", csrfGuard(), adminAuth, func(c *gin.Context) {
-		var body struct {
-			SolverURL string `json:"solver_url"`
-			SiteKey   string `json:"sitekey"`
-		}
-		if err := c.ShouldBindJSON(&body); err != nil {
-			c.JSON(400, gin.H{"error": "invalid json"})
-			return
-		}
-		if body.SolverURL == "" || body.SiteKey == "" {
-			c.JSON(400, gin.H{"error": "solver_url and sitekey are required"})
-			return
-		}
-		upstream.SetTurnstileConfig(body.SolverURL, body.SiteKey)
-		if db != nil {
-			_ = db.SetGWConfig("turnstile_solver_url", body.SolverURL)
-			_ = db.SetGWConfig("turnstile_sitekey", body.SiteKey)
-		}
-		slog.Info("turnstile config updated", "module", "settings", "solver_url", body.SolverURL, "sitekey", body.SiteKey)
-		c.JSON(200, gin.H{"status": "saved", "solver_url": body.SolverURL, "sitekey": body.SiteKey})
-	})
-	r.POST("/settings/turnstile/test", csrfGuard(), adminAuth, func(c *gin.Context) {
-		elapsed, tokenLen, err := upstream.TestTurnstile()
-		if err != nil {
-			c.JSON(502, gin.H{"ok": false, "error": err.Error(), "elapsed_ms": elapsed})
-			return
-		}
-		c.JSON(200, gin.H{"ok": true, "token_len": tokenLen, "elapsed_ms": elapsed})
-	})
-	// Content filters (dashboard Settings) — runtime + Redis gw:config
+	// Content filter settings (dashboard Settings page) — runtime + Redis gw:config
 	r.GET("/settings/filters", adminAuth, func(c *gin.Context) {
 		rules := proxy.FiltersList()
 		out := make([]gin.H, 0, len(rules))

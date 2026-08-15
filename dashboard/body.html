@@ -1202,47 +1202,10 @@
         <div class="panel-head">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
           <h3>Settings</h3>
-          <span class="head-meta" id="settingsPanelMeta">Turnstile Solver · lazy SSO refresh</span>
+          <span class="head-meta" id="settingsPanelMeta">Content Filters · runtime rules</span>
         </div>
 
         <div style="padding:16px;display:grid;gap:16px">
-          <!-- Turnstile Solver config -->
-          <div class="panel-head" style="border:none;padding:0">
-            <h4 style="margin:0;font-size:13px;font-weight:600">Turnstile Solver</h4>
-            <span class="head-meta">used by Grok image-gen lazy SSO re-login (401 → solve → sign-in)</span>
-          </div>
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
-            <div>
-              <label style="font-size:11px;color:var(--text-tertiary);display:block;margin-bottom:5px">Solver URL</label>
-              <input id="setSolverUrl" type="text" spellcheck="false" style="width:100%;background:var(--bg);border:1px solid var(--border-strong);border-radius:var(--radius-sm);padding:9px 11px;font-size:12px;font-family:var(--mono);color:var(--text-primary);outline:none" placeholder="http://127.0.0.1:8742/cloudflare" />
-            </div>
-            <div>
-              <label style="font-size:11px;color:var(--text-tertiary);display:block;margin-bottom:5px">Turnstile Sitekey</label>
-              <input id="setSiteKey" type="text" spellcheck="false" style="width:100%;background:var(--bg);border:1px solid var(--border-strong);border-radius:var(--radius-sm);padding:9px 11px;font-size:12px;font-family:var(--mono);color:var(--text-primary);outline:none" placeholder="0x4AAAAAAAhr9JGVDZbrZOo0" />
-            </div>
-          </div>
-          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-            <button class="btn-primary" onclick="saveTurnstileSettings()" style="padding:7px 16px;border-radius:var(--radius-sm);background:var(--brand);color:#000;border:none;font-size:12px;font-weight:600;cursor:pointer">Save</button>
-            <button class="btn-ghost" onclick="testTurnstileSettings()" style="padding:7px 16px;font-size:12px">Test Solver</button>
-            <span id="settingsResult" style="font-size:12px;color:var(--text-tertiary)"></span>
-          </div>
-
-          <!-- Status strip -->
-          <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px">
-            <div style="background:var(--bg);border:1px solid var(--border-strong);border-radius:var(--radius-sm);padding:12px">
-              <div style="font-size:11px;color:var(--text-tertiary);margin-bottom:6px">Solver Reachable</div>
-              <div id="setReachVal" style="font-size:14px;font-weight:600;color:var(--text-tertiary)">—</div>
-            </div>
-            <div style="background:var(--bg);border:1px solid var(--border-strong);border-radius:var(--radius-sm);padding:12px">
-              <div style="font-size:11px;color:var(--text-tertiary);margin-bottom:6px">Last Solve</div>
-              <div id="setLastSolve" style="font-size:14px;font-weight:600;color:var(--text-tertiary)">—</div>
-            </div>
-            <div style="background:var(--bg);border:1px solid var(--border-strong);border-radius:var(--radius-sm);padding:12px">
-              <div style="font-size:11px;color:var(--text-tertiary);margin-bottom:6px">Elapsed</div>
-              <div id="setElapsedVal" style="font-size:14px;font-weight:600;color:var(--text-tertiary)">—</div>
-            </div>
-          </div>
-
           <!-- Content Filters (strip agent identities before CodeBuddy upstream) -->
           <div class="panel-head" style="border:none;padding:0">
             <h4 style="margin:0;font-size:13px;font-weight:600">Content Filters</h4>
@@ -1256,11 +1219,6 @@
           </div>
           <div id="setFiltersList" style="display:grid;gap:6px;background:var(--bg);border:1px solid var(--border-strong);border-radius:var(--radius-sm);padding:12px;max-height:280px;overflow-y:auto">
             <div style="font-size:12px;color:var(--text-tertiary)">loading rules…</div>
-          </div>
-
-          <!-- Info -->
-          <div style="background:rgba(255,255,255,0.03);border:1px solid var(--border-strong);border-radius:var(--radius-sm);padding:12px;font-size:12px;color:var(--text-tertiary);line-height:1.6">
-            <b style="color:var(--text-primary)">Lazy SSO auth (Grok image gen):</b> cookies cached in Redis, never proactively refreshed. On 401 the gateway re-logs into console.x.ai via this solver + <code style="font-family:var(--mono);font-size:11px">POST /api/auth/sign-in</code> (~3s, no browser) and retries once. On 429 the account is marked exhausted (5-img quota counted locally) and rotation moves to the next account.
           </div>
         </div>
       </div>

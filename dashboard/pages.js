@@ -1032,56 +1032,6 @@ function tunCredBadge(label, present) {
   return '<span style="color:' + col + '">' + dot + ' ' + escHtml(label) + '</span>';
 }
 
-/* ═══════════════════ SETTINGS — Turnstile Solver ═══════════════════ */
-async function loadTurnstileSettings() {
-  var res = document.getElementById('settingsResult');
-  try {
-    var d = await apiFetch('/settings/turnstile');
-    if (!d) return;
-    document.getElementById('setSolverUrl').value = d.solver_url || '';
-    document.getElementById('setSiteKey').value = d.sitekey || '';
-    if (res) res.textContent = 'config loaded';
-  } catch (e) {
-    if (e.message === '__redirect__') return;
-    if (res) res.textContent = 'load failed: ' + e.message;
-  }
-}
-
-async function saveTurnstileSettings() {
-  var url = document.getElementById('setSolverUrl').value.trim();
-  var sk = document.getElementById('setSiteKey').value.trim();
-  var res = document.getElementById('settingsResult');
-  if (!url || !sk) { if (res) res.textContent = 'solver_url + sitekey required'; return; }
-  if (res) { res.textContent = 'saving…'; res.style.color = 'var(--text-tertiary)'; }
-  try {
-    var d = await apiFetch('/settings/turnstile', { method: 'PUT', body: JSON.stringify({ solver_url: url, sitekey: sk }) });
-    if (res) { res.textContent = 'saved ✓ (runtime + Redis)'; res.style.color = 'var(--emerald)'; }
-    refreshTurnstileStatus();
-  } catch (e) {
-    if (e.message === '__redirect__') return;
-    if (res) { res.textContent = 'save failed: ' + e.message; res.style.color = 'var(--red)'; }
-  }
-}
-
-async function testTurnstileSettings() {
-  var res = document.getElementById('settingsResult');
-  var btn = document.querySelector('#page-settings .btn-ghost');
-  if (btn) btn.disabled = true;
-  if (res) { res.textContent = 'solving…'; res.style.color = 'var(--text-tertiary)'; }
-  try {
-    var d = await apiFetch('/settings/turnstile/test', { method: 'POST' });
-    if (res) {
-      if (d.ok) { res.textContent = 'solver OK · token ' + d.token_len + ' chars · ' + d.elapsed_ms + 'ms'; res.style.color = 'var(--emerald)'; }
-      else { res.textContent = 'solver error: ' + d.error; res.style.color = 'var(--red)'; }
-    }
-  } catch (e) {
-    if (e.message === '__redirect__') return;
-    if (res) { res.textContent = 'test failed: ' + e.message; res.style.color = 'var(--red)'; }
-  } finally {
-    if (btn) btn.disabled = false;
-  }
-}
-
 /* ═══════════════════ SETTINGS — Content Filters ═══════════════════ */
 async function loadFilterSettings() {
   var list = document.getElementById('setFiltersList');
@@ -1120,29 +1070,6 @@ async function saveFilterSettings() {
   } catch (e) {
     if (e.message === '__redirect__') return;
     if (res) { res.textContent = 'save failed: ' + e.message; res.style.color = 'var(--red)'; }
-  }
-}
-
-async function refreshTurnstileStatus() {
-  try {
-    var d = await apiFetch('/settings/turnstile/test', { method: 'POST' });
-    var r = document.getElementById('setReachVal');
-    if (d.ok) {
-      if (r) { r.textContent = 'YES'; r.style.color = 'var(--emerald)'; }
-      var ls = document.getElementById('setLastSolve');
-      if (ls) { ls.textContent = d.token_len + ' chars'; ls.style.color = 'var(--emerald)'; }
-      var el = document.getElementById('setElapsedVal');
-      if (el) { el.textContent = d.elapsed_ms + 'ms'; el.style.color = 'var(--emerald)'; }
-    } else {
-      if (r) { r.textContent = 'NO'; r.style.color = 'var(--red)'; }
-      var ls2 = document.getElementById('setLastSolve');
-      if (ls2) { ls2.textContent = 'error'; ls2.style.color = 'var(--red)'; }
-      var el2 = document.getElementById('setElapsedVal');
-      if (el2) { el2.textContent = (d.elapsed_ms || 0) + 'ms'; el2.style.color = 'var(--red)'; }
-    }
-  } catch (e) {
-    var r2 = document.getElementById('setReachVal');
-    if (r2) { r2.textContent = 'NO'; r2.style.color = 'var(--red)'; }
   }
 }
 
@@ -1778,7 +1705,7 @@ async function tunnelRestart() {
 
 /* ══════════════════════════════════════════════════════════
    INIT — runs here (end of last script block) so router() and
-   its hooks (mediaInit, mediaPersistChat, loadTurnstileSettings,
+   its hooks (mediaInit, mediaPersistChat, loadFilterSettings,
    loadTunnelStatus…) see ALL function declarations.
    ══════════════════════════════════════════════════════════ */
 router();           // initial route
