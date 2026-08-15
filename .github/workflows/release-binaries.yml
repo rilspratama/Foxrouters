@@ -8,6 +8,7 @@ on:
 
 permissions:
   contents: write
+  actions: write
 
 jobs:
   goreleaser:
@@ -31,3 +32,12 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # After binaries are attached, kick the GHCR image build so it can
+      # download the prebuilt binary instead of compiling from source.
+      - name: Trigger GHCR image build
+        if: ${{ success() }}
+        run: |
+          gh workflow run docker-publish.yml -f tag="${{ github.ref_name }}"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
