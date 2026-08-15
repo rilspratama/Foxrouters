@@ -55,6 +55,7 @@ REDIS_PORT="${REDIS_PORT:-6379}"
 CONFIG_DIR="/etc/foxrouters"
 ENV_FILE="${CONFIG_DIR}/.env"
 KEY_FILE="${CONFIG_DIR}/gateway-key.txt"
+CF_BIN_PATH="/usr/local/bin/cloudflared"   # resolved during binary-mode install
 
 # ── install_binary_mode: native binary install (no Docker) ─────────────────
 # Redis via apt + systemd, gateway binary from GitHub Release, optional
@@ -185,15 +186,20 @@ install_binary_download() {
     ok "Installed: /usr/local/bin/foxrouters (v${ver})"
 
     # ── cloudflared (optional — tunnel feature) ────────────────────────────
-    if ! command -v cloudflared &>/dev/null; then
-        info "Installing cloudflared (tunnel feature)..."
-        curl -fsSL -o /usr/local/bin/cloudflared \
-            "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-${os}-${arch}" \
-            && chmod +x /usr/local/bin/cloudflared \
-            && ok "cloudflared: $(/usr/local/bin/cloudflared --version 2>/dev/null | head -1)" \
-            || yellow "cloudflared install failed — tunnel disabled (install later)"
+    # Respect an existing install anywhere on PATH; only download if missing.
+    CF_BIN_PATH="/usr/local/bin/cloudflared"   # default (script-level, used by .env)
+    if command -v cloudflared &>/dev/null; then
+        CF_BIN_PATH="$(command -v cloudflared)"
+        ok "cloudflared found: ${CF_BIN_PATH}"
     else
-        ok "cloudflared found: $(command -v cloudflared)"
+        info "Installing cloudflared (tunnel feature)..."
+        if curl -fsSL -o /usr/local/bin/cloudflared \
+            "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-${os}-${arch}" \
+            && chmod +x /usr/local/bin/cloudflared; then
+            ok "cloudflared installed: $(/usr/local/bin/cloudflared --version 2>/dev/null | head -1)"
+        else
+            yellow "cloudflared install failed — tunnel disabled (install later)"
+        fi
     fi
 
     install_binary_service "${ver}"
@@ -224,7 +230,7 @@ install_binary_service() {
         printf 'GATEWAY_API_KEYS=%s\n' "${gw_key}"
         printf 'LOG_BACKEND=sqlite\n'
         printf 'LOG_SQLITE_PATH=/var/lib/foxrouters/logs.db\n'
-        printf 'CLOUDFLARED_PATH=/usr/local/bin/cloudflared\n'
+        printf 'CLOUDFLARED_PATH=%s\n' "${CF_BIN_PATH}"
     } > "${ENV_FILE}.tmp"
     mv "${ENV_FILE}.tmp" "${ENV_FILE}"
     chmod 600 "${ENV_FILE}"
