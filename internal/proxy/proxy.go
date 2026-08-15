@@ -112,7 +112,32 @@ func toString(v interface{}) string {
 // Fallback combos retry on 5xx by buffering the upstream response through a
 // httptest-style recorder and only flushing to the real writer on success
 // or list exhaustion.
-func ProxyRequest(grokAM *upstream.GrokAccountManager, cbKM *upstream.CBKeyManager, fbAM *upstream.FreebuffAccountManager, hc *upstream.HealthChecker, authMgr *auth.Manager, registry *CustomRegistry, combos *ComboRegistry) gin.HandlerFunc {
+// filterModelsByKey restricts the model list to a key's allowed_models
+// whitelist (glob: "grok-*", "cb/*", exact). A key with NO whitelist sees
+// everything. An UNKNOWN key fails CLOSED (empty list) — identity that
+// cannot be verified must not inherit full catalog visibility.
+func filterModelsByKey(c *gin.Context, authMgr *auth.Manager, models []gin.H) []gin.H {
+	fullKey := c.GetString("client_key")
+	if fullKey == "" || authMgr == nil {
+		return models
+	}
+	info, ok := authMgr.Get(fullKey)
+	if !ok {
+		return []gin.H{} // unknown identity — deny
+	}
+	if len(info.AllowedModels) == 0 {
+		return models
+	}
+	out := make([]gin.H, 0, len(models))
+	for _, m := range models {
+		if id, _ := m["id"].(string); id != "" && info.IsModelAllowed(id) {
+			out = append(out, m)
+		}
+	}
+	return out
+}
+
+func ProxyRequest(grokAM *upstream.GrokAccountManager, cbKM *upstream.CBKeyManager, fbAM *upstream.FreebuffAccountManager, aliAM *upstream.AlibabaKeyManager, hc *upstream.HealthChecker, authMgr *auth.Manager, registry *CustomRegistry, combos *ComboRegistry) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		path := c.Request.URL.Path
 
@@ -184,6 +209,11 @@ func ProxyRequest(grokAM *upstream.GrokAccountManager, cbKM *upstream.CBKeyManag
 			for _, m := range upstream.GetFBModels() {
 				models = append(models, gin.H{"id": m.GatewayID, "object": "model", "owned_by": "freebuff", "reasoning": m.Reasoning})
 			}
+			// Alibaba (DashScope) models — dynamic from the model registry
+			// (fetched from /api/v1/models), static catalog fallback otherwise.
+			for _, m := range upstream.GetAliModels() {
+				models = append(models, gin.H{"id": m.Gateway, "object": "model", "owned_by": "alibaba", "reasoning": m.Reasoning})
+			}
 			// Backward-compat aliases: cb/<model> → same model, same upstream.
 			// Routing treats non-grok-* as CodeBuddy, so both shapes work.
 			cbAliases := []gin.H{
@@ -237,14 +267,14 @@ func ProxyRequest(grokAM *upstream.GrokAccountManager, cbKM *upstream.CBKeyManag
 		}
 		// /v1/models — local (list)
 		if path == "/v1/models" || path == "/models" {
-			c.JSON(200, gin.H{"object": "list", "data": buildModels()})
+			c.JSON(200, gin.H{"object": "list", "data": filterModelsByKey(c, authMgr, buildModels())})
 			return
 		}
 		// /v1/models/:id — single model lookup (Hermes/OpenAI SDK resolve
 		// models this way; a 404 here makes clients fall back silently).
 		if strings.HasPrefix(path, "/v1/models/") {
 			id := strings.TrimPrefix(path, "/v1/models/")
-			for _, m := range buildModels() {
+			for _, m := range filterModelsByKey(c, authMgr, buildModels()) {
 				if mid, _ := m["id"].(string); mid == id {
 					c.JSON(200, m)
 					return
@@ -429,6 +459,9 @@ func ProxyRequest(grokAM *upstream.GrokAccountManager, cbKM *upstream.CBKeyManag
 				if upstream.IsFreebuffModel(m) {
 					upstreamName = "freebuff"
 					upstream.ProxyFreebuff(c, b, bm, fbAM, clientStream, hc)
+				} else if upstream.IsAlibabaModel(m) {
+					upstreamName = "alibaba"
+					upstream.ProxyAlibaba(c, b, bm, aliAM, clientStream, hc)
 				} else if upstream.IsGrokModel(m) {
 					upstreamName = "grok"
 					upstream.ProxyGrok(c, b, grokAM, clientStream, hc, m)

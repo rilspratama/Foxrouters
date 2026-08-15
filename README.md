@@ -80,6 +80,19 @@ and log every request/response to SQLite — all behind a single Bearer token.
 - **Dynamic model registry** (v1.6.4+) — Freebuff + Grok model lists refresh from
   upstream sources every 6h (`POST /models/refresh` for manual trigger). New models
   appear without code changes; static fallback on fetch failure (zero downtime).
+- **Alibaba provider** (v1.6.14) — fourth upstream (`ali/` prefix) →
+  DashScope `dashscope-intl.aliyuncs.com/compatible-mode/v1`. Plain
+  OpenAI-compatible, `sk-ws-*` keys, no session lifecycle. Dynamic registry
+  (108+ chat models, zero-quota models excluded), 1M-context capable models.
+- **Per-key free-tier quota tracking** (v1.6.14) — gateway-side accumulator
+  (`ali:model_usage:<model>` Redis hash) records tokens in/out + requests per
+  model. Static baseline map (1M tokens/model) × active key count = dashboard
+  **Free Quota** column (used / limit progress bar) on the Models page.
+  `GET /ali/models/usage` (admin) for the raw table.
+- **Model visibility filter** (v1.6.14) — `/v1/models` + `/v1/models/:id` are
+  filtered per-key: a key with an `allowed_models` whitelist only sees those
+  models (glob `grok-*`, `cb/*`, exact). Unknown keys fail CLOSED (empty list);
+  keys without a whitelist see the full catalog.
 - **API-key auth** with role-based access — `inference` (default, least privilege)
   can only reach `/v1/*`; `admin` reaches everything.
 - **Per-key model whitelist** with glob patterns (`grok-*`, `cb/*`, exact match).
@@ -324,7 +337,23 @@ Dashboard: Type badge, Expires, Add OAuth Manual|Login URL, Bulk OAuth, Sync cre
 
 Pipe format: `token|email|userid` — token required, email+userid optional, bare UUID also works.
 Buffy prefix auto-injected. Quota auto-synced every 5min. Auto-cooldown when exhausted.
-Freebuff + Grok model lists auto-refresh every 6h from upstream sources (static fallback on failure).
+
+### Alibaba credentials (v1.6.14+)
+
+| Method | Endpoint | Input |
+|--------|----------|-------|
+| Single key | `POST /ali/import` | `{"key":"sk-ws-…","email":"…"}` |
+| Bulk (api_keys.txt format) | `POST /ali/import/bulk` | `{"raw":"email \| password \| sk-ws-… \| ts\n…"}` (cap 500/batch) |
+| Test | `POST /ali/keys/test` | `{"key_hash":"…"}` (or full key, server-side) |
+| Disable / Enable | `POST /ali/keys/disable` / `enable` | `{"key_hash":"…","reason":"…"}` |
+| Delete (last resort — prefer disable) | `POST /ali/accounts/delete` | `{"key_hash":"…"}` |
+| Quota view | `GET /ali/models/usage` | admin — per-model used/limit table |
+
+**Security:** full `sk-ws-*` secrets NEVER leave the server — `/ali/accounts` returns
+only `key_masked` + opaque `key_hash` (SHA-256 24 hex). All key actions resolve
+hash→key server-side; unknown ids return 404 (no credential-validation oracle).
+
+Freebuff + Grok + Alibaba model lists auto-refresh every 6h from upstream sources (static fallback on failure).
 
 ---
 
@@ -561,6 +590,8 @@ Routing is driven purely by the `model` field of the incoming request:
 |---|---|---|
 | `grok-*` | `https://cli-chat-proxy.grok.com` | Multi-account pool, refresh + 401 retry. |
 | `cb/*` | `https://www.codebuddy.ai/v2` | Dual pool (`api_key` + `oauth`), mixed RR, meter credit sync, 14018/Status==3 disable. |
+| `fb/*` | `https://www.codebuff.com/api/v1` | Freebuff free tier, session/run caching, quota sync + auto-cooldown. |
+| `ali/*` | `https://dashscope-intl.aliyuncs.com/compatible-mode/v1` | Alibaba DashScope, key RR, per-key quota accumulator, AccessDenied disable+rotate. |
 
 ### Grok alias expansion
 

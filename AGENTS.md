@@ -7,7 +7,7 @@ Unified OpenAI-compatible API gateway for **Grok + CodeBuddy**. Routes by model 
 Multi-account/key round-robin, auto-refresh (singleflight + pre-warm), circuit breaker,
 API key auth, per-key RPM/quota, Redis hot-state, **SQLite** full-body history, web dashboard.
 
-**Version:** v1.6.7 (`-X main.Version` build flag)
+**Version:** v1.6.13-audit (`-X main.Version` build flag)
 **Port:** 20130 · **Deploy:** Docker Compose (`docker compose up -d --build foxrouters`)
 
 > **⚠️ DEV MUST NOT TOUCH PROD.** `docker compose up --build` from a dev
@@ -73,6 +73,7 @@ Log backend choices (`LOG_BACKEND` env, default `sqlite`):
 - `Next()` Pass1 valid token; Pass2 least-expired + async refresh  
 - 401 rebuild request body + retry  
 - **CB OAuth:** Pre-warm worker (30s tick, 30m window) + `EnsureValid` before chat + 401 refresh-retry. Singleflight + lock-split. Refresh via `POST /v2/plugin/auth/token/refresh` (`X-Refresh-Token`). Eager refresh on import when AT is expired/near-expiry and RT is valid.
+- **Alibaba:** plain key RR (`ali/` prefix → DashScope compatible-mode). `Next()` snapshots the pool under one RLock (TOCTOU-safe) + `atomic.LoadUint64` cursor. Per-key usage (`RecordUsage`) + per-model usage (`RecordUsageModel` → `ali:model_usage:<model>`). Permanent disable on `AccessDenied.Unpurchased` (403), cooldown on 429, 4xx passthrough. Key actions via opaque `key_hash` (SHA-256 24 hex) — full secrets never leave the server. Bulk import capped at 500/batch.
 - **Grok selector modes:** rr | sticky | content-hash | hybrid (default sticky). `GROK_SELECTOR_MODE` env, `GET/PUT /grok/selector-mode` (Redis `grok:config`). `NextForMode()` dispatches by mode. Sticky map + 30min TTL janitor. `x-session-id`/`x-conversation-id`/`x-chat-id` header pins conversation. Content-hash = FNV-1a(model + first system message). Hybrid = 3-key bucket + sticky within bucket.
 - **Grok billing sync:** `GET /v1/billing?format=credits` every 5min (`GrokBillingSyncWorker`). 8 fields persisted (periodStart/End/Type, onDemandCap/Used, prepaidBalance, unifiedBilling). `POST /accounts/billing/sync` manual trigger. Weekly period rollover auto-resets usage counters.
 - **Grok usage tracking:** Per-account cumulative tokens from response `usage` field. `RecordUsage()` non-blocking Redis persist. `GROK_FREE_TIER_QUOTA=1M`. Dashboard: 'tokens_used / 1M (pct%)'.

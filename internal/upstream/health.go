@@ -190,6 +190,7 @@ type HealthChecker struct {
 	Grok   *UpstreamHealth
 	CB     *UpstreamHealth
 	FB     *UpstreamHealth
+	Ali    *UpstreamHealth
 	grokAM *GrokAccountManager
 	cbKM   *CBKeyManager
 }
@@ -200,6 +201,7 @@ func NewHealthChecker(grokAM *GrokAccountManager, cbKM *CBKeyManager) *HealthChe
 		Grok:   NewUpstreamHealth("grok"),
 		CB:     NewUpstreamHealth("codebuddy"),
 		FB:     NewUpstreamHealth("freebuff"),
+		Ali:    NewUpstreamHealth("alibaba"),
 		grokAM: grokAM,
 		cbKM:   cbKM,
 	}

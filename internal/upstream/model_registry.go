@@ -7,6 +7,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -29,10 +30,10 @@ import (
 //     returns grok-4.5 + reasoning_efforts[] + context_window.
 
 const (
-	fbModelsReleaseURL      = "https://github.com/pingmike2/freebuff2api-wokers/releases/latest/download/freebuff-models.json"
-	modelRegistryRefresh    = 6 * time.Hour
-	modelRegistryFetchTo    = 15 * time.Second
-	modelRegistryMaxBody    = 1 << 20 // 1MB
+	fbModelsReleaseURL   = "https://github.com/pingmike2/freebuff2api-wokers/releases/latest/download/freebuff-models.json"
+	modelRegistryRefresh = 6 * time.Hour
+	modelRegistryFetchTo = 15 * time.Second
+	modelRegistryMaxBody = 1 << 20 // 1MB
 )
 
 // grokModelEntry is one fetched Grok model entry from upstream /v1/models.
@@ -42,15 +43,27 @@ type grokModelEntry struct {
 	ReasoningEfforts []string `json:"-"`
 }
 
+// AlibabaModelInfo is one fetched DashScope model entry (from /api/v1/models).
+type AlibabaModelInfo struct {
+	Gateway   string `json:"gateway"`  // ali/<upstream>
+	Upstream  string `json:"upstream"` // bare model id (e.g. qwen3.7-flash)
+	Name      string `json:"name"`     // brand label (e.g. Qwen3.7-Flash)
+	Reasoning bool   `json:"reasoning"`
+	Quota     int64  `json:"quota"` // free-tier token limit (0 = none)
+}
+
 // modelRegistry holds the runtime model lists (mutex-protected).
 type modelRegistry struct {
 	sync.RWMutex
-	fb         []FreebuffModelConfig
-	fbSource   string
-	fbSyncedAt time.Time
-	grok       []grokModelEntry
-	grokSource string
+	fb           []FreebuffModelConfig
+	fbSource     string
+	fbSyncedAt   time.Time
+	grok         []grokModelEntry
+	grokSource   string
 	grokSyncedAt time.Time
+	ali          []AlibabaModelInfo
+	aliSource    string
+	aliSyncedAt  time.Time
 }
 
 var modelReg modelRegistry
@@ -159,6 +172,12 @@ func parseFBModelsJSON(body []byte) ([]FreebuffModelConfig, string, string, erro
 		if parts := strings.SplitN(id, "/", 2); len(parts) == 2 {
 			short = parts[1]
 		}
+		if !validModelID(id) || !validModelID(short) {
+			// Upstream-controlled id from a third-party GitHub release —
+			// drop anything outside a safe charset (fail-closed).
+			slog.Warn("fb model id rejected", "module", "fb-registry", "model", id)
+			continue
+		}
 		gwID := "fb/" + short
 		// Reasoning heuristic (JSON has no reasoning field): deepseek* + GLM
 		reasoning := strings.HasPrefix(id, "deepseek/") || id == "z-ai/glm-5.2"
@@ -207,8 +226,8 @@ func RefreshGrokModels(grokAM *GrokAccountManager) error {
 
 	var data struct {
 		Data []struct {
-			ID              string `json:"id"`
-			ContextWindow   int    `json:"context_window"`
+			ID               string `json:"id"`
+			ContextWindow    int    `json:"context_window"`
 			ReasoningEfforts []struct {
 				ID string `json:"id"`
 			} `json:"reasoning_efforts"`
@@ -278,6 +297,191 @@ func GrokModelsWorker(ctx context.Context, grokAM *GrokAccountManager) {
 		case <-ticker.C:
 			if err := RefreshGrokModels(grokAM); err != nil {
 				slog.Warn("grok models refresh failed", "module", "model-registry", "error", err)
+			}
+		}
+	}
+}
+
+// ============================================================================
+// ALIBABA (DashScope) MODEL REGISTRY
+// ============================================================================
+// Source: GET /api/v1/models (authenticated with a live sk-ws-* key) — returns
+// the full model table {model, name, description} paginated 100/page (~241).
+// We keep only LLM/chat models (qwen/deepseek/glm/kimi families), skipping
+// non-chat products (video/image/audio/embedding/realtime). Reasoning is a
+// best-effort heuristic on the model id. Falls back to the static
+// alibabaModelConfigs list when the registry is empty.
+
+const (
+	aliModelsURL      = "https://dashscope-intl.aliyuncs.com/api/v1/models"
+	aliModelsPageSize = 100
+)
+
+// GetAliModels returns the dynamic Alibaba model list, falling back to the
+// static alibabaModelConfigs when the registry is empty.
+func GetAliModels() []AlibabaModelInfo {
+	modelReg.RLock()
+	defer modelReg.RUnlock()
+	if len(modelReg.ali) > 0 {
+		return modelReg.ali
+	}
+	var out []AlibabaModelInfo
+	for _, c := range alibabaModelConfigs {
+		out = append(out, AlibabaModelInfo{
+			Gateway:   c.Gateway,
+			Upstream:  c.Upstream,
+			Name:      c.Upstream,
+			Reasoning: c.Reasoning,
+			Quota:     aliQuotaLimit(c.Upstream),
+		})
+	}
+	return out
+}
+
+// AliModelsInfo returns the registry source label + last sync time (dashboard).
+func AliModelsInfo() (source string, syncedAt time.Time, count int) {
+	modelReg.RLock()
+	defer modelReg.RUnlock()
+	return modelReg.aliSource, modelReg.aliSyncedAt, len(modelReg.ali)
+}
+
+// RefreshAliModels fetches + filters the DashScope model list via a live key
+// from the pool. Returns an error (registry unchanged) on any failure.
+func RefreshAliModels(am *AlibabaKeyManager) error {
+	if am == nil || am.Len() == 0 {
+		return fmt.Errorf("ali models: no keys available")
+	}
+	acc, err := am.Next()
+	if err != nil {
+		return fmt.Errorf("ali models: %w", err)
+	}
+
+	client := &http.Client{Timeout: modelRegistryFetchTo}
+	var entries []AlibabaModelInfo
+	for page := 1; page <= 4; page++ {
+		url := fmt.Sprintf("%s?page_no=%d&page_size=%d", aliModelsURL, page, aliModelsPageSize)
+		req, err := http.NewRequest(http.MethodGet, url, nil)
+		if err != nil {
+			return err
+		}
+		req.Header.Set("Authorization", "Bearer "+acc.Key)
+		req.Header.Set("User-Agent", "foxrouters/1.6.13")
+		resp, err := client.Do(req)
+		if err != nil {
+			return fmt.Errorf("ali models fetch p%d: %w", page, err)
+		}
+		if resp.StatusCode != http.StatusOK {
+			resp.Body.Close()
+			return fmt.Errorf("ali models fetch p%d: status %d", page, resp.StatusCode)
+		}
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, modelRegistryMaxBody))
+		resp.Body.Close()
+
+		var data struct {
+			Output struct {
+				Total  int `json:"total"`
+				Models []struct {
+					Model       string `json:"model"`
+					Name        string `json:"name"`
+					Description string `json:"description"`
+				} `json:"models"`
+			} `json:"output"`
+		}
+		if err := json.Unmarshal(body, &data); err != nil {
+			return fmt.Errorf("ali models parse p%d: %w", page, err)
+		}
+		for _, m := range data.Output.Models {
+			if !aliIsChatModel(m.Model) {
+				continue
+			}
+			if aliZeroQuotaModel(m.Model) {
+				continue // no free tier — don't expose (would 403 at runtime)
+			}
+			if !validModelID(m.Model) {
+				// Upstream-controlled string flowing into /v1/models +
+				// dashboard — drop anything that isn't a safe charset.
+				slog.Warn("ali model id rejected", "module", "ali-registry", "model", m.Model)
+				continue
+			}
+			entries = append(entries, AlibabaModelInfo{
+				Gateway:   "ali/" + m.Model,
+				Upstream:  m.Model,
+				Name:      m.Name,
+				Reasoning: aliModelReasoning(m.Model),
+				Quota:     aliQuotaLimit(m.Model),
+			})
+		}
+		if page*aliModelsPageSize >= data.Output.Total {
+			break
+		}
+	}
+	if len(entries) == 0 {
+		return fmt.Errorf("ali models: no chat models after filter")
+	}
+
+	modelReg.Lock()
+	modelReg.ali = entries
+	modelReg.aliSource = "dashscope-intl /api/v1/models"
+	modelReg.aliSyncedAt = time.Now()
+	modelReg.Unlock()
+
+	slog.Info("ali models refreshed", "module", "model-registry", "count", len(entries))
+	return nil
+}
+
+// validModelID enforces a strict charset for model ids sourced from
+// third-party registries (GitHub releases, DashScope) before they flow into
+// /v1/models and the dashboard. Anything else is dropped (fail-closed).
+var modelIDRe = regexp.MustCompile(`^[A-Za-z0-9._/\-]{1,80}$`)
+
+func validModelID(id string) bool {
+	return modelIDRe.MatchString(id)
+}
+
+// aliIsChatModel reports whether a DashScope model id is an LLM/chat model
+// we want to expose (vs video/image/audio/embedding/realtime products).
+func aliIsChatModel(id string) bool {
+	if !strings.HasPrefix(id, "qwen") && !strings.HasPrefix(id, "deepseek") &&
+		!strings.HasPrefix(id, "glm") && !strings.HasPrefix(id, "kimi") {
+		return false
+	}
+	low := strings.ToLower(id)
+	for _, skip := range []string{"realtime", "embedding", "t2v", "i2v", "r2v", "video",
+		"image", "audio", "asr", "tts", "captioner", "wan", "happyhorse"} {
+		if strings.Contains(low, skip) {
+			return false
+		}
+	}
+	return true
+}
+
+// aliModelReasoning is a best-effort heuristic: reasoning-capable families
+// (max/plus/deepseek/glm/kimi/thinking/omni/preview) → true.
+func aliModelReasoning(id string) bool {
+	low := strings.ToLower(id)
+	for _, yes := range []string{"max", "plus", "deepseek", "glm", "kimi", "thinking", "omni", "preview", "coder-32b", "long"} {
+		if strings.Contains(low, yes) {
+			return true
+		}
+	}
+	return false
+}
+
+// AliModelsWorker refreshes the DashScope model list every 6h. Uses a live key
+// from the pool; on failure keeps the current list and retries next tick.
+func AliModelsWorker(ctx context.Context, aliAM *AlibabaKeyManager) {
+	if err := RefreshAliModels(aliAM); err != nil {
+		slog.Warn("ali models initial refresh failed", "module", "model-registry", "error", err)
+	}
+	ticker := time.NewTicker(modelRegistryRefresh)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if err := RefreshAliModels(aliAM); err != nil {
+				slog.Warn("ali models refresh failed", "module", "model-registry", "error", err)
 			}
 		}
 	}

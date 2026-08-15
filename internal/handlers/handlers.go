@@ -61,13 +61,17 @@ func HandleHealthMinimal() gin.HandlerFunc {
 }
 
 // HandleHealth reports overall status + (when authed) per-upstream telemetry.
-func HandleHealth(grokAM *upstream.GrokAccountManager, cbKM *upstream.CBKeyManager, fbAM *upstream.FreebuffAccountManager, hc *upstream.HealthChecker, am *auth.Manager, sessions *auth.SessionStore) gin.HandlerFunc {
+func HandleHealth(grokAM *upstream.GrokAccountManager, cbKM *upstream.CBKeyManager, fbAM *upstream.FreebuffAccountManager, aliAM *upstream.AlibabaKeyManager, hc *upstream.HealthChecker, am *auth.Manager, sessions *auth.SessionStore) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		grokStats := hc.Grok.Stats()
 		cbStats := hc.CB.Stats()
 		var fbStats map[string]any
 		if hc.FB != nil {
 			fbStats = hc.FB.Stats()
+		}
+		var aliStats map[string]any
+		if hc.Ali != nil {
+			aliStats = hc.Ali.Stats()
 		}
 
 		// Overall status: unhealthy if any circuit is open
@@ -79,6 +83,11 @@ func HandleHealth(grokAM *upstream.GrokAccountManager, cbKM *upstream.CBKeyManag
 		}
 		if fbStats != nil {
 			if fbCircuit, ok := fbStats["circuit_state"].(string); ok && fbCircuit == "open" {
+				overall = "degraded"
+			}
+		}
+		if aliStats != nil {
+			if aliCircuit, ok := aliStats["circuit_state"].(string); ok && aliCircuit == "open" {
 				overall = "degraded"
 			}
 		}
@@ -127,6 +136,7 @@ func HandleHealth(grokAM *upstream.GrokAccountManager, cbKM *upstream.CBKeyManag
 				"grok":      grokStats,
 				"codebuddy": cbStats,
 				"freebuff":  fbStats,
+				"alibaba":   aliStats,
 			},
 			"grok_accounts": grokAM.Len(),
 			"grok_active": func() int {
@@ -172,7 +182,17 @@ func HandleHealth(grokAM *upstream.GrokAccountManager, cbKM *upstream.CBKeyManag
 				}
 				return active
 			}(),
-			"fb_accounts": fbAM.Len(),
+			"fb_accounts":  fbAM.Len(),
+			"ali_accounts": aliAM.Len(),
+			"ali_keys_active": func() int {
+				active := 0
+				for _, k := range aliAM.ListAccounts() {
+					if d, _ := k["disabled"].(bool); !d {
+						active++
+					}
+				}
+				return active
+			}(),
 			"fb_tier_full": func() int {
 				count := 0
 				for _, a := range fbAM.ListAccounts() {

@@ -108,6 +108,15 @@
           <div class="stat-sub" id="fbQuota"></div>
         </div>
         <div class="stat-card">
+          <div class="stat-label">Alibaba Keys</div>
+          <div class="stat-value-row">
+            <div class="stat-value" id="aliCount">—</div>
+            <span class="stat-delta" id="aliDelta"></span>
+          </div>
+          <div class="stat-bar" id="aliBar"><div class="stat-bar-seg used" id="aliBarUsed" style="width:0%"></div><div class="stat-bar-seg rest" id="aliBarRest" style="width:0%"></div></div>
+          <div class="stat-sub" id="aliActive"></div>
+        </div>
+        <div class="stat-card">
           <div class="stat-label">Models</div>
           <div class="stat-value" id="models">—</div>
           <div class="stat-sub">available</div>
@@ -313,6 +322,9 @@
             <button class="btn-ghost" id="fbOAuthBtn" onclick="showFBOAuthModal()" style="padding:5px 12px;font-size:12px;display:none">+ Add OAuth</button>
             <button class="btn-ghost" id="fbRefreshBtn" onclick="loadFBAccounts()" style="padding:5px 12px;font-size:12px;display:none">Refresh</button>
             <button class="btn-ghost" id="fbStreakBtn" onclick="runFBStreakCheckin()" style="padding:5px 12px;font-size:12px;display:none">Streak check-in</button>
+            <button class="btn-ghost" id="aliAddBtn" onclick="showAddAliModal()" style="padding:5px 12px;font-size:12px;display:none">+ Add Key</button>
+            <button class="btn-ghost" id="aliBulkBtn" onclick="showBulkAliModal()" style="padding:5px 12px;font-size:12px;display:none">Bulk Import</button>
+            <button class="btn-ghost" id="aliRefreshBtn" onclick="loadAliAccounts()" style="padding:5px 12px;font-size:12px;display:none">Refresh</button>
           </div>
         </div>
         <!-- CB selector mode (routing strategy for prompt-cache locality) -->
@@ -373,6 +385,22 @@
               </tr></thead>
               <tbody id="fbBody">
                 <tr><td colspan="7" style="text-align:center;padding:24px;color:var(--text-tertiary);font-size:13px">No Freebuff tokens. Click "+ Add Token" to import.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+        <!-- Alibaba (DashScope) panel -->
+        <div id="aliPanel" style="display:none;padding:16px">
+          <p style="font-size:13px;color:var(--text-tertiary);margin-bottom:12px;line-height:1.6">
+            Alibaba Cloud Model Studio (DashScope) API keys. Models: <code style="font-family:var(--mono);color:var(--text-secondary);background:var(--bg-elevated);padding:1px 5px;border-radius:3px;font-size:12px">ali/qwen3.8-max</code>, <code style="font-family:var(--mono);color:var(--text-secondary);background:var(--bg-elevated);padding:1px 5px;border-radius:3px;font-size:12px">ali/deepseek-v4-flash</code>, <code style="font-family:var(--mono);color:var(--text-secondary);background:var(--bg-elevated);padding:1px 5px;border-radius:3px;font-size:12px">ali/glm-5.2</code>, <code style="font-family:var(--mono);color:var(--text-secondary);background:var(--bg-elevated);padding:1px 5px;border-radius:3px;font-size:12px">ali/kimi-k2.7-code</code>.
+          </p>
+          <div class="tbl-scroll" style="max-height:500px">
+            <table class="tbl">
+              <thead><tr>
+                <th>Key</th><th>Email</th><th>Tokens In</th><th>Tokens Out</th><th>Requests</th><th>Status</th><th>Actions</th>
+              </tr></thead>
+              <tbody id="aliBody">
+                <tr><td colspan="7" style="text-align:center;padding:24px;color:var(--text-tertiary);font-size:13px">No Alibaba keys. Click "+ Add Key" to import.</td></tr>
               </tbody>
             </table>
           </div>
@@ -985,7 +1013,7 @@
         <div class="panel-head">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><polygon points="10 9 15 12 10 15 10 9"/></svg>
           <h3>Media Studio</h3>
-          <span class="head-meta" id="mediaPanelMeta">Grok free tier · image gen/edit 5 per akun · video 2 per akun · lazy SSO + rotate</span>
+          <span class="head-meta" id="mediaPanelMeta">Alibaba DashScope · qwen-image / wan · no SSO, no Turnstile</span>
         </div>
 
         <div style="display:flex;gap:8px;padding:12px 16px 0;border-bottom:1px solid var(--border-strong)">
@@ -1036,7 +1064,7 @@
           </div>
 
           <div id="mcMessages" style="background:var(--bg);border:1px solid var(--border-strong);border-radius:var(--radius-sm);padding:12px;min-height:180px;max-height:300px;overflow-y:auto;display:flex;flex-direction:column;gap:8px;font-size:12px">
-            <div style="color:var(--text-tertiary);padding:6px 0">Describe what you want to create — the LLM turns it into an optimized prompt for Grok Imagine. Keep chatting to refine; the last assistant reply becomes the image prompt.</div>
+            <div style="color:var(--text-tertiary);padding:6px 0">Describe what you want to create — the LLM turns it into an optimized prompt for Qwen-Image (Alibaba DashScope). Keep chatting to refine; the last assistant reply becomes the image prompt.</div>
           </div>
           <div style="background:var(--bg);border:1px solid var(--border-strong);border-radius:var(--radius-sm);padding:12px;display:grid;gap:8px">
             <div style="font-size:11px;color:var(--text-tertiary)">Current image prompt (last LLM reply)</div>
@@ -1060,14 +1088,30 @@
             <label style="font-size:11px;color:var(--text-tertiary);display:block;margin-bottom:5px">Prompt</label>
             <textarea id="mgPrompt" rows="3" spellcheck="false" placeholder="a tiny red panda wearing sunglasses, flat vector illustration" style="width:100%;background:var(--bg);border:1px solid var(--border-strong);border-radius:var(--radius-sm);padding:9px 11px;font-size:12px;font-family:var(--mono);color:var(--text-primary);outline:none;resize:vertical"></textarea>
           </div>
-          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px">
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:12px">
+            <div>
+              <label style="font-size:11px;color:var(--text-tertiary);display:block;margin-bottom:5px">Model</label>
+              <select id="mgModel" style="width:100%;background:var(--bg);border:1px solid var(--border-strong);border-radius:var(--radius-sm);padding:8px 10px;font-size:12px;color:var(--text-primary);outline:none">
+                <option value="qwen-image-3.0">qwen-image-3.0</option>
+                <option value="qwen-image-3.0-pro">qwen-image-3.0-pro</option>
+                <option value="qwen-image-2.0-pro">qwen-image-2.0-pro</option>
+                <option value="qwen-image-max">qwen-image-max</option>
+                <option value="qwen-image-plus">qwen-image-plus</option>
+                <option value="z-image-turbo">z-image-turbo</option>
+                <option value="wan2.7-image-pro">wan2.7-image-pro</option>
+                <option value="wan2.7-image">wan2.7-image</option>
+                <option value="wan2.6-image">wan2.6-image</option>
+                <option value="wan2.6-t2i">wan2.6-t2i</option>
+                <option value="wan2.2-t2i-plus">wan2.2-t2i-plus</option>
+              </select>
+            </div>
             <div>
               <label style="font-size:11px;color:var(--text-tertiary);display:block;margin-bottom:5px">Aspect ratio</label>
               <select id="mgAspect" style="width:100%;background:var(--bg);border:1px solid var(--border-strong);border-radius:var(--radius-sm);padding:8px 10px;font-size:12px;color:var(--text-primary);outline:none">
-                <option value="1:1">1:1 (square)</option>
-                <option value="3:2">3:2 (landscape)</option>
-                <option value="2:3">2:3 (portrait)</option>
-                <option value="16:9">16:9 (widescreen)</option>
+                <option value="1024*1024">1:1 (square)</option>
+                <option value="1344*768">3:2 (landscape)</option>
+                <option value="768*1344">2:3 (portrait)</option>
+                <option value="1280*720">16:9 (widescreen)</option>
               </select>
             </div>
             <div>
@@ -1102,7 +1146,19 @@
             </select>
             <button id="meAiBtn" class="btn-ghost" onclick="mediaAiCompose()" title="LLM looks at the image (vision), then writes a precise preservation edit prompt" style="padding:8px 12px;font-size:11px">✨ AI Compose</button>
           </div>
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;align-items:end">
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;align-items:end">
+            <div>
+              <label style="font-size:11px;color:var(--text-tertiary);display:block;margin-bottom:5px">Model</label>
+              <select id="meModel" style="width:100%;background:var(--bg);border:1px solid var(--border-strong);border-radius:var(--radius-sm);padding:8px 10px;font-size:12px;color:var(--text-primary);outline:none">
+                <option value="qwen-image-edit">qwen-image-edit</option>
+                <option value="qwen-image-edit-plus">qwen-image-edit-plus</option>
+                <option value="qwen-image-edit-max">qwen-image-edit-max</option>
+                <option value="wan2.7-image-pro">wan2.7-image-pro (edit)</option>
+                <option value="wan2.7-image">wan2.7-image (edit)</option>
+                <option value="wan2.6-image">wan2.6-image (edit)</option>
+                <option value="wan2.6-t2i">wan2.6-t2i (edit)</option>
+              </select>
+            </div>
             <div>
               <label style="font-size:11px;color:var(--text-tertiary);display:block;margin-bottom:5px">Source image</label>
               <input type="file" id="meFile" accept="image/*" style="font-size:12px;color:var(--text-tertiary);width:100%" />
@@ -1125,7 +1181,14 @@
             <label style="font-size:11px;color:var(--text-tertiary);display:block;margin-bottom:5px">Prompt</label>
             <textarea id="mvPrompt" rows="3" spellcheck="false" placeholder="a cat walking through a neon-lit city street, cinematic" style="width:100%;background:var(--bg);border:1px solid var(--border-strong);border-radius:var(--radius-sm);padding:9px 11px;font-size:12px;font-family:var(--mono);color:var(--text-primary);outline:none;resize:vertical"></textarea>
           </div>
-          <div style="display:flex;gap:8px;align-items:center">
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+            <select id="mvModel" style="background:var(--bg);border:1px solid var(--border-strong);border-radius:var(--radius-sm);padding:9px 10px;font-size:12px;color:var(--text-primary);outline:none">
+              <option value="wan2.6-t2v">wan2.6-t2v</option>
+              <option value="wan2.7-t2v">wan2.7-t2v</option>
+              <option value="wan2.2-t2v-plus">wan2.2-t2v-plus</option>
+              <option value="wan2.1-t2v-turbo">wan2.1-t2v-turbo</option>
+              <option value="wan3.0-video">wan3.0-video</option>
+            </select>
             <button class="btn-primary" onclick="mediaVideo()" style="padding:9px 16px;border-radius:var(--radius-sm);background:var(--brand);color:#000;border:none;font-size:12px;font-weight:600;cursor:pointer">Generate Video</button>
             <span id="mvProgress" style="font-size:12px;color:var(--text-tertiary)"></span>
           </div>

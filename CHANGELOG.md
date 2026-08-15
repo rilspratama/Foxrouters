@@ -2,9 +2,35 @@
 
 **Service:** Docker Compose (`foxrouters` container) · port **20130** · image local / GHCR  
 **Repo:** `/root/nexus-workspace/foxrouters/`  
-**Live version:** `const Version` in `main.go` / image tag (currently **v1.6.7**, working tree)
+**Live version:** `const Version` in `main.go` / image tag (currently **v1.6.13-audit**, working tree)
 
 Policy: **test (`go test -race`) before build/restart**. Secrets only via `.gateway.env` (gitignored).
+
+---
+
+## v1.6.13-audit (dev working tree) — Alibaba provider + per-key quota + visibility filter + security audit fixes (2026-08-15)
+
+### Added
+- **Alibaba Cloud Model Studio provider (4th upstream)** — `ali/` prefix → `dashscope-intl.aliyuncs.com/compatible-mode/v1`. Plain OpenAI-compatible, `sk-ws-*` keys, no session lifecycle. `internal/upstream/alibaba.go` (~810 lines) + handlers + routes. 32 keys imported to prod.
+- **Dynamic Alibaba model registry** — `AliModelsWorker` (6h refresh, gated `WORKERS_DISABLED`) + `POST /models/refresh`. 108+ chat models from `/api/v1/models`; zero-quota models excluded (`glm-5.2-fast-preview`, `qwen-plus-character-ja`, `qwen-plus-2025-01-25`, `ZHIPU/GLM-5.2`); static fallback 6.
+- **Per-key free-tier quota tracker** — `ali_quota.go`: static 1M tokens/model baseline map × `ActiveKeyCount()` = dashboard limit (`used / 29M · N keys`). `RecordUsageModel` → Redis `ali:model_usage:<model>` (tokens_in/out, requests). `GET /ali/models/usage` (admin). Dashboard **Free Quota** column with mini progress bar (green <60% / orange <90% / red ≥90%).
+- **Model visibility filter** — `filterModelsByKey` in `proxy.go`: `/v1/models` + `/v1/models/:id` filtered per-key by `allowed_models` whitelist (glob). Unknown keys fail CLOSED (empty list); no-whitelist keys + dashboard cookie session see full catalog.
+
+### Security (audit #1 deleg_8152cf75 + re-audit #2 deleg_3f349570 — READ-ONLY reports, fixes verified)
+- **Key hash flow** — `/ali/accounts` returns only `key_masked` + `key_hash` (SHA-256 24 hex); full `sk-ws-*` never leaves the server. Key actions (test/disable/enable/delete) resolve hash→key server-side; unknown ids → 404 (no credential-validation oracle).
+- **No secrets in URL/logs** — `DELETE /ali/accounts/:key` replaced by `POST /ali/accounts/delete` body.
+- **TOCTOU panic fix** — `AlibabaKeyManager.Next()` snapshots the pool under one RLock (concurrent `RemoveAccount` could shrink the slice → index out of range → gateway crash).
+- **`am.idx` race** — plain read + atomic write → `atomic.LoadUint64` + `atomic.AddUint64`.
+- **`validModelID` allowlist** — registry ids (Ali + Freebuff, third-party sourced) validated `^[A-Za-z0-9._/\-]{1,80}$`, drop fail-closed.
+- **`aliUsageKey` sanitize** — `[a-z0-9._-]` whitelist, no Redis keyspace pollution.
+- **`stripDateSuffix` regex** — `-\d{4}(-\d{2}(-\d{2})?)?$` (was `LastIndex("-20")`), zero-quota checked before + after strip.
+- **Bulk import cap 500/batch** + email preserved from api_keys.txt format; generic errors (no `err.Error()` passthrough).
+- **Nil-guards** on `AliModelUsageList`; `slog.Warn` on Redis read failure; `Remaining` clamped ≥0.
+
+### Verified
+- `go test -race ./...` ALL PASS, `go vet` clean, `node --check` OK.
+- Live (dev :20131 + prod :20130): 109 models, chat `ali/qwen3.7-flash` OK, quota `167 / 29.0M`, key test via hash OK, fake key → 404, bulk 510→500 truncated, log zero "sk-ws-" hits.
+- Audit reports: `SECURITY_AUDIT_2026-08-15.md` (2 rounds), `docs/cb-audit-2026-08-14.md`.
 
 ---
 

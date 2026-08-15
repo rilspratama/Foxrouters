@@ -189,6 +189,11 @@ func main() {
 	if err := fbAM.LoadFromRedis(); err != nil {
 		slog.Warn("Freebuff LoadFromRedis failed, starting empty", "module", "freebuff", "error", err)
 	}
+
+	aliAM := upstream.NewAlibabaKeyManager(db)
+	if err := aliAM.LoadFromRedis(); err != nil {
+		slog.Warn("Alibaba LoadFromRedis failed, starting empty", "module", "alibaba", "error", err)
+	}
 	upstream.LoadSelectorMode(db)     // restore persisted CB selector mode (rr|sticky|content-hash|hybrid)
 	upstream.LoadGrokSelectorMode(db) // restore persisted Grok selector mode
 
@@ -274,6 +279,7 @@ func main() {
 		go upstream.FBStreakWorker(workerCtx, fbAM, upstream.FreebuffStreakInterval())
 		go upstream.FbModelsWorker(workerCtx)
 		go upstream.GrokModelsWorker(workerCtx, grokAM)
+		go upstream.AliModelsWorker(workerCtx, aliAM)
 	}
 	// Snapshot pool sizes into Prometheus gauges every 10s. Cheap RLock walk;
 	// keeps activeKeys/disabledKeys eventually consistent without touching the
@@ -325,7 +331,7 @@ func main() {
 	loginLimiter := newLoginLimiter()
 	r.POST("/login", loginLimiter.middleware(), handlers.HandleLogin(authMgr, sessions))
 	r.POST("/logout", csrfGuard(), handlers.HandleLogout(sessions))
-	r.GET("/health", handlers.HandleHealth(grokAM, cbKM, fbAM, hc, authMgr, sessions))
+	r.GET("/health", handlers.HandleHealth(grokAM, cbKM, fbAM, aliAM, hc, authMgr, sessions))
 	r.HEAD("/health", handlers.HandleHealthMinimal())
 	// Prometheus scrape endpoint — admin only (exposes pool sizes, traffic
 	// patterns, circuit state). External scrapers should authenticate via
@@ -514,11 +520,21 @@ func main() {
 	r.POST("/fb/import", csrfGuard(), adminAuth, handlers.HandleFBImport(fbAM))
 	r.POST("/fb/import/bulk", csrfGuard(), adminAuth, handlers.HandleFBImportBulk(fbAM))
 	r.POST("/fb/quota/sync", csrfGuard(), adminAuth, handlers.HandleFBQuotaSync(fbAM))
-	r.POST("/models/refresh", csrfGuard(), adminAuth, handlers.HandleModelsRefresh(grokAM))
+	r.POST("/models/refresh", csrfGuard(), adminAuth, handlers.HandleModelsRefresh(grokAM, aliAM))
 	r.GET("/fb/accounts", adminAuth, handlers.HandleFBAccounts(fbAM))
 	r.DELETE("/fb/accounts/:token", csrfGuard(), adminAuth, handlers.HandleFBDeleteAccount(fbAM))
 	r.POST("/fb/oauth/device/start", csrfGuard(), adminAuth, handlers.HandleFBDeviceStart(fbAM))
 	r.GET("/fb/oauth/device/poll", adminAuth, handlers.HandleFBDevicePoll(fbAM))
+
+	// Alibaba (DashScope) keys
+	r.POST("/ali/import", csrfGuard(), adminAuth, handlers.HandleAliImport(aliAM))
+	r.POST("/ali/import/bulk", csrfGuard(), adminAuth, handlers.HandleAliImportBulk(aliAM))
+	r.GET("/ali/accounts", adminAuth, handlers.HandleAliAccounts(aliAM))
+	r.GET("/ali/models/usage", adminAuth, handlers.HandleAliModelUsage(aliAM))
+	r.POST("/ali/accounts/delete", csrfGuard(), adminAuth, handlers.HandleAliDeleteAccount(aliAM))
+	r.POST("/ali/keys/disable", csrfGuard(), adminAuth, handlers.HandleAliDisable(aliAM))
+	r.POST("/ali/keys/enable", csrfGuard(), adminAuth, handlers.HandleAliEnable(aliAM))
+	r.POST("/ali/keys/test", csrfGuard(), adminAuth, handlers.HandleAliTest(aliAM))
 	r.POST("/cleanup/disabled", csrfGuard(), adminAuth, handlers.HandleCleanupDisabled(grokAM, cbKM))
 	r.POST("/cleanup/banned", csrfGuard(), adminAuth, handlers.HandleCleanupBanned(grokAM))
 	r.GET("/history", adminAuth, handlers.HandleHistory(db))
@@ -566,26 +582,28 @@ func main() {
 	// handlers.AnthropicAuthMiddleware (rewrites x-api-key → Authorization: Bearer).
 	r.Any("/v1/*path", func(c *gin.Context) {
 		if c.Request.URL.Path == "/v1/messages" && c.Request.Method == http.MethodPost {
-			handlers.HandleMessages(grokAM, cbKM, fbAM, hc, authMgr, customReg, comboReg)(c)
+			handlers.HandleMessages(grokAM, cbKM, fbAM, aliAM, hc, authMgr, customReg, comboReg)(c)
 			return
 		}
 		if c.Request.URL.Path == "/v1/images/generations" && c.Request.Method == http.MethodPost {
-			handlers.HandleGrokImages(grokAM)(c)
+			// Media Studio — Alibaba DashScope (qwen-image / wan). Grok console
+			// SSO+DPoP+Turnstile path removed (see grok_images.go — legacy).
+			handlers.HandleAliImages(aliAM)(c)
 			return
 		}
 		if c.Request.URL.Path == "/v1/images/edits" && c.Request.Method == http.MethodPost {
-			handlers.HandleGrokImagesEdit(grokAM)(c)
+			handlers.HandleAliImagesEdit(aliAM)(c)
 			return
 		}
 		if c.Request.URL.Path == "/v1/videos/generations" && c.Request.Method == http.MethodPost {
-			handlers.HandleGrokVideoCreate(grokAM)(c)
+			handlers.HandleAliVideoCreate(aliAM)(c)
 			return
 		}
 		if strings.HasPrefix(c.Request.URL.Path, "/v1/videos/") && c.Request.Method == http.MethodGet {
-			handlers.HandleGrokVideoStatus(grokAM)(c)
+			handlers.HandleAliVideoStatus(aliAM)(c)
 			return
 		}
-		proxy.ProxyRequest(grokAM, cbKM, fbAM, hc, authMgr, customReg, comboReg)(c)
+		proxy.ProxyRequest(grokAM, cbKM, fbAM, aliAM, hc, authMgr, customReg, comboReg)(c)
 	})
 
 	r.GET("/", func(c *gin.Context) {

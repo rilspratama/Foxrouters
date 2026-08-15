@@ -1163,7 +1163,7 @@ function mediaTab(t) {
 }
 
 /* ── Chat (LLM prompt engineer) ─────────────────────────────────────────── */
-var MEDIA_SYS_PROMPT = 'You are an expert image prompt engineer for Grok Imagine (xAI image model). ' +
+var MEDIA_SYS_PROMPT = 'You are an expert image prompt engineer for Qwen-Image (Alibaba DashScope image model). ' +
   'The user describes what they want; you convert it into ONE high-quality image generation prompt. ' +
   'Rules: be specific and vivid — subject, style, lighting, composition, mood, color palette, camera/angle, ' +
   'artistic references. 50-120 words. Reply with ONLY the final prompt — no preamble, no markdown, no quotes. ' +
@@ -1183,7 +1183,7 @@ function mediaChatBubble(role, text) {
 function renderMediaChat() {
   var box = document.getElementById('mcMessages');
   // keep the intro hint as the first child
-  box.innerHTML = '<div style="color:var(--text-tertiary);padding:6px 0">Describe what you want to create — the LLM turns it into an optimized prompt for Grok Imagine. Keep chatting to refine; the last assistant reply becomes the image prompt.</div>';
+  box.innerHTML = '<div style="color:var(--text-tertiary);padding:6px 0">Describe what you want to create — the LLM turns it into an optimized prompt for Qwen-Image (Alibaba DashScope). Keep chatting to refine; the last assistant reply becomes the image prompt.</div>';
   mediaChatMsgs.forEach(function (m) { box.appendChild(mediaChatBubble(m.role, m.content)); });
   box.scrollTop = box.scrollHeight;
   // Simple UI hero: show only while the chat is empty
@@ -1441,14 +1441,14 @@ async function mediaGenerate() {
   var prompt = document.getElementById('mgPrompt').value.trim();
   if (!prompt) { out.innerHTML = mediaCard('', '<span style="color:var(--red)">prompt is required</span>'); return; }
   btn.disabled = true;
-  out.innerHTML = mediaCard('', '<span style="color:var(--text-tertiary)">generating… (~10s, lazy SSO if cookie expired)</span>');
+  out.innerHTML = mediaCard('', '<span style="color:var(--text-tertiary)">generating… (~30-60s, DashScope qwen-image-3.0)</span>');
   try {
     var d = await apiFetch('/v1/images/generations', {
       method: 'POST',
       body: JSON.stringify({
-        model: 'grok-imagine-image',
+        model: document.getElementById('mgModel').value || 'qwen-image-3.0',
         prompt: prompt,
-        aspect_ratio: document.getElementById('mgAspect').value,
+        size: document.getElementById('mgAspect').value,
         n: parseInt(document.getElementById('mgN').value, 10) || 1,
         response_format: 'b64_json'
       })
@@ -1461,7 +1461,7 @@ async function mediaGenerate() {
       mediaGalleryAdd(b, prompt);
       return mediaCard('', '<img src="data:image/jpeg;base64,' + b + '" style="max-width:100%;border-radius:8px;border:1px solid var(--border-strong)" />' +
         '<div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap">' +
-        '<a class="btn-ghost" download="grok-image-' + idx + '.jpg" href="data:image/jpeg;base64,' + b + '" style="padding:6px 12px;font-size:11px;text-decoration:none">Download</a>' +
+        '<a class="btn-ghost" download="ali-image-' + idx + '.jpg" href="data:image/jpeg;base64,' + b + '" style="padding:6px 12px;font-size:11px;text-decoration:none">Download</a>' +
         '<button class="btn-ghost" onclick="mediaUseInEdit(' + idx + ')" style="padding:6px 12px;font-size:11px">Send to Edit</button></div>');
     }).join('');
     out.innerHTML = cards;
@@ -1542,7 +1542,7 @@ function mediaFileToB64(file) {
   });
 }
 
-var MEDIA_EDIT_SYS_PROMPT = 'You are an expert image editing prompt engineer for Grok Imagine (xAI image model). ' +
+var MEDIA_EDIT_SYS_PROMPT = 'You are an expert image editing prompt engineer for Qwen-Image (Alibaba DashScope image model). ' +
   'You are shown the CURRENT image plus the user\'s desired change in plain words. ' +
   'Write ONE precise image-edit prompt that: ' +
   '(1) briefly describes what you can SEE in the current image (subject, setting, style, lighting), ' +
@@ -1599,11 +1599,11 @@ async function mediaEditRun() {
   try {
     var d = await apiFetch('/v1/images/edits', {
       method: 'POST',
-      body: JSON.stringify({ model: 'grok-imagine-image', prompt: prompt, image: img })
+      body: JSON.stringify({ model: document.getElementById('meModel').value || 'qwen-image-edit', prompt: prompt, image: img })
     });
     var url = d.data[0].url;
     out.innerHTML = mediaCard('', '<img src="' + url + '" style="max-width:100%;border-radius:8px;border:1px solid var(--border-strong)" />' +
-      '<div style="margin-top:8px"><a class="btn-ghost" download="grok-edit.jpg" href="' + url + '" style="padding:6px 12px;font-size:11px;text-decoration:none">Download</a></div>');
+      '<div style="margin-top:8px"><a class="btn-ghost" download="ali-edit.jpg" href="' + url + '" style="padding:6px 12px;font-size:11px;text-decoration:none">Download</a></div>');
   } catch (e) {
     if (e.message === '__redirect__') return;
     out.innerHTML = mediaCard('', '<span style="color:var(--red)">' + escHtml(e.message) + '</span>');
@@ -1624,10 +1624,10 @@ async function mediaVideo() {
   try {
     var d = await apiFetch('/v1/videos/generations', {
       method: 'POST',
-      body: JSON.stringify({ model: 'grok-imagine-image', prompt: prompt })
+      body: JSON.stringify({ model: document.getElementById('mvModel').value || 'wan2.6-t2v', prompt: prompt })
     });
     var id = d.id;
-    prog.textContent = 'queued (' + id + ') — polling…';
+    prog.textContent = 'queued (' + id + ') — polling… (DashScope wan2.6-t2v, ~30-60s)';
     if (mediaVidTimer) clearInterval(mediaVidTimer);
     mediaVidTimer = setInterval(function () { mediaVideoPoll(id); }, 5000);
   } catch (e) {
@@ -1649,7 +1649,7 @@ async function mediaVideoPoll(id) {
       prog.textContent = '';
       var url = d.data[0].url;
       out.innerHTML = mediaCard('', '<video controls src="' + url + '" style="max-width:100%;border-radius:8px;border:1px solid var(--border-strong)"></video>' +
-        '<div style="margin-top:8px"><a class="btn-ghost" download="grok-video.mp4" href="' + url + '" style="padding:6px 12px;font-size:11px;text-decoration:none">Download</a></div>');
+        '<div style="margin-top:8px"><a class="btn-ghost" download="ali-video.mp4" href="' + url + '" style="padding:6px 12px;font-size:11px;text-decoration:none">Download</a></div>');
     } else {
       prog.textContent = 'status: ' + (d.status || 'pending') + ' · progress: ' + (d.progress || 0) + '%';
     }

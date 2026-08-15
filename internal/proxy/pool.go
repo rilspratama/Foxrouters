@@ -33,8 +33,8 @@ import (
 	"io"
 	"log/slog"
 	"net"
-	nurl "net/url"
 	"net/http"
+	nurl "net/url"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -86,6 +86,7 @@ const (
 	UpstreamGrok      = "grok"
 	UpstreamCodeBuddy = "codebuddy"
 	UpstreamFreebuff  = "freebuff"
+	UpstreamAlibaba   = "alibaba"
 )
 
 // validUpstreams is the set of accepted values in ProxyEntry.Upstreams.
@@ -94,6 +95,7 @@ var validUpstreams = map[string]struct{}{
 	UpstreamGrok:      {},
 	UpstreamCodeBuddy: {},
 	UpstreamFreebuff:  {},
+	UpstreamAlibaba:   {},
 }
 
 // AppliesTo reports whether the entry is scoped to the given upstream. An
