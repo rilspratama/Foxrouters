@@ -111,6 +111,13 @@ func (s *sqliteStore) EnsureSchema(ctx context.Context) error {
 		// on restarts and silently ignored below.
 		`ALTER TABLE request_logs ADD COLUMN cache_hit_pct REAL NOT NULL DEFAULT -1`,
 		`CREATE INDEX IF NOT EXISTS idx_request_logs_timestamp ON request_logs(timestamp DESC)`,
+		// Composite (timestamp DESC, id DESC) — ORDER BY timestamp DESC, id DESC
+		// in GetRecentRequests could not be satisfied by the timestamp-only
+		// index (needed a temp B-tree over ALL rows). On a large DB (21GB prod
+		// incident 2026-08-17) that was 8.9s per query → /history/recent 500
+		// "context deadline exceeded". Composite index makes the ORDER BY
+		// a COVERING INDEX scan → LIMIT N reads only N rows (0.006s).
+		`CREATE INDEX IF NOT EXISTS idx_request_logs_ts_id ON request_logs(timestamp DESC, id DESC)`,
 		`CREATE INDEX IF NOT EXISTS idx_request_logs_model     ON request_logs(model)`,
 		`CREATE INDEX IF NOT EXISTS idx_request_logs_client    ON request_logs(client_key)`,
 
