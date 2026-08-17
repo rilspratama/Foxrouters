@@ -8,6 +8,40 @@ Policy: **test (`go test -race`) before build/restart**. Secrets only via `.gate
 
 ---
 
+## v1.6.16 — selector/cache-temp + 3-round audit fixes (2026-08-17)
+
+### Added
+- **Key-affinity hybrid bucketing** — clients pin to a stable account bucket
+  (rendezvous/HRW hashing over account identity, churn-stable) for prompt-cache
+  locality.
+- **Cache-temperature-aware routing** — per-account×prefix EMA hit-rate
+  tracking (`/debug/cache-temp`); hybrid mode prefers the warmest account for a
+  system prompt. Raw keys masked (per-process HMAC).
+- **Runtime Freebuff relay config** — `GET/PUT /fb/config` (dashboard Freebuff
+  tab) persists to Redis (`fb:config`) and overrides `FREEBUFF_BASE_URL` at
+  runtime, no restart.
+- **`PROXY_TEST_URL` env** — overrides the default egress-IP probe URL
+  (api.ip.fm) used by proxy pool health tests.
+
+### Fixed (3-round opus-5 pre-merge audit)
+- **P0**: Freebuff 429 handler self-deadlock — `SaveAccount` (which takes an
+  internal `RLock` snapshot) was called while holding `acc.mu.Lock()`;
+  non-reentrant RWMutex wedged the whole pool on the first 429.
+- **P2**: SaveAccount data race (snapshot-in-lock + `sync.RWMutex`),
+  api_base validation single choke point (https-only, bare origin, SSRF host
+  deny list, 256-char cap), `/fb/config` persist-first ordering,
+  MarkBanned/AddAccountWithInfo lock-IO + races, unbounded SSE accumulation in
+  `fbStreamToNonStream` (8 MiB ceiling + index/args caps).
+- **P3**: read-only sections now `RLock`, length-safe token masking,
+  dial-time SSRF guard (rebinding-proof), DNS fail-closed + IANA deny list,
+  per-process HMAC key mask, sanitizer-nil one-time warn, non-stream path
+  accumulates streamed `tool_calls`.
+- **History stability**: `request_body` was stored unbounded (20+ GB DB →
+  `/history/recent` 500s under write contention). `bodyString()` now caps each
+  stored request/response body at 1 MiB (`LOG_BODY_CAP_BYTES`) — normal
+  traffic still stored full.
+
+---
 ## v1.6.15 — Freebuff relay support (unreleased, dev)
 
 ### Added

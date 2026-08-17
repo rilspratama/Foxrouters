@@ -40,7 +40,7 @@ services:
       context: .
       args:
         VERSION: v1.6.16
-    image: ghcr.io/rilspratama/foxrouters:v1.6.15-relay
+    image: ghcr.io/rilspratama/foxrouters:v1.6.16
     container_name: foxrouters
     ports:
       - "127.0.0.1:20130:20130"
@@ -64,6 +64,8 @@ services:
       # Turnstile solver lives on the HOST (PM2/bun, port 8742) — reach it via
       # host.docker.internal (host-gateway). Overridable in the Settings page.
       TURNSTILE_SOLVER_URL: "${TURNSTILE_SOLVER_URL:-http://host.docker.internal:8742/cloudflare}"
+      # Cap stored request/response body in SQLite history (default 1 MiB).
+      LOG_BODY_CAP_BYTES: "${LOG_BODY_CAP_BYTES:-1048576}"
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
