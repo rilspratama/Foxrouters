@@ -309,9 +309,10 @@ func ProxyRequest(grokAM *upstream.GrokAccountManager, cbKM *upstream.CBKeyManag
 			return
 		}
 
-		// Rewrite agent identity strings before forwarding to upstream.
-		rewriteAgentIdentity(bodyMap)
-		body, _ = json.Marshal(bodyMap)
+		// NOTE: agent-identity sanitization is NOT applied here (global). It is
+		// wired into ProxyCodeBuddy only, via upstream.AgentIdentitySanitizer —
+		// the filter exists to dodge CodeBuddy's identity moderation, not as
+		// global policy for Grok/Freebuff/Alibaba.
 
 		model, _ := bodyMap["model"].(string)
 		if model == "" {

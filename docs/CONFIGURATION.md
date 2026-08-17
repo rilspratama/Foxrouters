@@ -16,6 +16,7 @@ startup).
 | `CPA_AUTH_DIR` | `./` | Directory scanned for `xai-*.json` Grok credential files at boot. |
 | `GATEWAY_AUTH_DISABLE` | `false` | **Dev only.** When `true`, bypasses auth on all routes. Never enable in production. |
 | `FREEBUFF_DISABLED` | `false` | When `true`, disables the Freebuff provider entirely. |
+| `FREEBUFF_BASE_URL` | `https://www.codebuff.com` | Relay base URL for session/chat/ads/streak/run calls. Set to a Railway/CF Worker relay URL for full-access tier (exit IP not VPN-flagged). Device flow (OAuth login) always hits codebuff.com directly. **Runtime-overridable**: `GET/PUT /fb/config` (dashboard Freebuff tab) persists to Redis (`fb:config`) and wins over this env default after boot. |
 | `COOKIE_SECURE` | `1` | Session cookie `Secure` flag. Set to `0` for dev HTTP (localhost). Default `1` = HTTPS-only. |
 
 > **Do not** commit secrets. Put the `.env` outside the repo or use `chmod 600

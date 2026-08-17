@@ -3,6 +3,7 @@ package upstream
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -10,12 +11,15 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
+	"sort"
 	"strings"
 	"time"
 
+	"foxrouters/internal/db"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 )
@@ -44,11 +48,11 @@ func fbStartDeviceAuth() (*FreebuffDeviceStart, error) {
 	fpID := "gw-" + fbRandomString(12)
 
 	body, _ := json.Marshal(map[string]string{"fingerprintId": fpID})
-	req, _ := http.NewRequest("POST", FREEBUFF_API_BASE+"/api/auth/cli/code", bytes.NewReader(body))
+	req, _ := http.NewRequest("POST", FREEBUFF_DEVICE_BASE+"/api/auth/cli/code", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", "Freebuff-CLI/0.0.142")
 
-	client := &http.Client{Timeout: FREEBUFF_SESSION_TIMEOUT}
+	client := fbHTTPClient(FREEBUFF_SESSION_TIMEOUT)
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("fb device start: %w", err)
@@ -96,10 +100,10 @@ func fbPollDeviceAuth(fingerprintID, fingerprintHash string, expiresAt int64) (*
 	params.Set("fingerprintHash", fingerprintHash)
 	params.Set("expiresAt", fmt.Sprintf("%d", expiresAt))
 
-	req, _ := http.NewRequest("GET", FREEBUFF_API_BASE+"/api/auth/cli/status?"+params.Encode(), nil)
+	req, _ := http.NewRequest("GET", FREEBUFF_DEVICE_BASE+"/api/auth/cli/status?"+params.Encode(), nil)
 	req.Header.Set("User-Agent", "Freebuff-CLI/0.0.142")
 
-	client := &http.Client{Timeout: FREEBUFF_SESSION_TIMEOUT}
+	client := fbHTTPClient(FREEBUFF_SESSION_TIMEOUT)
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("fb device poll: %w", err)
@@ -187,8 +191,8 @@ func parseAuthCode(loginURL string) (string, error) {
 }
 
 func fbProbeMe(token string) (userID, email string, err error) {
-	client := &http.Client{Timeout: 10 * time.Second}
-	req, _ := http.NewRequest("GET", FREEBUFF_API_BASE+FREEBUFF_ME_PATH, nil)
+	client := fbHTTPClient(10 * time.Second)
+	req, _ := http.NewRequest("GET", FreebuffAPIBase()+FREEBUFF_ME_PATH, nil)
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("User-Agent", "Freebuff-CLI/0.0.142")
 	resp, err := client.Do(req)
@@ -236,7 +240,7 @@ func (am *FreebuffAccountManager) TestFreebuffAccount(acc *FreebuffAccount) Cred
 		upstreamModel = "deepseek/deepseek-v4-flash"
 		agentID       = "base2-free-deepseek-flash"
 	)
-	client := &http.Client{Timeout: 90 * time.Second}
+	client := fbHTTPClient(90 * time.Second)
 	start := time.Now()
 
 	// Session (cached, 1hr TTL) + run chain (cached, 10min)
@@ -266,7 +270,7 @@ func (am *FreebuffAccountManager) TestFreebuffAccount(acc *FreebuffAccount) Cred
 	}
 	payload := fbTransform(body, upstreamModel, sess.InstanceID, runID)
 
-	req, err := http.NewRequest("POST", FREEBUFF_API_BASE+FREEBUFF_CHAT_PATH, bytes.NewReader(payload))
+	req, err := http.NewRequest("POST", FreebuffAPIBase()+FREEBUFF_CHAT_PATH, bytes.NewReader(payload))
 	if err != nil {
 		res.Error = "request build: " + err.Error()
 		return res
@@ -509,6 +513,36 @@ func fbInjectEndTurnTool(bodyMap map[string]any) {
 	bodyMap["tools"] = append(tools, endTurn)
 }
 
+// fbHTTPClient returns an http.Client with a dial-time SSRF guard (C2-07):
+// the DialContext Control hook rejects loopback/private/link-local/multicast
+// destination IPs, so a DNS-rebinding attack cannot redirect Freebuff calls
+// (which carry OAuth bearer tokens) to internal addresses AFTER the api_base
+// passed validation. This makes the setter-time host check advisory — the
+// real enforcement is at dial time, which is rebinding-proof.
+func fbHTTPClient(timeout time.Duration) *http.Client {
+	dialer := &net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}
+	return &http.Client{
+		Timeout: timeout,
+		Transport: &http.Transport{
+			DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+				host, _, err := net.SplitHostPort(addr)
+				if err != nil {
+					return nil, err
+				}
+				if ip := net.ParseIP(host); ip != nil && rejectNonPublicIP(ip) {
+					return nil, fmt.Errorf("dial %s blocked: non-public address", addr)
+				}
+				return dialer.DialContext(ctx, network, addr)
+			},
+			ForceAttemptHTTP2:     true,
+			MaxIdleConns:          100,
+			IdleConnTimeout:       90 * time.Second,
+			TLSHandshakeTimeout:   10 * time.Second,
+			ExpectContinueTimeout: 1 * time.Second,
+		},
+	}
+}
+
 func fbRandomString(n int) string {
 	b := make([]byte, n)
 	rand.Read(b)
@@ -546,6 +580,17 @@ func ProxyFreebuff(c *gin.Context, body []byte, bodyMap map[string]any, am *Free
 	upstreamModel := mc.Upstream
 	agentID := mc.Agent
 
+	// Content prefix for cache-temperature routing (model + first system
+	// message — same convention as CB/Grok proxies).
+	sysHash := upstreamModel
+	if msgs, ok := bodyMap["messages"].([]any); ok && len(msgs) > 0 {
+		if first, ok := msgs[0].(map[string]any); ok && first["role"] == "system" {
+			if sc, ok := first["content"].(string); ok {
+				sysHash += "|" + sc
+			}
+		}
+	}
+
 	total := am.Len()
 	reqStart := time.Now()
 
@@ -560,7 +605,7 @@ func ProxyFreebuff(c *gin.Context, body []byte, bodyMap map[string]any, am *Free
 			return
 		}
 
-		acc, err := am.Next(upstreamModel)
+		acc, err := am.NextTemp(upstreamModel, sysHash)
 		if err != nil {
 			lastErr = fmt.Sprintf("next: %v", err)
 			slog.Warn("fb no eligible account", "module", "freebuff", "model", upstreamModel, "error", err)
@@ -578,7 +623,24 @@ func ProxyFreebuff(c *gin.Context, body []byte, bodyMap map[string]any, am *Free
 				lastErr = fmt.Sprintf("banned: %v", err)
 				acc.mu.Unlock()
 				am.MarkBanned(bannedToken)
-				slog.Warn("fb account banned", "module", "freebuff", "token", bannedToken[:8]+"...")
+				slog.Warn("fb account banned", "module", "freebuff", "token", fbMaskToken(bannedToken))
+				continue
+			}
+			// 429 during session creation = daily session quota consumed
+			// (account shows quota available but upstream refuses). Cooldown
+			// the account so Next() skips it until the quota sync (or reset)
+			// re-evaluates — otherwise every request burns a 429 round-trip.
+			if errors.Is(err, ErrFBQuotaExceeded) {
+				cooldown := fbParseCooldown(err.Error())
+				acc.CooldownUntil = time.Now().Add(cooldown)
+				// Unlock BEFORE SaveAccount — SaveAccount does Redis I/O (up to
+				// 500ms) and reads fields without locking internally. Holding
+				// acc.mu across it would stall any concurrent access to this
+				// account. Matches the SyncQuota pattern (unlock → save).
+				acc.mu.Unlock()
+				am.SaveAccount(acc)
+				lastErr = fmt.Sprintf("session quota: %v", err)
+				slog.Warn("fb session quota exceeded, cooldown", "module", "freebuff", "cooldown", cooldown, "error", err)
 				continue
 			}
 			acc.mu.Unlock()
@@ -608,7 +670,7 @@ func ProxyFreebuff(c *gin.Context, body []byte, bodyMap map[string]any, am *Free
 		chatReq, _ := http.NewRequestWithContext(
 			c.Request.Context(),
 			"POST",
-			FREEBUFF_API_BASE+FREEBUFF_CHAT_PATH,
+			FreebuffAPIBase()+FREEBUFF_CHAT_PATH,
 			bytes.NewReader(transformedBody),
 		)
 		chatReq.Header.Set("Authorization", "Bearer "+acc.Token)
@@ -624,7 +686,7 @@ func ProxyFreebuff(c *gin.Context, body []byte, bodyMap map[string]any, am *Free
 		if !clientStream {
 			timeout = FREEBUFF_NONSTREAM_TIMEOUT
 		}
-		chatClient := &http.Client{Timeout: timeout}
+		chatClient := fbHTTPClient(timeout)
 		if client != nil {
 			// Clone the (possibly proxy) transport WITHOUT mutating the shared
 			// default client. Setting .Timeout on the shared *http.Client would
@@ -659,7 +721,7 @@ func ProxyFreebuff(c *gin.Context, body []byte, bodyMap map[string]any, am *Free
 				bodyCopy2 := make(map[string]any)
 				json.Unmarshal(bodyBytes, &bodyCopy2)
 				transformedBody = fbTransform(bodyCopy2, upstreamModel, sess.InstanceID, runID)
-				chatReq, _ = http.NewRequestWithContext(c.Request.Context(), "POST", FREEBUFF_API_BASE+FREEBUFF_CHAT_PATH, bytes.NewReader(transformedBody))
+				chatReq, _ = http.NewRequestWithContext(c.Request.Context(), "POST", FreebuffAPIBase()+FREEBUFF_CHAT_PATH, bytes.NewReader(transformedBody))
 				chatReq.Header.Set("Authorization", "Bearer "+acc.Token)
 				chatReq.Header.Set("Content-Type", "application/json")
 				chatReq.Header.Set("User-Agent", "Freebuff-CLI/0.0.142")
@@ -686,8 +748,13 @@ func ProxyFreebuff(c *gin.Context, body []byte, bodyMap map[string]any, am *Free
 			resp.Body.Close()
 			cooldown := fbParseCooldown(string(respBody))
 			acc.CooldownUntil = time.Now().Add(cooldown)
-			am.SaveAccount(acc)
+			// Unlock BEFORE SaveAccount — SaveAccount takes an internal
+			// acc.mu.RLock() snapshot; holding the write lock here would
+			// self-deadlock (Go RWMutex is not re-entrant: RLock while the
+			// same goroutine holds Lock blocks forever). C2-00 (P0) — this
+			// call site was missed in the 734ec59 audit fix.
 			acc.mu.Unlock()
+			am.SaveAccount(acc)
 			lastErr = fmt.Sprintf("429: %s", truncateLog(string(respBody), 200))
 			slog.Warn("fb rate limited, cooldown", "module", "freebuff", "cooldown", cooldown, "body", truncateLog(string(respBody), 200))
 			continue
@@ -699,9 +766,13 @@ func ProxyFreebuff(c *gin.Context, body []byte, bodyMap map[string]any, am *Free
 		if resp.StatusCode == 403 {
 			respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 			resp.Body.Close()
+			// C2-04: snapshot email under lock before Unlock (log reads after
+			// unlock race the acc.mu-guarded writers).
+			acc.mu.Lock()
+			accEmail := acc.Email
 			acc.mu.Unlock()
 			lastErr = fmt.Sprintf("403: %s", truncateLog(string(respBody), 200))
-			slog.Warn("fb transient 403, retrying", "module", "freebuff", "account", acc.Email, "body", truncateLog(string(respBody), 200))
+			slog.Warn("fb transient 403, retrying", "module", "freebuff", "account", accEmail, "body", truncateLog(string(respBody), 200))
 			continue
 		}
 
@@ -777,6 +848,11 @@ func ProxyFreebuff(c *gin.Context, body []byte, bodyMap map[string]any, am *Free
 				if ct, ok := streamUsage["completion_tokens"].(float64); ok {
 					c.Set("tokens_out", int(ct))
 				}
+				// Cache-temperature feedback: record hit % for (token, sysHash)
+				// from the RAW last-chunk usage (has cache fields).
+				if pct := db.CachePctFromUsage(streamUsage); pct >= 0 {
+					am.RecordCacheHit(acc.Token, sysHash, pct)
+				}
 			}
 			if agg := fbStreamToNonStream(strings.NewReader(streamBuf.String()), upstreamModel); agg != nil {
 				if aggBytes, err := json.Marshal(agg); err == nil {
@@ -799,6 +875,10 @@ func ProxyFreebuff(c *gin.Context, body []byte, bodyMap map[string]any, am *Free
 				}
 				if ct, ok := usage["completion_tokens"].(float64); ok {
 					c.Set("tokens_out", int(ct))
+				}
+				// Cache-temperature feedback (non-stream path).
+				if pct := db.CachePctFromUsage(usage); pct >= 0 {
+					am.RecordCacheHit(acc.Token, sysHash, pct)
 				}
 			}
 			if aggBytes, err := json.Marshal(agg); err == nil {
@@ -860,15 +940,45 @@ func fbExtractContent(agg map[string]any) (string, bool) {
 	return "", false
 }
 
+// fbStreamTotalCeil bounds the total streamed bytes aggregated by
+// fbStreamToNonStream (SEC2-01: a hostile/compromised Freebuff relay — an
+// explicitly supported deployment shape via FREEBUFF_BASE_URL / /fb/config —
+// must not be able to drive the gateway to OOM by streaming unlimited chunks).
+const fbStreamTotalCeil = 8 << 20 // 8 MiB
+
+// fbStreamToolCallsCap bounds distinct tool_call indices (SEC2-01).
+const fbStreamToolCallsCap = 64
+
+// fbStreamToolArgsCap bounds per-call accumulated arguments (SEC2-01).
+const fbStreamToolArgsCap = 1 << 20 // 1 MiB
+
 func fbStreamToNonStream(body io.Reader, model string) map[string]any {
 	scanner := bufio.NewScanner(body)
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 
 	var content, reasoning, finishReason, respID, respModel string
 	var usage map[string]any
+	var totalBytes int
+	// toolCalls accumulates streamed tool_call deltas keyed by index.
+	type toolCallAcc struct {
+		ID        string
+		Type      string
+		Name      string
+		Arguments string
+		Index     int
+	}
+	toolCalls := map[int]*toolCallAcc{}
 
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
+		totalBytes += len(line)
+		if totalBytes > fbStreamTotalCeil {
+			// SEC2-01: abort past the ceiling — return the partial aggregate.
+			if finishReason == "" {
+				finishReason = "length"
+			}
+			break
+		}
 		if !strings.HasPrefix(line, "data: ") {
 			continue
 		}
@@ -917,6 +1027,51 @@ func fbStreamToNonStream(body io.Reader, model string) map[string]any {
 		if r, ok := delta["reasoning_content"].(string); ok {
 			reasoning += r
 		}
+		// Collect tool_calls deltas (streamed incrementally).
+		if tcs, ok := delta["tool_calls"].([]any); ok {
+			for _, tc := range tcs {
+				tcMap, ok := tc.(map[string]any)
+				if !ok {
+					continue
+				}
+				idx := 0
+				if idxF, ok := tcMap["index"].(float64); ok {
+					idx = int(idxF)
+				}
+				// SEC2-01: index is upstream-controlled — ignore out-of-range
+				// values (negative / huge) instead of growing the map unbounded.
+				if idx < 0 || idx >= fbStreamToolCallsCap {
+					continue
+				}
+				acc, exists := toolCalls[idx]
+				if !exists {
+					acc = &toolCallAcc{Index: idx}
+					toolCalls[idx] = acc
+				}
+				if id, ok := tcMap["id"].(string); ok && id != "" {
+					acc.ID = id
+				}
+				if t, ok := tcMap["type"].(string); ok && t != "" {
+					acc.Type = t
+				}
+				if fn, ok := tcMap["function"].(map[string]any); ok {
+					if name, ok := fn["name"].(string); ok && name != "" {
+						acc.Name = name
+					}
+					if args, ok := fn["arguments"].(string); ok {
+						// SEC2-01: bound per-call accumulated arguments.
+						remaining := fbStreamToolArgsCap - len(acc.Arguments)
+						if remaining > 0 {
+							if len(args) > remaining {
+								acc.Arguments += args[:remaining]
+							} else {
+								acc.Arguments += args
+							}
+						}
+					}
+				}
+			}
+		}
 		if fr, ok := choice["finish_reason"].(string); ok && fr != "" {
 			finishReason = fr
 		}
@@ -946,6 +1101,34 @@ func fbStreamToNonStream(body io.Reader, model string) map[string]any {
 	}
 	if reasoning != "" && content != "" {
 		msg["reasoning_content"] = reasoning
+	}
+
+	// Attach accumulated tool_calls if any were streamed.
+	if len(toolCalls) > 0 {
+		// Sort by index for deterministic order.
+		indices := make([]int, 0, len(toolCalls))
+		for i := range toolCalls {
+			indices = append(indices, i)
+		}
+		sort.Ints(indices)
+		tcList := make([]map[string]any, 0, len(indices))
+		for _, i := range indices {
+			acc := toolCalls[i]
+			tc := map[string]any{
+				"index": acc.Index,
+				"type":  "function",
+			}
+			if acc.ID != "" {
+				tc["id"] = acc.ID
+			}
+			fn := map[string]any{"arguments": acc.Arguments}
+			if acc.Name != "" {
+				fn["name"] = acc.Name
+			}
+			tc["function"] = fn
+			tcList = append(tcList, tc)
+		}
+		msg["tool_calls"] = tcList
 	}
 
 	return map[string]any{
@@ -999,12 +1182,4 @@ func fbParseCooldown(body string) time.Duration {
 
 	// Default 60s
 	return 60 * time.Second
-}
-
-// fbMaskToken masks a token for display.
-func fbMaskToken(token string) string {
-	if len(token) <= 12 {
-		return token
-	}
-	return token[:8] + "..." + token[len(token)-4:]
 }

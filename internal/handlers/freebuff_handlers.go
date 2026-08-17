@@ -241,3 +241,69 @@ func HandleFBDeleteAccount(fbAM *upstream.FreebuffAccountManager) gin.HandlerFun
 		c.JSON(http.StatusOK, gin.H{"deleted": true})
 	}
 }
+
+// HandleFBConfig GET/PUT the Freebuff runtime config (fb:config hash).
+//   - GET  /fb/config → current api_base (effective value) + persisted value
+//   - PUT  /fb/config {api_base} → set + persist to Redis (survives restart)
+//
+// Admin-only (registered behind adminAuth). api_base drives session/chat/
+// ads/streak/run calls; device flow always stays on codebuff.com.
+type fbConfigStore interface {
+	GetFBConfig(field string) (string, error)
+	SetFBConfig(field, value string) error
+}
+
+func HandleFBConfig(store fbConfigStore) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		switch c.Request.Method {
+		case http.MethodGet:
+			persisted := ""
+			if store != nil {
+				if v, err := store.GetFBConfig("api_base"); err == nil {
+					persisted = v
+				}
+			}
+			c.JSON(http.StatusOK, gin.H{
+				"api_base":        upstream.FreebuffAPIBase(),
+				"persisted_value": persisted,
+				"device_base":     upstream.FREEBUFF_DEVICE_BASE,
+			})
+		case http.MethodPut:
+			var req struct {
+				APIBase string `json:"api_base"`
+			}
+			if err := c.ShouldBindJSON(&req); err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "invalid JSON body"})
+				return
+			}
+			url := strings.TrimSpace(req.APIBase)
+			if url == "" {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "api_base must not be empty"})
+				return
+			}
+			// Single choke-point validation (same as env + Redis-persisted
+			// values): https-only, public host, bare origin, length bound.
+			// SetFreebuffAPIBase returns the normalized URL or an error.
+			norm, err := upstream.NormalizeFreebuffAPIBase(url)
+			if err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+				return
+			}
+			// Persist FIRST, apply second — a Redis failure must not leave the
+			// in-memory base changed (split-brain: 500 returned but live
+			// traffic already routed to the new value).
+			if store != nil {
+				if err := store.SetFBConfig("api_base", norm); err != nil {
+					c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to persist to Redis: " + err.Error()})
+					return
+				}
+			}
+			// Apply without re-validation (SEC2-04: no second DNS lookup —
+			// NormalizeFreebuffAPIBase above already validated + normalized).
+			upstream.SetFreebuffAPIBaseValidated(norm)
+			c.JSON(http.StatusOK, gin.H{"status": "ok", "api_base": upstream.FreebuffAPIBase()})
+		default:
+			c.JSON(http.StatusMethodNotAllowed, gin.H{"error": "method not allowed"})
+		}
+	}
+}

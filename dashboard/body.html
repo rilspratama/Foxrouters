@@ -378,6 +378,12 @@
           <p style="font-size:13px;color:var(--text-tertiary);margin-bottom:12px;line-height:1.6">
             Freebuff (Codebuff rebrand) free-tier tokens. Models: <code style="font-family:var(--mono);color:var(--text-secondary);background:var(--bg-elevated);padding:1px 5px;border-radius:3px;font-size:12px">fb/deepseek-v4-flash</code>, <code style="font-family:var(--mono);color:var(--text-secondary);background:var(--bg-elevated);padding:1px 5px;border-radius:3px;font-size:12px">fb/mimo-v2.5</code>. Each account: 6 sessions/day, 1hr each.
           </p>
+          <div id="fbConfigRow" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:12px;padding:10px 12px;background:var(--bg-elevated);border:1px solid var(--border);border-radius:var(--radius-sm);font-size:13px">
+            <span style="color:var(--text-secondary);white-space:nowrap">API Base URL:</span>
+            <input id="fbApiBaseInput" type="text" spellcheck="false" style="flex:1;min-width:260px;padding:6px 10px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg);color:var(--text);font-family:var(--mono);font-size:12px" placeholder="https://www.codebuff.com" />
+            <button class="btn-ghost" onclick="saveFbConfig()" style="padding:6px 14px;font-size:12px;color:var(--brand);border:1px solid var(--border);border-radius:var(--radius-sm);cursor:pointer">Save</button>
+            <span id="fbConfigStatus" style="font-size:12px;color:var(--text-tertiary)"></span>
+          </div>
           <div class="tbl-scroll" style="max-height:500px">
             <table class="tbl">
               <thead><tr>

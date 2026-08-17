@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"foxrouters/internal/db"
 	"github.com/gin-gonic/gin"
 )
 
@@ -41,18 +42,13 @@ func ProxyGrok(c *gin.Context, body []byte, am *GrokAccountManager, clientStream
 	total := am.Len()
 
 	// Sticky session: client may pin all requests in a conversation to the
-	// same upstream account via header (prompt-cache locality). First header
-	// wins: x-session-id, x-conversation-id, x-chat-id.
-	sessionID := c.GetHeader("x-session-id")
-	if sessionID == "" {
-		sessionID = c.GetHeader("x-conversation-id")
-	}
-	if sessionID == "" {
-		sessionID = c.GetHeader("x-chat-id")
-	}
-	if len(sessionID) > 128 {
-		sessionID = sessionID[:128]
-	}
+	// same upstream account via header (prompt-cache locality). Header
+	// priority per stickySessionHeaders — covers OpenCode, Codex CLI, the assistant.
+	sessionID := StickySessionID(c)
+
+	// clientKey: full gateway API key from auth context — the client identity
+	// signal for key-affinity hybrid bucketing (Hermes sends no session id).
+	clientKey := c.GetString("client_key")
 
 	// sysHash: identifies the shared prompt prefix (model + first system
 	// message) for content-hash / hybrid selection modes.
@@ -95,7 +91,7 @@ func ProxyGrok(c *gin.Context, body []byte, am *GrokAccountManager, clientStream
 		var acc *GrokAccount
 		var err error
 		if attempt < stickyAttempts {
-			acc, err = am.NextForMode(mode, sessionID, sysHash)
+			acc, err = am.NextForMode(mode, sessionID, sysHash, clientKey)
 		} else {
 			acc, err = am.Next()
 		}
@@ -289,6 +285,7 @@ func ProxyGrok(c *gin.Context, body []byte, am *GrokAccountManager, clientStream
 
 		var streamContent strings.Builder
 		var streamTokensIn, streamTokensOut int
+		var streamUsage map[string]any // last chunk's full usage (has cache fields)
 		var lineCarry string
 		for {
 			if err := ctx.Err(); err != nil {
@@ -326,6 +323,9 @@ func ProxyGrok(c *gin.Context, body []byte, am *GrokAccountManager, clientStream
 						streamContent.WriteString(sc.Choices[0].Delta.Content)
 					}
 					if sc.Usage != nil {
+						// Keep the LAST non-nil usage (final chunk has real
+						// token counts + cache hit fields).
+						streamUsage = sc.Usage
 						if pt, ok := sc.Usage["prompt_tokens"].(float64); ok {
 							streamTokensIn = int(pt)
 						}
@@ -345,6 +345,12 @@ func ProxyGrok(c *gin.Context, body []byte, am *GrokAccountManager, clientStream
 		// Accumulate per-account usage (telemetry, non-blocking)
 		if lastAcc != nil {
 			lastAcc.RecordUsage(streamTokensIn, streamTokensOut)
+		}
+		// Cache-temperature feedback: record hit % for (account, sysHash).
+		if lastAcc != nil && sysHash != "" {
+			if pct := db.CachePctFromUsage(streamUsage); pct >= 0 {
+				am.RecordCacheHit(lastAcc.Email, sysHash, pct)
+			}
 		}
 		respJSON, _ := json.Marshal(gin.H{
 			"choices": []gin.H{{
@@ -383,6 +389,12 @@ func ProxyGrok(c *gin.Context, body []byte, am *GrokAccountManager, clientStream
 				// Accumulate per-account usage (telemetry, non-blocking)
 				if lastAcc != nil {
 					lastAcc.RecordUsage(int(pt), int(ct))
+				}
+				// Cache-temperature feedback: record hit % for (account, sysHash).
+				if lastAcc != nil && sysHash != "" {
+					if pct := db.CachePctFromUsage(usage); pct >= 0 {
+						am.RecordCacheHit(lastAcc.Email, sysHash, pct)
+					}
 				}
 			}
 		}

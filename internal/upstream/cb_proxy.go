@@ -9,10 +9,24 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
+	"foxrouters/internal/db"
 	"github.com/gin-gonic/gin"
 )
+
+// AgentIdentitySanitizer rewrites agent-identity strings in a request body map
+// before it is forwarded upstream. Injected by the proxy package
+// (rewriteAgentIdentity) to avoid an import cycle (proxy → upstream). nil = no
+// sanitization. Currently wired only into ProxyCodeBuddy — Grok / Freebuff /
+// Alibaba forward content untouched (this filter exists to dodge CodeBuddy's
+// identity moderation, not as global policy).
+var AgentIdentitySanitizer func(bodyMap map[string]any)
+
+// cbSanitizerMissingOnce guards the one-time warn when the agent-identity
+// sanitizer is nil on the CodeBuddy path (SEC2-05).
+var cbSanitizerMissingOnce sync.Once
 
 func ProxyCodeBuddy(c *gin.Context, body []byte, bodyMap map[string]any, km *CBKeyManager, clientStream bool, hc *HealthChecker) {
 	if !hc.CB.CanRequest() {
@@ -32,22 +46,48 @@ func ProxyCodeBuddy(c *gin.Context, body []byte, bodyMap map[string]any, km *CBK
 		return
 	}
 
+	// Sanitize agent identity strings on the exact body that goes upstream
+	// (CodeBuddy-only — see AgentIdentitySanitizer doc). sysHash below is then
+	// computed from the sanitized prefix, matching the pre-split behavior.
+	if AgentIdentitySanitizer != nil {
+		var tmap map[string]any
+		if err := json.Unmarshal(transformed, &tmap); err != nil {
+			// SEC-08: never silently fail-open — log so a sanitization bypass
+			// is observable; forward the unsanitized bytes rather than nil.
+			slog.Warn("cb sanitizer: body not a JSON object, sanitization skipped", "module", "codebuddy", "error", err)
+		} else {
+			AgentIdentitySanitizer(tmap)
+			re, err := json.Marshal(tmap)
+			if err != nil {
+				// Keep the previous (pre-sanitize) bytes on marshal failure —
+				// assigning nil would blank the upstream request body.
+				slog.Warn("cb sanitizer: re-marshal failed, forwarding pre-sanitize body", "module", "codebuddy", "error", err)
+			} else {
+				transformed = re
+			}
+		}
+	} else {
+		// SEC2-05: if the sanitizer was never wired (e.g. proxy package not
+		// linked in a binary/test that uses upstream directly), flag it once
+		// so the control's absence is observable, not silent.
+		cbSanitizerMissingOnce.Do(func() {
+			slog.Warn("cb sanitizer: AgentIdentitySanitizer is nil — identity sanitization DISABLED for CodeBuddy", "module", "codebuddy")
+		})
+	}
+
 	client, proxyID := getClient(upstreamClient, "codebuddy")
 	total := km.Len()
 
 	// Sticky session: client may pin all requests in a conversation to the
-	// same upstream key via header (prompt-cache locality). First header wins:
-	// x-session-id, x-conversation-id, x-chat-id.
-	sessionID := c.GetHeader("x-session-id")
-	if sessionID == "" {
-		sessionID = c.GetHeader("x-conversation-id")
-	}
-	if sessionID == "" {
-		sessionID = c.GetHeader("x-chat-id")
-	}
-	if len(sessionID) > 128 {
-		sessionID = sessionID[:128]
-	}
+	// same upstream key via header (prompt-cache locality). Header priority
+	// per stickySessionHeaders — covers OpenCode (x-session-id), Codex CLI
+	// (thread-id/session-id), Claude Code (x-claude-code-session-id), and
+	// generic OpenAI clients (x-conversation-id/x-chat-id).
+	sessionID := StickySessionID(c)
+
+	// clientKey: full gateway API key from auth context — the client identity
+	// signal for key-affinity hybrid bucketing (Hermes sends no session id).
+	clientKey := c.GetString("client_key")
 
 	// sysHash: identifies the shared prompt prefix (model + first system
 	// message) for content-hash / hybrid selection modes. Computed from the
@@ -103,7 +143,7 @@ func ProxyCodeBuddy(c *gin.Context, body []byte, bodyMap map[string]any, km *CBK
 		var key *CBKey
 		var err error
 		if attempt < stickyAttempts {
-			key, err = km.NextForMode(mode, sessionID, sysHash)
+			key, err = km.NextForMode(mode, sessionID, sysHash, clientKey)
 		} else {
 			key, err = km.Next()
 		}
@@ -425,6 +465,14 @@ func ProxyCodeBuddy(c *gin.Context, body []byte, bodyMap map[string]any, km *CBK
 			"stream": true,
 		})
 		c.Set("response_body", json.RawMessage(respJSON))
+		// Cache-temperature feedback: record hit % for (key, sysHash). Use the
+		// RAW last-chunk usage (has cache fields); the synthesized fallback
+		// respUsage has none and would record fabricated 0% hits.
+		if lastKey != nil && sysHash != "" {
+			if pct := db.CachePctFromUsage(streamUsage); pct >= 0 {
+				km.RecordCacheHit(lastKey.Key, sysHash, pct)
+			}
+		}
 	} else {
 		result := cbCollectStream(lastResp, originalModel, lastKey)
 		c.JSON(200, result)
@@ -444,6 +492,12 @@ func ProxyCodeBuddy(c *gin.Context, body []byte, bodyMap map[string]any, km *CBK
 			}
 			if ct, ok := usage["completion_tokens"].(float64); ok {
 				c.Set("tokens_out", int(ct))
+			}
+			// Cache-temperature feedback: record hit % for (key, sysHash).
+			if lastKey != nil && sysHash != "" {
+				if pct := db.CachePctFromUsage(usage); pct >= 0 {
+					km.RecordCacheHit(lastKey.Key, sysHash, pct)
+				}
 			}
 		}
 	}

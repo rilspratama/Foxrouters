@@ -8,6 +8,13 @@ Policy: **test (`go test -race`) before build/restart**. Secrets only via `.gate
 
 ---
 
+## v1.6.15 — Freebuff relay support (unreleased, dev)
+
+### Added
+- **`FREEBUFF_BASE_URL` env** — routes session/chat/ads/streak/run API calls through a PaaS relay (Railway/CF Worker) whose exit IP is not VPN/datacenter-flagged, enabling `accessTier=full` (all 6 models) from datacenter deployments. Device flow (OAuth login URL + poll) always hits `codebuff.com` directly (PKCE callback is origin-bound). Leave empty for direct (limited/blocked from datacenter IPs).
+
+---
+
 ## v1.6.14 — monolith split + faster CI release + docs restructure (2026-08-15)
 
 ### Changed

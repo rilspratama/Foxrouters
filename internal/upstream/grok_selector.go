@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"sort"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -142,14 +143,14 @@ func LoadGrokSelectorMode(store *db.Store) {
 // NextForMode selects an account according to the active mode.
 //   - sessionID: from x-session-id/x-conversation-id/x-chat-id header (may be "")
 //   - sysHash:   hash of model + first system message content (may be "")
-func (am *GrokAccountManager) NextForMode(mode GrokSelectorMode, sessionID, sysHash string) (*GrokAccount, error) {
+func (am *GrokAccountManager) NextForMode(mode GrokSelectorMode, sessionID, sysHash, clientKey string) (*GrokAccount, error) {
 	switch mode {
 	case GrokSelectorRR:
 		return am.Next()
 	case GrokSelectorContentHash:
 		return am.nextByHash(sysHash)
 	case GrokSelectorHybrid:
-		return am.nextHybrid(sessionID, sysHash)
+		return am.nextHybrid(sessionID, sysHash, clientKey)
 	case GrokSelectorSticky:
 		fallthrough
 	default:
@@ -183,10 +184,12 @@ func (am *GrokAccountManager) nextByHash(sysHash string) (*GrokAccount, error) {
 }
 
 // nextHybrid: content-hash selects a bucket of grokHybridBucketSize enabled
-// accounts; session-id sticks to one account inside the bucket (rebinding
-// within the bucket when the account dies → shared system-prompt cache stays
-// warm).
-func (am *GrokAccountManager) nextHybrid(sessionID, sysHash string) (*GrokAccount, error) {
+// nextHybrid: the client API key picks a bucket of grokHybridBucketSize enabled
+// accounts (key-affinity — one harness key keeps ALL its conversations in one
+// bucket so the account-level prompt cache warms across sessions); session-id
+// sticks to one account inside the bucket; without a session id the sysHash
+// picks the account (shared system prompt → same account).
+func (am *GrokAccountManager) nextHybrid(sessionID, sysHash, clientKey string) (*GrokAccount, error) {
 	am.mu.RLock()
 	enabled := make([]*GrokAccount, 0, len(am.accounts))
 	for _, acc := range am.accounts {
@@ -198,6 +201,12 @@ func (am *GrokAccountManager) nextHybrid(sessionID, sysHash string) (*GrokAccoun
 	if len(enabled) == 0 {
 		return nil, fmt.Errorf("all grok accounts disabled")
 	}
+	// No system message (sysHash == ""): nothing to warm in an upstream prompt
+	// cache, so key-affinity bucketing buys nothing and would herd ALL
+	// system-less traffic from one API key onto a single account (bucket[0]),
+	// concentrating rate limits / free-tier quota. Fall back to RR/sticky like
+	// the pre-key-affinity behavior. clientKey is deliberately ignored here —
+	// auth always sets it, so the old `&& clientKey == ""` guard was dead code.
 	if sysHash == "" {
 		if sessionID != "" {
 			return am.NextSticky(sessionID)
@@ -205,13 +214,45 @@ func (am *GrokAccountManager) nextHybrid(sessionID, sysHash string) (*GrokAccoun
 		return am.Next()
 	}
 
-	// Bucket = consecutive slice of enabled accounts starting at hash position.
-	h := fnv.New64a()
-	h.Write([]byte(sysHash))
-	start := int(h.Sum64() % uint64(len(enabled)))
+	// Bucket seed: the client API key wins (key-affinity). sysHash is the
+	// defensive fallback (auth always sets client_key, so this is unreachable
+	// in practice).
+	bucketSeed := sysHash
+	if clientKey != "" {
+		bucketSeed = "key:" + clientKey
+	}
+	// C2-08: rendezvous (HRW) hashing over stable account identity (email).
+	// Picks the argmax h(bucketSeed‖email) among enabled accounts, so bucket
+	// membership is STABLE under churn — disabling/cooldowning one account
+	// no longer shifts the modulo window and herds every client onto a new
+	// account at once (which would cool all upstream prompt caches
+	// simultaneously). Returns the same ordered bucket as before for the
+	// session-binding step below.
 	bucket := make([]*GrokAccount, 0, grokHybridBucketSize)
-	for i := 0; i < grokHybridBucketSize && i < len(enabled); i++ {
-		bucket = append(bucket, enabled[(start+i)%len(enabled)])
+	{
+		type scored struct {
+			acc *GrokAccount
+			s   uint64
+		}
+		scoredEnabled := make([]scored, 0, len(enabled))
+		for _, acc := range enabled {
+			h := fnv.New64a()
+			h.Write([]byte(bucketSeed))
+			identity := acc.Email
+			if identity == "" {
+				identity = acc.GetAccessToken() // fallback stable identity
+			}
+			h.Write([]byte("\x00"))
+			h.Write([]byte(identity))
+			scoredEnabled = append(scoredEnabled, scored{acc, h.Sum64()})
+		}
+		// Sort descending by score; take the top grokHybridBucketSize.
+		sort.Slice(scoredEnabled, func(i, j int) bool {
+			return scoredEnabled[i].s > scoredEnabled[j].s
+		})
+		for i := 0; i < grokHybridBucketSize && i < len(scoredEnabled); i++ {
+			bucket = append(bucket, scoredEnabled[i].acc)
+		}
 	}
 
 	// Session binding within bucket (reuse sticky map — but only accept the
@@ -235,6 +276,31 @@ func (am *GrokAccountManager) nextHybrid(sessionID, sysHash string) (*GrokAccoun
 		am.sticky[sessionID] = &grokStickyBinding{acc: pick, lastSeen: time.Now()}
 		am.stickyMu.Unlock()
 		return pick, nil
+	}
+
+	// No session id: prefer the account in this bucket whose upstream prompt
+	// cache is warmest for this prefix (cache-temperature-aware routing).
+	// Falls back to the deterministic sysHash pick when nothing is warm yet.
+	if sysHash != "" && am.cacheTemp != nil {
+		cands := make([]string, 0, len(bucket))
+		for _, acc := range bucket {
+			cands = append(cands, acc.Email)
+		}
+		if best, ok := am.cacheTemp.best(cands, sysHash, cacheWarmThreshold, cacheTempMaxAge); ok {
+			for _, acc := range bucket {
+				if acc.Email == best {
+					return acc, nil
+				}
+			}
+		}
+	}
+
+	// No session id: pick deterministically by system-prompt hash inside the
+	// key's bucket → all sessions sharing a system prompt share one account.
+	if sysHash != "" {
+		sh := fnv.New64a()
+		sh.Write([]byte(sysHash))
+		return bucket[sh.Sum64()%uint64(len(bucket))], nil
 	}
 	return bucket[0], nil
 }
