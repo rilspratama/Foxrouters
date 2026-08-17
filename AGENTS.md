@@ -64,7 +64,7 @@ Log backend choices (`LOG_BACKEND` env, default `sqlite`):
 3. Refresh = singleflight + lock-split (no network under `acc.mu`)  
 4. Any disable/enable/token mutate → `Save*()` after unlock  
 5. History write async only; credentials never in CH  
-6. Full body unlimited in CH; log `id` JSON **string** for browsers  
+6. Stored request/response body capped at `LOG_BODY_CAP_BYTES` (default 1 MiB) via `bodyString()` — full bodies for normal traffic, multi-MB rows (huge-context requests) truncated with marker; log `id` JSON **string** for browsers  
 7. No live gateway key inject into `/dashboard` HTML  
 8. Proxy pool: `getClient(default, upstream)` — returns proxied client if pool has enabled proxies matching upstream scope (`all`/`grok`/`codebuddy`/`freebuff`), else direct. Transport cache per proxy ID. Auto-disable after 5 fails.
 
@@ -134,6 +134,21 @@ Log backend choices (`LOG_BACKEND` env, default `sqlite`):
 - **Env gate:** `FREEBUFF_DISABLED=1` skips provider.
 - **Dashboard:** Freebuff tab in Accounts page (5 buttons: +Add Token, Bulk Import, +Add OAuth, Sync Quota, Refresh). Overview cards: FB count+quota, FB circuit, FB latency, FB errors.
 - **Endpoints:** `POST /fb/import`, `POST /fb/import/bulk`, `POST /fb/quota/sync`, `GET /fb/accounts`, `DELETE /fb/accounts/:token`, `POST /fb/oauth/device/start`, `GET /fb/oauth/device/poll`.
+
+### Freebuff api_base validation + relay config
+- **Single choke point** — `validateFreebuffAPIBase` (`freebuff_models.go`) gates ALL inputs (env default, Redis boot loader, `PUT /fb/config`): https-only (unless `FB_ALLOW_INSECURE_BASE=1`), bare origin (no path/query/userinfo), public host only (IANA deny list incl. CGNAT/benchmark/NAT64, `net.LookupIP` fail-CLOSED with 3s ctx), ≤256 chars.
+- **Runtime override** — `GET/PUT /fb/config` (dashboard Freebuff tab) persists to Redis `fb:config` FIRST, applies in-memory SECOND; persist failure → in-memory unchanged (no split-brain). Env `FREEBUFF_BASE_URL` is the boot default only.
+- **Dial-time enforcement (rebinding-proof)** — `fbHTTPClient(timeout)` attaches a `net.Dialer` Control hook rejecting non-public destination IPs on every connection; the setter check is advisory UX validation only.
+- **`SetFreebuffAPIBaseValidated(norm)`** — handler applies a pre-validated value WITHOUT re-DNS (single lookup per PUT; `NormalizeFreebuffAPIBase` does the one resolution).
+
+### Lock discipline for `FreebuffAccount` (`freebuff_manager.go`)
+- `acc.mu` is a **`sync.RWMutex`** — read-only snapshots MUST use `RLock`/`RUnlock` (QuotaSummary, eligibility loops, candidate sort, ListAccounts).
+- **`SaveAccount` takes an internal `acc.mu.RLock()` snapshot** — callers MUST NOT hold `acc.mu.Lock()` when calling (non-reentrant → self-deadlock). Unlock-before-save everywhere (MarkBanned, 429/403 handlers, quota-exhausted branch). Re-audit every new `SaveAccount` call site.
+- `SaveAccount` performs Redis HSet — never call it under `am.mu` (manager lock) either (500ms I/O stalls the whole pool).
+- Mutation of `acc.Email`/`acc.UserID` must hold `acc.mu` (AddAccountWithInfo, ProbeAll) — `am.mu` alone is a data race against the RLock snapshot.
+
+### Freebuff non-stream aggregation bounds
+- `fbStreamToNonStream` caps total streamed bytes at 8 MiB (abort → `finish_reason="length"`), tool_call `index` in `[0,64)`, per-call arguments ≤1 MiB — a hostile/compromised relay (supported shape via FREEBUFF_BASE_URL) cannot OOM the gateway.
 
 ### Dynamic Model Registry (`internal/upstream/model_registry.go`)
 Refreshes Freebuff + Grok model lists from upstream sources every **6h** so new

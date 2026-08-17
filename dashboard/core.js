@@ -767,7 +767,7 @@ function showTab(e, tab) {
   document.getElementById('fbRefreshBtn').style.display = tab === 'fb' ? '' : 'none';
   var fbStreakBtn = document.getElementById('fbStreakBtn');
   if (fbStreakBtn) fbStreakBtn.style.display = tab === 'fb' ? '' : 'none';
-  if (tab === 'fb') loadFBAccounts();
+  if (tab === 'fb') { loadFBAccounts(); loadFBConfig(); }
   // Alibaba panel + buttons
   var aliPanelEl = document.getElementById('aliPanel');
   if (aliPanelEl) aliPanelEl.style.display = tab === 'ali' ? 'block' : 'none';
@@ -922,6 +922,60 @@ async function loadFBAccounts() {
   } catch (e) {
     var body = document.getElementById('fbBody');
     if (body) body.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:24px;color:var(--danger);font-size:13px">Failed to load: ' + escHtml(e.message) + '</td></tr>';
+  }
+}
+
+// loadFBConfig fetches the current Freebuff API base URL (effective + persisted)
+// and fills the config input. Called when the Freebuff panel is shown.
+async function loadFBConfig() {
+  var input = document.getElementById('fbApiBaseInput');
+  var status = document.getElementById('fbConfigStatus');
+  if (!input) return;
+  try {
+    var d = await fetchJSON('/fb/config');
+    input.value = d.api_base || '';
+    if (status) {
+      if (d.persisted_value && d.persisted_value !== d.api_base) {
+        status.textContent = '(persisted: ' + d.persisted_value + ')';
+      } else {
+        status.textContent = d.persisted_value ? '(persisted to Redis)' : '(env/default — not persisted)';
+      }
+    }
+  } catch (e) {
+    if (e.message === '__redirect__') return; // session expired — login nav handles it
+    if (status) status.textContent = 'load failed: ' + e.message;
+  }
+}
+
+// saveFbConfig persists the Freebuff API base URL to Redis (survives restart).
+async function saveFbConfig() {
+  var input = document.getElementById('fbApiBaseInput');
+  var status = document.getElementById('fbConfigStatus');
+  if (!input) return;
+  var url = input.value.trim();
+  if (!url) {
+    if (status) { status.textContent = 'empty — ignored'; status.style.color = 'var(--warning)'; }
+    return;
+  }
+  try {
+    var d = await apiFetch('/fb/config', {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ api_base: url })
+    });
+    // D3: reflect the server-normalized value (trim + single trailing slash
+    // stripped) so the input shows exactly what is stored/effective.
+    if (d && d.api_base) input.value = d.api_base;
+    if (status) {
+      status.textContent = 'saved ✓';
+      status.style.color = 'var(--success)';
+      // D3: after the flash, re-render persisted-state via loadFBConfig so the
+      // indicator returns to '(persisted to Redis)' instead of disappearing.
+      setTimeout(function () { loadFBConfig(); }, 2500);
+    }
+  } catch (e) {
+    if (e.message === '__redirect__') return; // session expired
+    if (status) { status.textContent = 'save failed: ' + e.message; status.style.color = 'var(--danger)'; }
   }
 }
 

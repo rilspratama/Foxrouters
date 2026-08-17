@@ -375,6 +375,10 @@ type GrokAccountManager struct {
 	// sticky sessions: sessionID → bound account (prompt-cache locality)
 	sticky   map[string]*grokStickyBinding
 	stickyMu sync.Mutex
+
+	// cacheTemp: per-account cache hit rates by content prefix (sysHash).
+	// Hybrid/content-hash selection prefers the warmest account.
+	cacheTemp *cacheTemperature
 }
 
 // grokStickyBinding records which account a session is pinned to.
@@ -387,9 +391,25 @@ type grokStickyBinding struct {
 const grokStickyTTL = 30 * time.Minute
 
 func NewGrokAccountManager(store *db.Store) *GrokAccountManager {
-	am := &GrokAccountManager{accounts: make([]*GrokAccount, 0), db: store, sticky: make(map[string]*grokStickyBinding)}
+	am := &GrokAccountManager{accounts: make([]*GrokAccount, 0), db: store, sticky: make(map[string]*grokStickyBinding), cacheTemp: newCacheTemperature()}
 	go am.stickyJanitor()
 	return am
+}
+
+// RecordCacheHit feeds the cache-temperature map from a real response.
+// hitPct is the upstream-reported cache hit % for (email, sysHash prefix).
+func (am *GrokAccountManager) RecordCacheHit(email, sysHash string, hitPct float64) {
+	if am.cacheTemp != nil {
+		am.cacheTemp.record(email, sysHash, hitPct)
+	}
+}
+
+// SnapshotCacheTemp returns the per-account cache temperature map (debug).
+func (am *GrokAccountManager) SnapshotCacheTemp() map[string]map[string]CacheTempSnap {
+	if am == nil || am.cacheTemp == nil {
+		return nil
+	}
+	return am.cacheTemp.snapshot()
 }
 
 // DB returns the persistence handle (nil in test builds).
@@ -652,6 +672,8 @@ func (am *GrokAccountManager) ReenableCooldowns() {
 // ---------------------------------------------------------------------------
 
 // stickyJanitor evicts idle bindings so the map doesn't grow unbounded.
+// Also prunes the cache-temperature map (same 5m tick) so per-prefix entries
+// don't accumulate forever as conversations churn.
 func (am *GrokAccountManager) stickyJanitor() {
 	if am.sticky == nil {
 		return
@@ -667,6 +689,9 @@ func (am *GrokAccountManager) stickyJanitor() {
 			}
 		}
 		am.stickyMu.Unlock()
+		if am.cacheTemp != nil {
+			am.cacheTemp.prune(cacheTempMaxAge)
+		}
 	}
 }
 

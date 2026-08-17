@@ -516,6 +516,27 @@ func (s *Store) GetGrokConfig(field string) (string, error) {
 	return s.rdb.HGet(ctx, "grok:config", field).Result()
 }
 
+// SetFBConfig writes a scalar Freebuff config value (api_base override etc.,
+// fb:config hash — persisted across restarts).
+func (s *Store) SetFBConfig(field, value string) error {
+	if s == nil {
+		return fmt.Errorf("no store")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+	return s.rdb.HSet(ctx, "fb:config", field, value).Err()
+}
+
+// GetFBConfig reads a scalar Freebuff config value.
+func (s *Store) GetFBConfig(field string) (string, error) {
+	if s == nil {
+		return "", fmt.Errorf("no store")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+	return s.rdb.HGet(ctx, "fb:config", field).Result()
+}
+
 // SetVideoOwner persists the account that created a console.x.ai video job so
 // polling survives gateway restarts (TTL 24h).
 func (s *Store) SetVideoOwner(id, email string) error {

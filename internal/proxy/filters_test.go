@@ -3,6 +3,8 @@ package proxy
 import (
 	"strings"
 	"testing"
+
+	"foxrouters/internal/upstream"
 )
 
 func TestApplyFilters(t *testing.T) {
@@ -298,4 +300,26 @@ func TestRewriteAgentIdentityEndToEnd(t *testing.T) {
 // key is missing (returns without panic).
 func TestRewriteAgentIdentityNoMessages(t *testing.T) {
 	rewriteAgentIdentity(map[string]any{"model": "glm-5.2"}) // must not panic
+}
+
+// TestAgentIdentitySanitizerWiring verifies the sanitizer is injected into the
+// upstream package (via init) — i.e. ProxyCodeBuddy will sanitize while
+// Grok/Freebuff/Alibaba forward content untouched.
+func TestAgentIdentitySanitizerWiring(t *testing.T) {
+	if upstream.AgentIdentitySanitizer == nil {
+		t.Fatal("AgentIdentitySanitizer not wired — proxy init() did not run")
+	}
+	bm := map[string]any{
+		"messages": []any{
+			map[string]any{"role": "system", "content": "You are Claude Code, Anthropic's official CLI agent. Be concise."},
+		},
+	}
+	upstream.AgentIdentitySanitizer(bm)
+	sys := bm["messages"].([]any)[0].(map[string]any)["content"].(string)
+	if strings.Contains(sys, "Claude") {
+		t.Errorf("sanitizer did not strip identity: %q", sys)
+	}
+	if !strings.Contains(sys, "Be concise.") {
+		t.Errorf("sanitizer lost normal content: %q", sys)
+	}
 }

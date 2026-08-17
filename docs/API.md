@@ -196,6 +196,23 @@ Each key also carries:
 
 Keys are created via `POST /api/keys` and stored in Redis.
 
+## Admin & Debug Endpoints
+
+All admin routes require an **admin-role** gateway key (Bearer auth). Mutating
+verbs additionally require the CSRF header (browser dashboard sets it).
+
+| Endpoint | Method | Description |
+|---|---|---|
+| `GET/PUT /fb/config` | GET/PUT | Read / update the runtime Freebuff relay base URL. PUT body `{"api_base":"https://..."}` — validates at a single choke point (https-only unless `FB_ALLOW_INSECURE_BASE=1`, bare origin, public host via IANA deny-list, ≤256 chars), **persists to Redis first** (`fb:config`), applies second. GET returns `{api_base, persisted_value, device_base}`. |
+| `GET /debug/cache-temp` | GET | Per-account × system-prefix prompt-cache temperature (EMA hit rate, samples, last-seen). Keys are masked (emails `abc***@dom.com`, credentials per-process HMAC `mask:<12hex>`) — raw secrets never leave the server. |
+| `GET /cb/selector-mode` / `PUT /cb/selector-mode` | GET/PUT | CodeBuddy key selection strategy: `rr` \| `sticky` \| `content-hash` \| `hybrid` (Redis-persisted `cb:config`). |
+| `GET /grok/selector-mode` / `PUT /grok/selector-mode` | GET/PUT | Grok selector mode (same values; Redis `grok:config`). |
+
+**Hybrid selection** (both CB and Grok) uses **key-affinity buckets**: the
+client gateway key pins to a stable bucket of accounts via rendezvous (HRW)
+hashing over account identity — churn (disable/cooldown) does not reshuffle
+the bucket, so upstream prompt caches stay warm.
+
 ## Model Routing
 
 Routing is driven purely by the `model` field of the incoming request:

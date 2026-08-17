@@ -537,7 +537,9 @@ func extractCacheHitPct(body []byte) float64 {
 	return -1
 }
 
-// cachePctFromUsage computes hit/prompt*100 from a usage map.
+// cachePctFromUsage computes hit/prompt*100 from a usage map. Handles both
+// CodeBuddy-style prompt_cache_hit_tokens and OpenAI-style
+// prompt_tokens_details.cached_tokens. Returns -1 when unknown.
 func cachePctFromUsage(u map[string]any) float64 {
 	pt, _ := toFloat64(u["prompt_tokens"])
 	if pt <= 0 {
@@ -553,6 +555,12 @@ func cachePctFromUsage(u map[string]any) float64 {
 		return 0
 	}
 	return float64(int(hit/pt*1000)) / 10
+}
+
+// CachePctFromUsage is the exported form of cachePctFromUsage (used by the
+// upstream package for cache-temperature-aware routing).
+func CachePctFromUsage(u map[string]any) float64 {
+	return cachePctFromUsage(u)
 }
 
 func toFloat64(v any) (float64, bool) {

@@ -121,6 +121,7 @@ up() {
     -e "CB_SELECTOR_MODE=sticky" \
     --add-host "host.docker.internal:host-gateway" \
     -e "TURNSTILE_SOLVER_URL=http://host.docker.internal:8742/cloudflare" \
+    -e "FREEBUFF_BASE_URL=${FREEBUFF_BASE_URL:-}" \
     "$DEV_IMAGE" >/dev/null
 
   green "✓ dev gateway started"

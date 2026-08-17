@@ -39,7 +39,7 @@ type FreebuffAccount struct {
 	// Hourly session tracking (in-memory, resets each hour)
 	HourlySessionCount int       `json:"-"`
 	HourlyWindowStart  time.Time `json:"-"`
-	mu                 sync.Mutex
+	mu                 sync.RWMutex
 	db                 *db.Store
 }
 
@@ -60,13 +60,58 @@ type FreebuffAccountManager struct {
 	mu       sync.RWMutex
 	idx      uint64
 	db       *db.Store
+
+	// cacheTemp: per-account cache hit rates by content prefix (sysHash).
+	// Session-aware Next() prefers the warmest account inside the chosen
+	// priority group (0 = live session, 1 = idle) — reuses the same
+	// cacheTemperature machinery as CB/Grok.
+	cacheTemp *cacheTemperature
 }
 
 func NewFreebuffAccountManager(store *db.Store) *FreebuffAccountManager {
-	return &FreebuffAccountManager{
-		accounts: make(map[string]*FreebuffAccount),
-		db:       store,
+	am := &FreebuffAccountManager{
+		accounts:  make(map[string]*FreebuffAccount),
+		db:        store,
+		cacheTemp: newCacheTemperature(),
 	}
+	go am.cacheTempJanitor()
+	return am
+}
+
+// cacheTempJanitor prunes stale temperature entries every 5 minutes so the
+// map stays bounded (prefixes age out 30m after last use). Mirrors the CB/Grok
+// sticky-janitor pattern; Freebuff has no sticky sessions, and unlike
+// FbQuotaSyncWorker this ALWAYS runs — even with WORKERS_DISABLED=1 the
+// request path keeps recording, so prune must not be worker-gated.
+func (am *FreebuffAccountManager) cacheTempJanitor() {
+	if am.cacheTemp == nil {
+		return
+	}
+	ticker := time.NewTicker(5 * time.Minute)
+	defer ticker.Stop()
+	for range ticker.C {
+		am.cacheTemp.prune(cacheTempMaxAge)
+	}
+}
+
+// RecordCacheHit feeds the cache-temperature map from a real response.
+// hitPct is the upstream-reported cache hit % for (token, sysHash prefix).
+// Entries without system content (sysHash == bare model) are ignored — the
+// selector never consults them (see nextForModel), so recording them would
+// only waste memory.
+func (am *FreebuffAccountManager) RecordCacheHit(token, sysHash string, hitPct float64) {
+	if am == nil || am.cacheTemp == nil || !strings.Contains(sysHash, "|") {
+		return
+	}
+	am.cacheTemp.record(token, sysHash, hitPct)
+}
+
+// SnapshotCacheTemp returns the per-account cache temperature map (debug).
+func (am *FreebuffAccountManager) SnapshotCacheTemp() map[string]map[string]CacheTempSnap {
+	if am == nil || am.cacheTemp == nil {
+		return nil
+	}
+	return am.cacheTemp.snapshot()
 }
 
 func (am *FreebuffAccountManager) DB() *db.Store { return am.db }
@@ -89,13 +134,14 @@ func (am *FreebuffAccountManager) QuotaSummary() (totalRecent, totalLimit float6
 	am.mu.RLock()
 	defer am.mu.RUnlock()
 	for _, acc := range am.accounts {
-		acc.mu.Lock()
+		// C2-05: read-only snapshot → RLock (mu is now an RWMutex)
+		acc.mu.RLock()
 		totalRecent += acc.QuotaRecent
 		totalLimit += acc.QuotaLimit
 		if acc.QuotaLimit > 0 && acc.QuotaRecent >= acc.QuotaLimit {
 			exhausted++
 		}
-		acc.mu.Unlock()
+		acc.mu.RUnlock()
 	}
 	return
 }
@@ -231,13 +277,27 @@ func (am *FreebuffAccountManager) MarkBanned(token string) {
 	if !acc.Banned {
 		acc.Banned = true
 		acc.BannedAt = time.Now()
-		am.SaveAccount(acc)
 	}
+	// Unlock acc.mu BEFORE SaveAccount — SaveAccount takes an internal
+	// acc.mu.RLock() snapshot; holding the write lock here would deadlock
+	// (Go RWMutex is not re-entrant). Also drop am.mu first so the Redis
+	// HSet (up to 500ms) never runs under the manager write lock (C2-01:
+	// would stall the whole Freebuff pool).
 	acc.mu.Unlock()
 	am.mu.Unlock()
+	am.SaveAccount(acc)
 }
 
 // SaveAccount persists account state to Redis.
+//
+// Concurrency-safe: it takes a consistent snapshot of the account fields
+// under acc.mu (RLock), then performs the Redis HSet with no lock held (no
+// Redis I/O under lock — a 500ms stall would block concurrent access to this
+// account). Callers may invoke it with or without acc.mu held; the internal
+// RLock is re-entrant-safe because Go's RWMutex allows RLock while a writer
+// holds it only if the caller does NOT already hold the write lock, so
+// callers MUST NOT hold acc.mu.Lock() when calling (see MarkBanned, which
+// unlocks before saving).
 func (am *FreebuffAccountManager) SaveAccount(acc *FreebuffAccount) {
 	if am.db == nil || !am.db.Ready() {
 		return
@@ -249,6 +309,9 @@ func (am *FreebuffAccountManager) SaveAccount(acc *FreebuffAccount) {
 	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 	defer cancel()
 
+	// Snapshot under read lock — consistent view, no torn reads, no -race on
+	// multi-word fields (time.Time, map). Redis I/O happens after release.
+	acc.mu.RLock()
 	disabledStr := "0"
 	if acc.Disabled {
 		disabledStr = "1"
@@ -282,7 +345,13 @@ func (am *FreebuffAccountManager) SaveAccount(acc *FreebuffAccount) {
 		"entitlement_referral": acc.EntitlementReferral,
 		"entitlement_streak":   acc.EntitlementStreak,
 	}
-	if qbmJSON, err := json.Marshal(acc.QuotaByModel); err == nil && qbmJSON != nil {
+	var qbmJSON []byte
+	if acc.QuotaByModel != nil {
+		qbmJSON, _ = json.Marshal(acc.QuotaByModel)
+	}
+	acc.mu.RUnlock()
+
+	if len(qbmJSON) > 0 {
 		data["quota_by_model"] = string(qbmJSON)
 	}
 	key := "fb:account:" + acc.Token
@@ -302,8 +371,13 @@ func (am *FreebuffAccountManager) AddAccount(token string) (added bool, total in
 func (am *FreebuffAccountManager) AddAccountWithInfo(token, userID, email string) (added bool, total int, err error) {
 	am.mu.Lock()
 	if existing, exists := am.accounts[token]; exists {
-		// Update email/userID if they were empty and we now have them
+		// Update email/userID if they were empty and we now have them.
+		// C2-02: mutations must hold acc.mu (SaveAccount's RLock snapshot and
+		// ProbeAll read these fields under acc.mu) — am.mu alone is a data
+		// race. SaveAccount runs after BOTH locks are released (no Redis I/O
+		// under either lock).
 		updated := false
+		existing.mu.Lock()
 		if existing.Email == "" && email != "" {
 			existing.Email = email
 			updated = true
@@ -312,10 +386,11 @@ func (am *FreebuffAccountManager) AddAccountWithInfo(token, userID, email string
 			existing.UserID = userID
 			updated = true
 		}
+		existing.mu.Unlock()
+		am.mu.Unlock()
 		if updated {
 			am.SaveAccount(existing)
 		}
-		am.mu.Unlock()
 		return false, am.Len(), nil
 	}
 	am.mu.Unlock()
@@ -356,6 +431,9 @@ func (am *FreebuffAccountManager) RemoveAccount(token string) error {
 	am.mu.Lock()
 	delete(am.accounts, token)
 	am.mu.Unlock()
+	if am.cacheTemp != nil {
+		am.cacheTemp.dropAccount(token)
+	}
 
 	if am.db != nil && am.db.Ready() {
 		rdb := am.db.Redis()
@@ -386,6 +464,18 @@ func fbIsPremiumModel(upstreamModel string) bool {
 // premium (full-mode-only) models, and "blocked" accounts are always skipped.
 // Tier "" (unknown, not yet synced) passes through.
 func (am *FreebuffAccountManager) Next(model string) (*FreebuffAccount, error) {
+	return am.nextForModel(model, "")
+}
+
+// NextTemp is Next() plus cache-temperature preference: when several accounts
+// are equally eligible (same session-priority group), the one with the warmest
+// upstream prompt cache for the content prefix (sysHash) wins. sysHash == ""
+// behaves exactly like Next().
+func (am *FreebuffAccountManager) NextTemp(model, sysHash string) (*FreebuffAccount, error) {
+	return am.nextForModel(model, sysHash)
+}
+
+func (am *FreebuffAccountManager) nextForModel(model, sysHash string) (*FreebuffAccount, error) {
 	am.mu.RLock()
 	defer am.mu.RUnlock()
 
@@ -400,7 +490,8 @@ func (am *FreebuffAccountManager) Next(model string) (*FreebuffAccount, error) {
 	var eligible []*FreebuffAccount
 	var earliestReset time.Time
 	for _, acc := range am.accounts {
-		acc.mu.Lock()
+		// C2-05: read-only eligibility snapshot → RLock
+		acc.mu.RLock()
 		disabled := acc.Disabled
 		banned := acc.Banned
 		cooldown := !acc.CooldownUntil.IsZero() && time.Now().Before(acc.CooldownUntil)
@@ -409,7 +500,7 @@ func (am *FreebuffAccountManager) Next(model string) (*FreebuffAccount, error) {
 		if !acc.QuotaResetAt.IsZero() && (earliestReset.IsZero() || acc.QuotaResetAt.Before(earliestReset)) {
 			earliestReset = acc.QuotaResetAt
 		}
-		acc.mu.Unlock()
+		acc.mu.RUnlock()
 		if !disabled && !banned && !cooldown && !quotaExhausted && !tierBlocked {
 			eligible = append(eligible, acc)
 		}
@@ -435,9 +526,10 @@ func (am *FreebuffAccountManager) Next(model string) (*FreebuffAccount, error) {
 
 	candidates := make([]fbCandidate, 0, len(eligible))
 	for _, acc := range eligible {
-		acc.mu.Lock()
+		// C2-05: read-only snapshot → RLock
+		acc.mu.RLock()
 		recent := acc.QuotaRecent
-		acc.mu.Unlock()
+		acc.mu.RUnlock()
 		priority := 2
 		if am.hasCachedSessionFor(acc.Token, model) {
 			priority = 0
@@ -453,7 +545,7 @@ func (am *FreebuffAccountManager) Next(model string) (*FreebuffAccount, error) {
 		return candidates[i].recent < candidates[j].recent
 	})
 
-	// Pick the best priority group (session match > idle > mismatch), round-robin within it.
+	// Pick the best priority group (session match > idle > mismatch).
 	bestPriority := candidates[0].priority
 	var top []*FreebuffAccount
 	for _, c := range candidates {
@@ -461,6 +553,29 @@ func (am *FreebuffAccountManager) Next(model string) (*FreebuffAccount, error) {
 			break
 		}
 		top = append(top, c.acc)
+	}
+
+	// Cache-temperature: within the top group, prefer the account whose
+	// upstream prompt cache is warmest for this prefix (real hit rates from
+	// previous responses). Falls back to round-robin when nothing is warm or
+	// no prefix is known — keeps quota fairness for cold prefixes.
+	// Guard: only engage when sysHash carries actual system content ("|"
+	// separator) — a bare model name means the client sent no system message,
+	// and collapsing ALL such traffic into one bucket per model would herd
+	// every system-less request onto a single warm account (quota is tight:
+	// ~6 sessions/day/account).
+	if sysHash != "" && strings.Contains(sysHash, "|") && am.cacheTemp != nil && len(top) > 1 {
+		cands := make([]string, 0, len(top))
+		for _, a := range top {
+			cands = append(cands, a.Token)
+		}
+		if best, ok := am.cacheTemp.best(cands, sysHash, cacheWarmThreshold, cacheTempMaxAge); ok {
+			for _, a := range top {
+				if a.Token == best {
+					return a, nil
+				}
+			}
+		}
 	}
 
 	idx := atomic.AddUint64(&am.idx, 1)
@@ -501,7 +616,8 @@ func (am *FreebuffAccountManager) ListAccounts() []map[string]any {
 
 	result := make([]map[string]any, 0, len(am.accounts))
 	for _, acc := range am.accounts {
-		acc.mu.Lock()
+		// C2-05: read-only snapshot → RLock
+		acc.mu.RLock()
 		status := "active"
 		if acc.Banned {
 			status = "banned"
@@ -511,7 +627,7 @@ func (am *FreebuffAccountManager) ListAccounts() []map[string]any {
 			status = "cooldown"
 		}
 		entry := map[string]any{
-			"token":                acc.Token[:8] + "..." + acc.Token[len(acc.Token)-4:],
+			"token":                fbMaskToken(acc.Token),
 			"token_full":           acc.Token,
 			"user_id":              acc.UserID,
 			"email":                acc.Email,
@@ -534,7 +650,7 @@ func (am *FreebuffAccountManager) ListAccounts() []map[string]any {
 			"entitlement_streak":   acc.EntitlementStreak,
 			"quota_by_model":       acc.QuotaByModel,
 		}
-		acc.mu.Unlock()
+		acc.mu.RUnlock()
 		result = append(result, entry)
 	}
 	return result
@@ -557,14 +673,32 @@ func (am *FreebuffAccountManager) ProbeAll() {
 			acc.DisabledAt = time.Now()
 			acc.mu.Unlock()
 			am.SaveAccount(acc)
-			slog.Warn("fb probe failed, disabling", "module", "freebuff", "token", acc.Token[:8]+"...", "error", err)
-		} else if userID != acc.UserID || email != acc.Email {
-			acc.mu.Lock()
-			acc.UserID = userID
-			acc.Email = email
-			acc.Disabled = false
-			acc.mu.Unlock()
-			am.SaveAccount(acc)
+			// C2-06: length-safe token mask (was acc.Token[:8] — panic on short token)
+			slog.Warn("fb probe failed, disabling", "module", "freebuff", "token", fbMaskToken(acc.Token), "error", err)
+		} else {
+			// C2-03: snapshot both fields under RLock before comparing (avoids
+			// racing the acc.mu-guarded writers in AddAccountWithInfo/ProbeAll).
+			acc.mu.RLock()
+			curUID, curEmail := acc.UserID, acc.Email
+			acc.mu.RUnlock()
+			if userID != curUID || email != curEmail {
+				acc.mu.Lock()
+				acc.UserID = userID
+				acc.Email = email
+				acc.Disabled = false
+				acc.mu.Unlock()
+				am.SaveAccount(acc)
+			}
 		}
 	}
+}
+
+// fbMaskToken returns a length-safe display mask for a Freebuff token
+// (first8...last4, or "***" for tokens < 12 chars). C2-06: call sites that
+// slice acc.Token[:8] directly panic on short/garbage tokens from import.
+func fbMaskToken(t string) string {
+	if len(t) >= 12 {
+		return t[:8] + "..." + t[len(t)-4:]
+	}
+	return "***"
 }

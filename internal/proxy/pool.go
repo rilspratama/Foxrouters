@@ -29,12 +29,14 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
 	"net"
 	"net/http"
 	nurl "net/url"
+	"os"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -51,10 +53,20 @@ const (
 
 	// PROXY_TEST_TIMEOUT is the per-request timeout used by Test().
 	PROXY_TEST_TIMEOUT = 10 * time.Second
-
-	// PROXY_TEST_URL is the reachability probe target.
-	PROXY_TEST_URL = "http://httpbin.org/ip"
 )
+
+// proxyTestURL is the reachability probe target for Test(). Overridable via
+// PROXY_TEST_URL env (e.g. a self-hosted or geo-pinned endpoint); defaults to
+// api.ip.fm. NOTE: httpbin.org is unreliable (frequent 503/timeouts from this
+// VPS and through proxies). api.ip.fm returns JSON {"data":{"ip":"..."}} and is
+// consistently reachable — the response is parsed for the egress IP (see
+// parseEgressIP). Verified 2026-08-16: 200 via 172.17.0.1:6020.
+var proxyTestURL = func() string {
+	if v := os.Getenv("PROXY_TEST_URL"); v != "" {
+		return v
+	}
+	return "https://api.ip.fm"
+}()
 
 // ProxyEntry is the API-visible shape of one proxy pool entry.
 //
@@ -585,18 +597,48 @@ func (p *ProxyPool) Test(id string) (success bool, egressIP string, latencyMs in
 	start := time.Now()
 	ctx, cancel := context.WithTimeout(context.Background(), PROXY_TEST_TIMEOUT)
 	defer cancel()
-	req, _ := http.NewRequestWithContext(ctx, "GET", PROXY_TEST_URL, nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", proxyTestURL, nil)
+	if err != nil {
+		return false, "", 0, fmt.Errorf("build probe request: %w", err)
+	}
 	resp, err := client.Do(req)
 	latencyMs = time.Since(start).Milliseconds()
 	if err != nil {
 		return false, "", latencyMs, err
 	}
 	defer resp.Body.Close()
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
 	if resp.StatusCode < 200 || resp.StatusCode >= 400 {
 		return false, "", latencyMs, fmt.Errorf("HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
 	}
-	return true, strings.TrimSpace(string(body)), latencyMs, nil
+	return true, parseEgressIP(body), latencyMs, nil
+}
+
+// parseEgressIP extracts the egress IP from a probe response. The default
+// endpoint (api.ip.fm) returns JSON {"data":{"ip":"..."}}; some alternatives
+// (e.g. api.ipify.org) return the IP as plain text. Tries JSON first, falls
+// back to the trimmed raw body. The result must parse as an IP (SEC-06: the
+// body comes from PROXY_TEST_URL fetched THROUGH the proxy under test, i.e.
+// third-party-controlled — never surface unvalidated content as `ip`).
+// Returns "" if neither yields a valid IP.
+func parseEgressIP(body []byte) string {
+	if len(body) == 0 {
+		return ""
+	}
+	var j struct {
+		Data struct {
+			IP string `json:"ip"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(body, &j); err == nil && j.Data.IP != "" {
+		if ip := net.ParseIP(strings.TrimSpace(j.Data.IP)); ip != nil {
+			return ip.String()
+		}
+	}
+	if ip := net.ParseIP(strings.TrimSpace(string(body))); ip != nil {
+		return ip.String()
+	}
+	return ""
 }
 
 // -------- helpers --------

@@ -25,6 +25,10 @@ type CBKeyManager struct {
 	// sticky sessions: sessionID → bound key (prompt-cache locality)
 	sticky   map[string]*stickyBinding
 	stickyMu sync.Mutex
+
+	// cacheTemp: per-account cache hit rates by content prefix (sysHash).
+	// Hybrid/content-hash selection prefers the warmest account.
+	cacheTemp *cacheTemperature
 }
 
 type stickyBinding struct {
@@ -36,12 +40,30 @@ type stickyBinding struct {
 const stickyTTL = 30 * time.Minute
 
 func NewCBKeyManager(store *db.Store) *CBKeyManager {
-	km := &CBKeyManager{keys: make([]*CBKey, 0), db: store, sticky: make(map[string]*stickyBinding)}
+	km := &CBKeyManager{keys: make([]*CBKey, 0), db: store, sticky: make(map[string]*stickyBinding), cacheTemp: newCacheTemperature()}
 	go km.stickyJanitor()
 	return km
 }
 
+// RecordCacheHit feeds the cache-temperature map from a real response.
+// hitPct is the upstream-reported cache hit % for (key, sysHash prefix).
+func (km *CBKeyManager) RecordCacheHit(keyKey, sysHash string, hitPct float64) {
+	if km.cacheTemp != nil {
+		km.cacheTemp.record(keyKey, sysHash, hitPct)
+	}
+}
+
+// SnapshotCacheTemp returns the per-account cache temperature map (debug).
+func (km *CBKeyManager) SnapshotCacheTemp() map[string]map[string]CacheTempSnap {
+	if km == nil || km.cacheTemp == nil {
+		return nil
+	}
+	return km.cacheTemp.snapshot()
+}
+
 // stickyJanitor evicts idle bindings so the map doesn't grow unbounded.
+// Also prunes the cache-temperature map (same 5m tick) so per-prefix entries
+// don't accumulate forever as conversations churn.
 func (km *CBKeyManager) stickyJanitor() {
 	if km.sticky == nil {
 		return
@@ -57,6 +79,9 @@ func (km *CBKeyManager) stickyJanitor() {
 			}
 		}
 		km.stickyMu.Unlock()
+		if km.cacheTemp != nil {
+			km.cacheTemp.prune(cacheTempMaxAge)
+		}
 	}
 }
 
@@ -186,16 +211,20 @@ func LoadSelectorMode(store *db.Store) {
 }
 
 // NextForMode selects a key according to the active mode.
-//   - sessionID: from x-session-id/x-conversation-id/x-chat-id header (may be "")
-//   - sysHash:   hash of model + first system message content (may be "")
-func (km *CBKeyManager) NextForMode(mode CBSelectorMode, sessionID, sysHash string) (*CBKey, error) {
+//   - sessionID:  from x-session-id/x-conversation-id/x-chat-id header (may be "")
+//   - sysHash:    hash of model + first system message content (may be "")
+//   - clientKey:  full gateway API key from auth context — the client identity
+//     signal. Harnesses like Hermes don't send a session ID, so the key is the
+//     only stable per-client marker: hybrid mode buckets BY KEY so all of one
+//     client's conversations warm the same small account bucket.
+func (km *CBKeyManager) NextForMode(mode CBSelectorMode, sessionID, sysHash, clientKey string) (*CBKey, error) {
 	switch mode {
 	case SelectorRR:
 		return km.Next()
 	case SelectorContentHash:
 		return km.nextByHash(sysHash)
 	case SelectorHybrid:
-		return km.nextHybrid(sessionID, sysHash)
+		return km.nextHybrid(sessionID, sysHash, clientKey)
 	case SelectorSticky:
 		fallthrough
 	default:
@@ -228,10 +257,13 @@ func (km *CBKeyManager) nextByHash(sysHash string) (*CBKey, error) {
 	return enabled[h.Sum64()%uint64(len(enabled))], nil
 }
 
-// nextHybrid: content-hash selects a bucket of hybridBucketSize enabled keys;
-// session-id sticks to one key inside the bucket (rebinding within the bucket
-// when the key dies → shared system-prompt cache stays warm).
-func (km *CBKeyManager) nextHybrid(sessionID, sysHash string) (*CBKey, error) {
+// nextHybrid: the client API key picks a bucket of hybridBucketSize enabled
+// keys (key-affinity — one harness key keeps ALL its conversations in one
+// bucket so the account-level prompt cache warms across sessions); session-id
+// sticks to one key inside the bucket; without a session id the sysHash picks
+// the key (shared system prompt → same account). Rebinding happens only inside
+// the bucket → the shared system-prompt cache stays warm.
+func (km *CBKeyManager) nextHybrid(sessionID, sysHash, clientKey string) (*CBKey, error) {
 	km.mu.RLock()
 	enabled := make([]*CBKey, 0, len(km.keys))
 	for _, k := range km.keys {
@@ -243,6 +275,12 @@ func (km *CBKeyManager) nextHybrid(sessionID, sysHash string) (*CBKey, error) {
 	if len(enabled) == 0 {
 		return nil, fmt.Errorf("all cb keys disabled")
 	}
+	// No system message (sysHash == ""): nothing to warm in an upstream prompt
+	// cache, so key-affinity bucketing buys nothing and would herd ALL
+	// system-less traffic from one API key onto a single account (bucket[0]),
+	// concentrating rate limits / free-tier quota. Fall back to RR/sticky like
+	// the pre-key-affinity behavior. clientKey is deliberately ignored here —
+	// auth always sets it, so the old `&& clientKey == ""` guard was dead code.
 	if sysHash == "" {
 		if sessionID != "" {
 			return km.NextSticky(sessionID)
@@ -250,9 +288,15 @@ func (km *CBKeyManager) nextHybrid(sessionID, sysHash string) (*CBKey, error) {
 		return km.Next()
 	}
 
-	// Bucket = consecutive slice of enabled keys starting at hash position.
+	// Bucket seed: the client API key wins (key-affinity). sysHash is the
+	// defensive fallback (auth always sets client_key, so this is unreachable
+	// in practice).
+	bucketSeed := sysHash
+	if clientKey != "" {
+		bucketSeed = "key:" + clientKey
+	}
 	h := fnv.New64a()
-	h.Write([]byte(sysHash))
+	h.Write([]byte(bucketSeed))
 	start := int(h.Sum64() % uint64(len(enabled)))
 	bucket := make([]*CBKey, 0, hybridBucketSize)
 	for i := 0; i < hybridBucketSize && i < len(enabled); i++ {
@@ -280,6 +324,32 @@ func (km *CBKeyManager) nextHybrid(sessionID, sysHash string) (*CBKey, error) {
 		km.sticky[sessionID] = &stickyBinding{key: pick, lastSeen: time.Now()}
 		km.stickyMu.Unlock()
 		return pick, nil
+	}
+
+	// No session id: prefer the account in this bucket whose upstream prompt
+	// cache is warmest for this prefix (cache-temperature-aware routing —
+	// real hit rates recorded from previous responses). Falls back to the
+	// deterministic sysHash pick when nothing is warm yet.
+	if sysHash != "" && km.cacheTemp != nil {
+		cands := make([]string, 0, len(bucket))
+		for _, k := range bucket {
+			cands = append(cands, k.Key)
+		}
+		if best, ok := km.cacheTemp.best(cands, sysHash, cacheWarmThreshold, cacheTempMaxAge); ok {
+			for _, k := range bucket {
+				if k.Key == best {
+					return k, nil
+				}
+			}
+		}
+	}
+
+	// No session id: pick deterministically by system-prompt hash inside the
+	// key's bucket → all sessions sharing a system prompt share one account.
+	if sysHash != "" {
+		sh := fnv.New64a()
+		sh.Write([]byte(sysHash))
+		return bucket[sh.Sum64()%uint64(len(bucket))], nil
 	}
 	return bucket[0], nil
 }

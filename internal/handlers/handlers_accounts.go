@@ -1,7 +1,12 @@
 package handlers
 
 import (
+	"crypto/hmac"
+	crypto_rand "crypto/rand"
+	"crypto/sha256"
+	"fmt"
 	"foxrouters/internal/upstream"
+	"hash/fnv"
 	"log/slog"
 	"strconv"
 	"strings"
@@ -377,4 +382,81 @@ func HandleSyncGrokBilling(grokAM *upstream.GrokAccountManager) gin.HandlerFunc 
 			"results": results,
 		})
 	}
+}
+
+// HandleCacheTemp exposes the per-account cache-temperature map (which
+// accounts hold warm upstream prompt caches for which content prefixes).
+// Admin-only observability for cache-temperature-aware routing. Account
+// identifiers are REDACTED (full API keys / OAuth tokens never leave the
+// server); prefix keys are already short hashes.
+func HandleCacheTemp(cbKM *upstream.CBKeyManager, grokAM *upstream.GrokAccountManager, fbAM *upstream.FreebuffAccountManager) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		c.JSON(200, gin.H{
+			"codebuddy": maskCacheTempKeys(cbKM.SnapshotCacheTemp()),
+			"grok":      maskCacheTempKeys(grokAM.SnapshotCacheTemp()),
+			"freebuff":  maskCacheTempKeys(fbAM.SnapshotCacheTemp()),
+			"note":      "ema = exponential moving average of upstream cache hit %; entries older than 30m are considered cold; account keys are masked, prefix keys are hashes",
+		})
+	}
+}
+
+// maskCacheTempKeys redacts the account-identifier dimension of a cache-temp
+// snapshot: ck_*/eyJ* keys keep only a prefix hint, email-like identifiers
+// keep first 3 chars + domain. When two distinct keys mask to the same string
+// (e.g. ck_ keys sharing a 12-char prefix, or emails sharing local-part prefix
+// + domain), a short FNV hash suffix is appended so no entry is silently
+// dropped from the debug output.
+func maskCacheTempKeys(m map[string]map[string]upstream.CacheTempSnap) map[string]map[string]upstream.CacheTempSnap {
+	if m == nil {
+		return nil
+	}
+	out := make(map[string]map[string]upstream.CacheTempSnap, len(m))
+	seen := make(map[string]string, len(m)) // masked -> original key that claimed it
+	for k, v := range m {
+		mk := maskAccountKey(k)
+		if orig, exists := seen[mk]; exists && orig != k {
+			// collision — disambiguate with a short hash of the full key
+			h := fnv.New64a()
+			h.Write([]byte(k))
+			mk = mk + "#" + fmt.Sprintf("%016x", h.Sum64())[:8]
+		}
+		seen[mk] = k
+		out[mk] = v
+	}
+	return out
+}
+
+// maskKeyPepper is a per-process random key for maskAccountKey's HMAC
+// (SEC2-06): a bare unsalted SHA-256 digest is a stable, deployment-
+// independent confirmation oracle — anyone holding the /debug/cache-temp
+// response plus a candidate credential list could verify membership offline.
+// The per-process random key makes the digest meaningless outside this
+// process lifetime.
+var maskKeyPepper = func() []byte {
+	b := make([]byte, 32)
+	if _, err := crypto_rand.Read(b); err != nil {
+		// Practically unreachable; fall back to time-seeded entropy so the
+		// mask is still not deployment-stable.
+		return []byte(fmt.Sprintf("fp-%d", time.Now().UnixNano()))
+	}
+	return b
+}()
+
+// maskAccountKey redacts an account identifier for display. Emails keep the
+// first 3 chars of the local-part + domain; non-email credentials (API keys,
+// OAuth tokens) are NEVER returned raw or as plaintext prefixes — they map to
+// a per-process HMAC-SHA256 digest, regardless of length (SEC-03: short
+// credentials must not leak verbatim; SEC2-06: digest must not be a stable
+// confirmation oracle).
+func maskAccountKey(k string) string {
+	if i := strings.IndexByte(k, '@'); i > 0 {
+		pre := k[:i]
+		if len(pre) > 3 {
+			pre = pre[:3]
+		}
+		return pre + "***" + k[i:]
+	}
+	mac := hmac.New(sha256.New, maskKeyPepper)
+	mac.Write([]byte(k))
+	return "mask:" + fmt.Sprintf("%x", mac.Sum(nil))[:12]
 }

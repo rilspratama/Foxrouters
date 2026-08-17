@@ -248,6 +248,7 @@ func runServer() {
 	}
 	upstream.LoadSelectorMode(db)     // restore persisted CB selector mode (rr|sticky|content-hash|hybrid)
 	upstream.LoadGrokSelectorMode(db) // restore persisted Grok selector mode
+	upstream.LoadFreebuffAPIBase(db)  // restore persisted Freebuff api_base override (fb:config)
 
 	// Health checker: active + passive monitoring with circuit breaker.
 	// Gated by HEALTH_PROBES_DISABLED=1 — dev containers must NOT probe
@@ -389,6 +390,8 @@ func runServer() {
 	// patterns, circuit state). External scrapers should authenticate via
 	// Bearer token or run on a private network.
 	r.GET("/metrics", adminAuth, gin.WrapH(promhttp.Handler()))
+	// Cache-temperature observability (which accounts hold warm prompt caches).
+	r.GET("/debug/cache-temp", adminAuth, handlers.HandleCacheTemp(cbKM, grokAM, fbAM))
 	// Accounts/keys/history — admin only (inference keys must not see other tenants' data)
 	r.GET("/accounts", adminAuth, handlers.HandleAccounts(grokAM, cbKM))
 	r.GET("/cb-stats", adminAuth, func(c *gin.Context) {
@@ -542,6 +545,9 @@ func runServer() {
 	r.DELETE("/fb/accounts/:token", csrfGuard(), adminAuth, handlers.HandleFBDeleteAccount(fbAM))
 	r.POST("/fb/oauth/device/start", csrfGuard(), adminAuth, handlers.HandleFBDeviceStart(fbAM))
 	r.GET("/fb/oauth/device/poll", adminAuth, handlers.HandleFBDevicePoll(fbAM))
+	// Freebuff runtime config (api_base relay override, persisted to Redis)
+	r.GET("/fb/config", adminAuth, handlers.HandleFBConfig(db))
+	r.PUT("/fb/config", csrfGuard(), adminAuth, handlers.HandleFBConfig(db))
 
 	// Alibaba (DashScope) keys
 	r.POST("/ali/import", csrfGuard(), adminAuth, handlers.HandleAliImport(aliAM))

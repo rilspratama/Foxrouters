@@ -6,6 +6,8 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+
+	"foxrouters/internal/upstream"
 )
 
 // FilterRule is a single content-sanitization rule. Rules are ordered:
@@ -207,4 +209,12 @@ func ApplyFilters(content string) string {
 		}
 	}
 	return filtered
+}
+
+// init wires the agent-identity sanitizer into the upstream package. It is
+// registered here (proxy package) because upstream cannot import proxy
+// (proxy → upstream import cycle). This makes sanitization CodeBuddy-only:
+// Grok / Freebuff / Alibaba forward request content untouched.
+func init() {
+	upstream.AgentIdentitySanitizer = rewriteAgentIdentity
 }

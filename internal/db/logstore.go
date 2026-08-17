@@ -17,7 +17,9 @@ package db
 import (
 	"context"
 	"encoding/json"
+	"os"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -175,12 +177,37 @@ type RequestDetail struct {
 	ResponseBody json.RawMessage `json:"response_body"`
 }
 
-// bodyString safely stringifies a nil-or-empty json.RawMessage.
+// logBodyCap bounds a single stored request/response body in SQLite.
+// Default 1 MiB — keeps full bodies for normal traffic while preventing
+// multi-MB rows (huge-context requests) from bloating the DB and blocking
+// readers past busy_timeout (prod incident 2026-08-17: request_body alone
+// reached 20.6 GB and /history/recent 500'd with context deadline).
+// Override via LOG_BODY_CAP_BYTES.
+var logBodyCap = func() int {
+	if v := os.Getenv("LOG_BODY_CAP_BYTES"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			return n
+		}
+	}
+	return 1 << 20 // 1 MiB
+}()
+
+// bodyString safely stringifies a nil-or-empty json.RawMessage, bounded to
+// logBodyCap bytes. Oversized bodies are truncated with a marker so the
+// detail view shows the head of the payload instead of silently dropping it.
 func bodyString(raw json.RawMessage) string {
 	if len(raw) == 0 {
 		return ""
 	}
-	return string(raw)
+	if len(raw) <= logBodyCap {
+		return string(raw)
+	}
+	out := string(raw[:logBodyCap])
+	// Keep valid JSON shape when possible: close an open object/array.
+	if strings.HasPrefix(out, "{") {
+		out += " ...(truncated)"
+	}
+	return out
 }
 
 // max0 clamps a negative int to 0 (used when packing into unsigned CH columns).

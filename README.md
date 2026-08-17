@@ -2,7 +2,7 @@
 
 [![Go Version](https://img.shields.io/badge/go-1.25.12%2B-00ADD8?logo=go)](https://go.dev/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](#license)
-[![Version](https://img.shields.io/badge/version-v1.6.14-blue)](./CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-v1.6.16-blue)](./CHANGELOG.md)
 [![Security](https://img.shields.io/badge/security-audited%203x-brightgreen)](./CHANGELOG.md)
 [![Tests](https://img.shields.io/badge/tests-62%2F62%20PASS%20(%2Brace)-success)](./)
 
@@ -37,11 +37,11 @@ key. Open `http://<host-ip>:20130/login`, paste the key, done.
   pinning for prompt-cache locality, ~3x cheaper cached tokens).
 - **Per-gateway-key limits** — RPM, burst, token quota, model whitelist, role
   (`admin` vs `inference`).
-- **Redis hot state + SQLite cold history** — full request/response bodies, 90-day TTL.
+- **Redis hot state + SQLite cold history** — full request/response bodies (capped at 1 MiB each to bound DB growth), 90-day TTL.
 - **Dynamic model registry** — Freebuff + Grok model lists refresh from upstream
   every 6h; new models appear without code changes.
 - **Embedded web dashboard** — stats, accounts & keys, gateway keys, models,
-  proxies, tunnel.
+  proxies, tunnel, runtime Freebuff relay config (`/fb/config`).
 - **Security hardened** (3x audited) — XSS-safe event delegation, CSRF guard,
   Secure/HttpOnly cookies, per-key key masking, fail-closed model visibility.
 

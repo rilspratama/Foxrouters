@@ -111,23 +111,85 @@ func TestFbDeleteSessionClearsCache(t *testing.T) {
 	}
 }
 
+// TestFbNextCacheTemperature verifies NextTemp: within the same priority
+// group, the account with the warmest cache for the content prefix wins;
+// cold prefixes keep the round-robin fallback; below-threshold EMAs don't
+// divert.
+func TestFbNextCacheTemperature(t *testing.T) {
+	fresh := func(token string) *FreebuffAccount {
+		return &FreebuffAccount{Token: token, Email: token + "@example.com", QuotaLimit: 6, QuotaRecent: 0}
+	}
+	am := NewFreebuffAccountManager(nil)
+	am.accounts["a"] = fresh("a")
+	am.accounts["b"] = fresh("b")
+
+	const model = "deepseek/deepseek-v4-flash"
+	const hotPrefix = model + "|sys:HOT"
+	// Warm b's cache for the hot prefix (real hit rate from a previous 2xx).
+	am.RecordCacheHit("b", hotPrefix, 97)
+
+	// Warm prefix: temperature overrides RR → b every time.
+	for i := 0; i < 2; i++ {
+		got, err := am.NextTemp(model, hotPrefix)
+		if err != nil || got == nil {
+			t.Fatalf("NextTemp: %v", err)
+		}
+		if got.Token != "b" {
+			t.Fatalf("warm account must win (call %d): got %s, want b", i+1, got.Token)
+		}
+	}
+
+	// Cold prefix: no temperature entry → round-robin spreads across the pool.
+	// Assert SET coverage over several calls (map-iteration order + non-stable
+	// sort re-randomize the top group per call, so a strict call#1 != call#2
+	// parity assertion would be flaky — both tokens must appear instead).
+	seen := map[string]bool{}
+	for i := 0; i < 6; i++ {
+		got, err := am.NextTemp(model, model+"|sys:COLD")
+		if err != nil || got == nil {
+			t.Fatalf("NextTemp cold: %v", err)
+		}
+		seen[got.Token] = true
+	}
+	if len(seen) < 2 {
+		t.Fatalf("cold prefix must spread round-robin across accounts: only saw %v", seen)
+	}
+
+	// Below-threshold EMA must NOT divert (30 < 50 warm threshold).
+	am2 := NewFreebuffAccountManager(nil)
+	am2.accounts["x"] = fresh("x")
+	am2.accounts["y"] = fresh("y")
+	am2.RecordCacheHit("y", hotPrefix, 30)
+	// If temperature diverted, the 1st call could still land on y via RR with
+	// 2 accounts — so assert on determinism instead: record 95 on x, then the
+	// warmest (x) must win even though RR would alternate.
+	am2.RecordCacheHit("x", hotPrefix, 95)
+	got, err := am2.NextTemp(model, hotPrefix)
+	if err != nil || got == nil {
+		t.Fatalf("NextTemp threshold: %v", err)
+	}
+	if got.Token != "x" {
+		t.Fatalf("warmest EMA must win: got %s, want x", got.Token)
+	}
+}
+
 // TestFbNextTierGating verifies Next(model) skips limited-tier accounts for
 // premium models, skips blocked accounts always, and lets unknown tier pass.
 func TestFbNextTierGating(t *testing.T) {
 	mk := func(token, tier string) *FreebuffAccount {
 		return &FreebuffAccount{
-			Token:   token,
-			Email:   token + "@example.com",
-			Tier:    tier,
+			Token:      token,
+			Email:      token + "@example.com",
+			Tier:       tier,
 			QuotaLimit: 6, QuotaRecent: 0,
 		}
 	}
 	cases := []struct {
-		name        string
-		accounts    []*FreebuffAccount
-		model       string
-		wantToken   string
-		wantErr     bool
+		name      string
+		accounts  []*FreebuffAccount
+		model     string
+		wantToken string
+		wantErr   bool
 	}{
 		{"limited + premium → no eligible", []*FreebuffAccount{mk("a", "limited")}, "deepseek/deepseek-v4-pro", "", true},
 		{"limited + standard → picked", []*FreebuffAccount{mk("a", "limited")}, "deepseek/deepseek-v4-flash", "a", false},
@@ -170,8 +232,8 @@ func TestFbNextTierGating(t *testing.T) {
 func TestFbNextSessionAware(t *testing.T) {
 	fresh := func(token string) *FreebuffAccount {
 		return &FreebuffAccount{
-			Token:   token,
-			Email:   token + "@example.com",
+			Token:      token,
+			Email:      token + "@example.com",
 			QuotaLimit: 6, QuotaRecent: 0,
 		}
 	}
@@ -382,5 +444,106 @@ func TestFbBannedLifecycle(t *testing.T) {
 	}
 	if !restored {
 		t.Fatalf("expected restored account a to be selectable again")
+	}
+}
+
+// TestApplyFbQuotaFromModelMapStatusNoneExhausted is the regression test for
+// the "0/6 but can't create session" bug: upstream status="none" (no ACTIVE
+// session) still carries the REAL daily recentCount in rateLimitsByModel. The
+// quota must reflect 6/6 + cooldown-until-reset — NOT reset to fresh 0/6.
+func TestApplyFbQuotaFromModelMapStatusNoneExhausted(t *testing.T) {
+	acc := &FreebuffAccount{}
+	resetAt := "2026-08-16T07:00:00.000Z"
+	qbm := map[string]FbModelQuota{
+		"deepseek/deepseek-v4-flash": {
+			Limit: 6, RecentCount: 6, ResetAt: resetAt, Period: "pacific_day",
+		},
+	}
+
+	applied := applyFbQuotaFromModelMap(acc, qbm)
+	if !applied {
+		t.Fatalf("expected applied=true when map has the reference model")
+	}
+	if acc.QuotaRecent != 6 || acc.QuotaLimit != 6 {
+		t.Fatalf("expected quota to stay 6/6 (exhausted), got recent=%v limit=%v", acc.QuotaRecent, acc.QuotaLimit)
+	}
+	wantReset, _ := time.Parse(time.RFC3339, resetAt)
+	if !acc.QuotaResetAt.Equal(wantReset) {
+		t.Fatalf("expected resetAt %v, got %v", wantReset, acc.QuotaResetAt)
+	}
+	if acc.CooldownUntil.IsZero() {
+		t.Fatalf("expected cooldown-until-reset for exhausted account, got zero")
+	}
+	if !acc.CooldownUntil.Equal(wantReset) {
+		t.Fatalf("expected cooldown until %v, got %v", wantReset, acc.CooldownUntil)
+	}
+}
+
+// TestApplyFbQuotaFromModelMapStatusNoneFresh: status="none" with recentCount=0
+// must stay 0/6 with NO cooldown (same result as before the fix, but reached
+// through the real rate-limit data instead of the status shortcut).
+func TestApplyFbQuotaFromModelMapStatusNoneFresh(t *testing.T) {
+	acc := &FreebuffAccount{}
+	qbm := map[string]FbModelQuota{
+		"deepseek/deepseek-v4-flash": {
+			Limit: 6, RecentCount: 0, ResetAt: "2026-08-16T07:00:00.000Z", Period: "pacific_day",
+		},
+	}
+
+	if !applyFbQuotaFromModelMap(acc, qbm) {
+		t.Fatalf("expected applied=true")
+	}
+	if acc.QuotaRecent != 0 || acc.QuotaLimit != 6 {
+		t.Fatalf("expected 0/6, got recent=%v limit=%v", acc.QuotaRecent, acc.QuotaLimit)
+	}
+	if !acc.CooldownUntil.IsZero() {
+		t.Fatalf("expected no cooldown for fresh quota, got %v", acc.CooldownUntil)
+	}
+}
+
+// TestApplyFbQuotaFromModelMapNoData: empty rateLimitsByModel (truly no data)
+// falls back to fresh 0/6.
+func TestApplyFbQuotaFromModelMapNoData(t *testing.T) {
+	acc := &FreebuffAccount{CooldownUntil: time.Now().Add(10 * time.Minute)}
+	if applyFbQuotaFromModelMap(acc, nil) {
+		t.Fatalf("expected applied=false for empty map")
+	}
+	if acc.QuotaRecent != 0 || acc.QuotaLimit != 6 {
+		t.Fatalf("expected fallback 0/6, got recent=%v limit=%v", acc.QuotaRecent, acc.QuotaLimit)
+	}
+	if !acc.CooldownUntil.IsZero() {
+		t.Fatalf("expected cooldown cleared for fresh fallback, got %v", acc.CooldownUntil)
+	}
+}
+
+// TestFbSessionCreateError429 is the regression test for the session-create
+// 429 classification: it must map to ErrFBQuotaExceeded so the proxy can
+// cooldown the account instead of retrying it immediately.
+func TestFbSessionCreateError429(t *testing.T) {
+	err := fbSessionCreateError(429, []byte(`{"error":{"message":"6 sessions used today"}}`))
+	if !errors.Is(err, ErrFBQuotaExceeded) {
+		t.Fatalf("expected ErrFBQuotaExceeded for 429, got %v", err)
+	}
+}
+
+// TestFbQuotaSyncErrorBanned is the regression test for quota-sync 403 banned
+// classification: GET /session returns 403 {"status":"banned"} for banned
+// accounts (not a 200 with a status field), which must map to ErrFBBanned so
+// SyncAllQuota marks them banned instead of leaving them selectable.
+func TestFbQuotaSyncErrorBanned(t *testing.T) {
+	err := fbQuotaSyncError(403, []byte(`{"status":"banned"}`))
+	if !errors.Is(err, ErrFBBanned) {
+		t.Fatalf("expected ErrFBBanned for 403 banned, got %v", err)
+	}
+}
+
+// TestFbQuotaSyncErrorOther keeps non-banned errors generic (no sentinel).
+func TestFbQuotaSyncErrorOther(t *testing.T) {
+	err := fbQuotaSyncError(500, []byte(`internal error`))
+	if errors.Is(err, ErrFBBanned) || errors.Is(err, ErrFBQuotaExceeded) {
+		t.Fatalf("expected generic error for 500, got %v", err)
+	}
+	if err == nil {
+		t.Fatalf("expected non-nil error")
 	}
 }

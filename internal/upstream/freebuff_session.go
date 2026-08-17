@@ -20,7 +20,7 @@ import (
 
 func (am *FreebuffAccountManager) SyncQuota(acc *FreebuffAccount) error {
 	client := &http.Client{Timeout: 10 * time.Second}
-	req, _ := http.NewRequest("GET", FREEBUFF_API_BASE+FREEBUFF_SESSION_PATH, nil)
+	req, _ := http.NewRequest("GET", FreebuffAPIBase()+FREEBUFF_SESSION_PATH, nil)
 	req.Header.Set("Authorization", "Bearer "+acc.Token)
 	req.Header.Set("User-Agent", "Freebuff-CLI/0.0.142")
 	// Force the FULL quota snapshot (including zero-limit models like GLM
@@ -33,7 +33,7 @@ func (am *FreebuffAccountManager) SyncQuota(acc *FreebuffAccount) error {
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if resp.StatusCode != 200 {
-		return fmt.Errorf("quota sync [%d]: %s", resp.StatusCode, truncateLog(string(body), 200))
+		return fbQuotaSyncError(resp.StatusCode, body)
 	}
 
 	var data struct {
@@ -82,59 +82,55 @@ func (am *FreebuffAccountManager) SyncQuota(acc *FreebuffAccount) error {
 	acc.EntitlementStreak = data.RateLimit.EntitlementBreakdown.Streak
 
 	// Per-model quota snapshot (full map incl. zero-limit models like GLM referral)
-	if len(data.RateLimitsByModel) > 0 {
-		qbm := make(map[string]FbModelQuota, len(data.RateLimitsByModel))
-		for name, rl := range data.RateLimitsByModel {
-			qbm[name] = FbModelQuota{
-				Limit:               rl.Limit,
-				RecentCount:         rl.RecentCount,
-				ResetAt:             rl.ResetAt,
-				Period:              rl.Period,
-				EntitlementBase:     rl.EntitlementBreakdown.Base,
-				EntitlementReferral: rl.EntitlementBreakdown.Referral,
-				EntitlementStreak:   rl.EntitlementBreakdown.Streak,
-			}
+	qbm := make(map[string]FbModelQuota, len(data.RateLimitsByModel))
+	for name, rl := range data.RateLimitsByModel {
+		qbm[name] = FbModelQuota{
+			Limit:               rl.Limit,
+			RecentCount:         rl.RecentCount,
+			ResetAt:             rl.ResetAt,
+			Period:              rl.Period,
+			EntitlementBase:     rl.EntitlementBreakdown.Base,
+			EntitlementReferral: rl.EntitlementBreakdown.Referral,
+			EntitlementStreak:   rl.EntitlementBreakdown.Streak,
 		}
-		acc.QuotaByModel = qbm
 	}
+	acc.QuotaByModel = qbm
 
-	// Use deepseek-v4-flash as the reference model (available in all tiers)
-	rl, ok := data.RateLimitsByModel["deepseek/deepseek-v4-flash"]
-	if !ok || data.Status == "none" {
-		// No active session — account is fresh, full quota available (0/6)
-		acc.QuotaRecent = 0
-		acc.QuotaLimit = 6 // default free tier limit
-		acc.QuotaPeriod = "pacific_day"
-		acc.QuotaSyncedAt = time.Now()
-		acc.CooldownUntil = time.Time{} // not exhausted
-		acc.mu.Unlock()
+	// Aggregate quota from the reference model (deepseek-v4-flash, available in
+	// all tiers). NOTE: do NOT treat data.Status == "none" as "fresh account" —
+	// status "none" just means no session is currently ACTIVE. With the
+	// x-freebuff-include-unused-rate-limits header the server still returns the
+	// full rateLimitsByModel map with the REAL daily recentCount (a
+	// 6/6-exhausted account whose sessions all expired reports status "none"
+	// and recentCount=6). Resetting to 0/6 here made exhausted accounts look
+	// available and then fail POST /session with 429 forever (loop).
+	applied := applyFbQuotaFromModelMap(acc, qbm)
+	acc.mu.Unlock()
+
+	if !applied {
 		am.SaveAccount(acc)
-		slog.Debug("fb quota: no session, fresh account (0/6)", "module", "freebuff", "token", acc.Token[:8]+"...", "tier", acc.Tier)
+		slog.Debug("fb quota: no rate-limit data, fresh account (0/6)", "module", "freebuff", "token", acc.Token[:8]+"...", "tier", acc.Tier)
 		return nil
 	}
 
-	acc.QuotaRecent = rl.RecentCount
-	acc.QuotaLimit = rl.Limit
-	acc.QuotaPeriod = rl.Period
-	acc.QuotaSyncedAt = time.Now()
-
-	// Parse resetAt
-	if rl.ResetAt != "" {
-		if resetTime, err := time.Parse(time.RFC3339, rl.ResetAt); err == nil {
-			acc.QuotaResetAt = resetTime
-			// Auto-cooldown if quota exhausted
-			if rl.Limit > 0 && rl.RecentCount >= rl.Limit {
-				acc.CooldownUntil = resetTime
-			}
-		}
-	}
-	acc.mu.Unlock()
-
 	am.SaveAccount(acc)
+	rl := qbm["deepseek/deepseek-v4-flash"]
 	slog.Info("fb quota synced", "module", "freebuff", "token", acc.Token[:8]+"...",
 		"recent", rl.RecentCount, "limit", rl.Limit, "reset", rl.ResetAt,
 		"tier", data.AccessTier, "country", data.CountryCode)
 	return nil
+}
+
+// fbQuotaSyncError classifies a non-200 GET /session response during quota
+// sync. Banned accounts are reported as HTTP 403 {"status":"banned"} (NOT a
+// 200 with a status field), so this must map to ErrFBBanned — otherwise the
+// account is never marked banned, Next() keeps selecting it and every request
+// burns a 403 round-trip.
+func fbQuotaSyncError(statusCode int, respBody []byte) error {
+	if statusCode == 403 && strings.Contains(string(respBody), `"banned"`) {
+		return ErrFBBanned
+	}
+	return fmt.Errorf("quota sync [%d]: %s", statusCode, truncateLog(string(respBody), 200))
 }
 
 // SyncAllQuota syncs quota for all accounts.
@@ -160,6 +156,47 @@ func (am *FreebuffAccountManager) SyncAllQuota() {
 		}
 	}
 	slog.Info("fb quota sync complete", "module", "freebuff", "synced", synced, "total", len(accounts))
+}
+
+// applyFbQuotaFromModelMap applies the aggregate quota fields on acc from the
+// per-model rate-limits snapshot, using deepseek-v4-flash (available in all
+// tiers) as the reference model. Caller must hold acc.mu.
+//
+// Returns true when real rate-limit data was applied, false when the map has
+// no entry at all — in that case the account is treated as fresh (0/6) and the
+// fields are reset. NOTE: a status="none" response is NOT treated as fresh
+// here — the caller passes the full rateLimitsByModel map which the server
+// still populates (with x-freebuff-include-unused-rate-limits) even when no
+// session is active, so an exhausted account correctly lands on 6/6 +
+// cooldown-until-reset instead of being reset to 0/6 and 429-looping.
+func applyFbQuotaFromModelMap(acc *FreebuffAccount, qbm map[string]FbModelQuota) bool {
+	rl, ok := qbm["deepseek/deepseek-v4-flash"]
+	if !ok {
+		// No rate-limit data at all — account is fresh, full quota available (0/6)
+		acc.QuotaRecent = 0
+		acc.QuotaLimit = 6 // default free tier limit
+		acc.QuotaPeriod = "pacific_day"
+		acc.QuotaSyncedAt = time.Now()
+		acc.CooldownUntil = time.Time{} // not exhausted
+		return false
+	}
+
+	acc.QuotaRecent = rl.RecentCount
+	acc.QuotaLimit = rl.Limit
+	acc.QuotaPeriod = rl.Period
+	acc.QuotaSyncedAt = time.Now()
+
+	// Parse resetAt
+	if rl.ResetAt != "" {
+		if resetTime, err := time.Parse(time.RFC3339, rl.ResetAt); err == nil {
+			acc.QuotaResetAt = resetTime
+			// Auto-cooldown if quota exhausted
+			if rl.Limit > 0 && rl.RecentCount >= rl.Limit {
+				acc.CooldownUntil = resetTime
+			}
+		}
+	}
+	return true
 }
 
 // FbQuotaSyncWorker periodically syncs quota for all Freebuff accounts (every 5 min).
@@ -404,10 +441,15 @@ func (am *FreebuffAccountManager) storeRun(token, agentID, runID string) {
 }
 
 // fbSessionCreateError classifies a non-200 POST /session response.
-// 403 {"status":"banned"} → ErrFBBanned (permanent); everything else → generic.
+// 403 {"status":"banned"} → ErrFBBanned (permanent);
+// 429 → ErrFBQuotaExceeded (daily session quota consumed — cooldown, don't retry now);
+// everything else → generic.
 func fbSessionCreateError(statusCode int, respBody []byte) error {
 	if statusCode == 403 && strings.Contains(string(respBody), `"banned"`) {
 		return ErrFBBanned
+	}
+	if statusCode == 429 {
+		return fmt.Errorf("%w: %s", ErrFBQuotaExceeded, truncateLog(string(respBody), 200))
 	}
 	return fmt.Errorf("POST session: %d %s", statusCode, string(respBody))
 }
@@ -449,7 +491,7 @@ func (am *FreebuffAccountManager) fbGetOrCreateSession(client *http.Client, toke
 
 // fbGetSession does GET /api/v1/freebuff/session (0 cost).
 func fbGetSession(client *http.Client, token string) (*FreebuffSession, error) {
-	req, _ := http.NewRequest("GET", FREEBUFF_API_BASE+FREEBUFF_SESSION_PATH, nil)
+	req, _ := http.NewRequest("GET", FreebuffAPIBase()+FREEBUFF_SESSION_PATH, nil)
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("User-Agent", "Freebuff-CLI/0.0.142")
 	resp, err := client.Do(req)
@@ -488,7 +530,7 @@ func fbGetSession(client *http.Client, token string) (*FreebuffSession, error) {
 // fbCreateSession does POST /api/v1/freebuff/session.
 func fbCreateSession(client *http.Client, token, model string) (*FreebuffSession, error) {
 	body, _ := json.Marshal(map[string]string{"model": model})
-	req, _ := http.NewRequest("POST", FREEBUFF_API_BASE+FREEBUFF_SESSION_PATH, bytes.NewReader(body))
+	req, _ := http.NewRequest("POST", FreebuffAPIBase()+FREEBUFF_SESSION_PATH, bytes.NewReader(body))
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("x-freebuff-model", model)
@@ -542,7 +584,7 @@ func fbCreateSession(client *http.Client, token, model string) (*FreebuffSession
 }
 
 func fbGetSessionWithInstance(client *http.Client, token, instanceID string) (*FreebuffSession, error) {
-	req, _ := http.NewRequest("GET", FREEBUFF_API_BASE+FREEBUFF_SESSION_PATH, nil)
+	req, _ := http.NewRequest("GET", FreebuffAPIBase()+FREEBUFF_SESSION_PATH, nil)
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("x-freebuff-instance-id", instanceID)
 	req.Header.Set("User-Agent", "Freebuff-CLI/0.0.142")
@@ -600,7 +642,7 @@ func (am *FreebuffAccountManager) fbDeleteSession(client *http.Client, token str
 	}
 
 	// Best-effort upstream DELETE
-	req, _ := http.NewRequest("DELETE", FREEBUFF_API_BASE+FREEBUFF_SESSION_PATH, nil)
+	req, _ := http.NewRequest("DELETE", FreebuffAPIBase()+FREEBUFF_SESSION_PATH, nil)
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("User-Agent", "Freebuff-CLI/0.0.142")
 	if resp, err := client.Do(req); err == nil {
@@ -626,7 +668,7 @@ func fbFireAdsAndStreak(client *http.Client, token string) error {
 		},
 		"userAgent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0 Safari/537.36",
 	})
-	req, _ := http.NewRequestWithContext(ctx, "POST", FREEBUFF_API_BASE+FREEBUFF_ADS_PATH, bytes.NewReader(adsBody))
+	req, _ := http.NewRequestWithContext(ctx, "POST", FreebuffAPIBase()+FREEBUFF_ADS_PATH, bytes.NewReader(adsBody))
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", "Freebuff-CLI/0.0.142")
@@ -637,7 +679,7 @@ func fbFireAdsAndStreak(client *http.Client, token string) error {
 	}
 
 	// Streak check-in
-	req2, _ := http.NewRequestWithContext(ctx, "GET", FREEBUFF_API_BASE+FREEBUFF_STREAK_PATH, nil)
+	req2, _ := http.NewRequestWithContext(ctx, "GET", FreebuffAPIBase()+FREEBUFF_STREAK_PATH, nil)
 	req2.Header.Set("Authorization", "Bearer "+token)
 	req2.Header.Set("User-Agent", "Freebuff-CLI/0.0.142")
 	if resp, err := client.Do(req2); err != nil {
@@ -662,7 +704,7 @@ func (am *FreebuffAccountManager) fbGetOrCreateRun(client *http.Client, token, a
 		"agentId":        agentId,
 		"ancestorRunIds": []string{},
 	})
-	req, _ := http.NewRequest("POST", FREEBUFF_API_BASE+FREEBUFF_RUN_PATH, bytes.NewReader(body))
+	req, _ := http.NewRequest("POST", FreebuffAPIBase()+FREEBUFF_RUN_PATH, bytes.NewReader(body))
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", "Freebuff-CLI/0.0.142")
